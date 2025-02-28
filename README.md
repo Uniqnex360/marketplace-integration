@@ -22,20 +22,8 @@ MarketLink is a comprehensive data integration platform designed to unify sales 
 
 **Technology Stack:**
 
-*   [List the technologies you are using.  Examples:  Python, Flask/Django, React, Node.js, MySQL/PostgreSQL, AWS, Docker, etc.]
+*   Python
+*   Django
+*   Mongodb
 
-**Getting Started:**
 
-[Include instructions on how to set up the project, including dependencies, API keys, and configuration.]
-
-**Contributing:**
-
-[Explain how others can contribute to the project.]
-
-**License:**
-
-[Specify the license under which the project is released (e.g., MIT License, Apache 2.0).]
-
-**Contact:**
-
-[Provide contact information or a link to a support forum.]
