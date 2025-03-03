@@ -43,8 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
-    # 'django.contrib.auth',  # Default Django auth system
-    # 'django.contrib.contenttypes',
+    "rest_framework_simplejwt",
 ]
 
 MIDDLEWARE = [
@@ -56,6 +55,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'ecommerce_tool.custom_mideleware.customMiddleware' #custom middle ware
 ]
 
 ROOT_URLCONF = 'ecommerce_tool.urls'
@@ -82,18 +82,29 @@ WSGI_APPLICATION = 'ecommerce_tool.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'djongo',
-        'NAME': os.getenv('DATABASE_NAME'),  # Change to your database name
-        'CLIENT': {
-            'host': os.getenv('DATABASE_HOST'),  # Change if using a remote MongoDB
-            # 'username': 'your_mongo_user',  # Remove if not using authentication
-            # 'password': 'your_mongo_password',
-            # 'authSource': 'admin',  # Required if using authentication
-        }
-    }
-}
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'djongo',
+#         'NAME': os.getenv('DATABASE_NAME'),  # Change to your database name
+#         'CLIENT': {
+#             'host': os.getenv('DATABASE_HOST'),  # Change if using a remote MongoDB
+#             # 'username': os.getenv('DATABASE_USER'),  # Remove if not using authentication
+#             # 'password': os.getenv('DATABASE_PASSWORD'),
+#             # 'authSource': 'admin',  # Required if using authentication
+#         }
+#     }
+# }
+
+# MongoDB connection settings for mongoengine
+from mongoengine import connect
+
+connect(
+    db=os.getenv('DATABASE_NAME'),
+    # username=os.getenv('DATABASE_USER'),
+    # password=os.getenv('DATABASE_PASSWORD'),
+    host=os.getenv('DATABASE_HOST'),
+    # alias='default'
+)
 
 
 
@@ -138,15 +149,16 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework.authentication.SessionAuthentication',
-        'rest_framework.authentication.TokenAuthentication',
-    ),
-    'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.IsAuthenticated',
-    ),
-}
+# REST_FRAMEWORK = {
+#     'DEFAULT_AUTHENTICATION_CLASSES': (
+#         'rest_framework.authentication.SessionAuthentication',
+#         'rest_framework.authentication.TokenAuthentication',
+#         "rest_framework_simplejwt.authentication.JWTAuthentication",
+#     ),
+#     'DEFAULT_PERMISSION_CLASSES': (
+#         'rest_framework.permissions.IsAuthenticated',
+#     ),
+# }
 
 
 

@@ -10,7 +10,6 @@ class Marketplace(Document):
     created_at = StringField()  # Timestamp when the marketplace was added
     updated_at = StringField()  # Timestamp when the marketplace was last updated
 
-    meta = {'collection': 'marketplaces'}
 
 
 
@@ -23,7 +22,6 @@ class Category(Document):
     created_at = StringField()  # Timestamp when the category was added
     updated_at = StringField()  # Timestamp when the category was last updated
 
-    meta = {'collection': 'categories'}
 
 
 class Price(EmbeddedDocument):
@@ -53,7 +51,6 @@ class Product(Document):
     created_at = StringField()  # Timestamp when the product was added
     updated_at = StringField()  # Timestamp when the product was last updated
 
-    meta = {'collection': 'products'}
 
 
 class ignore_api_functions(Document):
@@ -83,7 +80,7 @@ class user(Document):
     first_name = StringField()
     last_name = StringField()
     username = StringField()
-    email = StringField(validation=validateEmail,required=True)
+    email = StringField(required=True)
     password = StringField()
     age = IntField()
     date_of_birth = StringField()
@@ -98,5 +95,10 @@ class user(Document):
     creation_date = DateTimeField(default=datetime.now())
     credentilas = ListField(DictField())
 
-    meta = {'collection': 'users'}
+
+class access_token(Document):
+    user_id = ReferenceField(user)
+    access_token_str = StringField()
+    creation_time = DateTimeField(default=datetime.now())
+    updation_time = DateTimeField(default=datetime.now())
 

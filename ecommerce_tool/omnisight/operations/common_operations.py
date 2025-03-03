@@ -213,7 +213,7 @@ def loginUser(request):
             'role_name': role_name,
             # 'max_age': SIMPLE_JWT['SESSION_COOKIE_MAX_AGE'],
         }
-        token = ""#jwt.encode(payload, SIMPLE_JWT['SIGNING_KEY'], algorithm=SIMPLE_JWT['ALGORITHM'])
+        token = jwt.encode(payload, SIMPLE_JWT['SIGNING_KEY'], algorithm=SIMPLE_JWT['ALGORITHM'])
         valid = True
         response = createJsonResponse(request, token)
 
@@ -234,5 +234,5 @@ def loginUser(request):
         valid = False   
         response.data['data']['valid'] = valid
         response.data['data']['role'] = ""
-        response.data['_c1'] = ''
+        response.data['authentication_token'] = ''
     return response

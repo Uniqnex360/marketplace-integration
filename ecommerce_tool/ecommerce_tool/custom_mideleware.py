@@ -28,10 +28,7 @@ SIMPLE_JWT = {
 }
 
 def obtainManufactureIdFromToken(request): 
-    token = ""
-    c1 = request.COOKIES.get('_c1')
-    c2 = request.COOKIES.get('_c2')
-    if(c1 and c2):    token = c1 + "." + c2
+    token = request.COOKIES.get('authentication_token', "")
     validationObjJWT = None
     try:
         validationObjJWT = jwt.decode(token, SIMPLE_JWT['SIGNING_KEY'], algorithms=[SIMPLE_JWT['ALGORITHM']])
@@ -41,10 +38,7 @@ def obtainManufactureIdFromToken(request):
     
 
 def obtainUserIdFromToken(request): 
-    token = ""
-    c1 = request.COOKIES.get('_c1')
-    c2 = request.COOKIES.get('_c2')
-    if(c1 and c2):    token = c1 + "." + c2
+    token = request.COOKIES.get('authentication_token', "")
     validationObjJWT = None
     try:
         validationObjJWT = jwt.decode(token, SIMPLE_JWT['SIGNING_KEY'], algorithms=[SIMPLE_JWT['ALGORITHM']])
@@ -54,10 +48,7 @@ def obtainUserIdFromToken(request):
     
 
 def obtainUserRoleFromToken(request): 
-    token = ""
-    c1 = request.COOKIES.get('_c1')
-    c2 = request.COOKIES.get('_c2')
-    if(c1 and c2):    token = c1 + "." + c2
+    token = request.COOKIES.get('authentication_token', "")
     validationObjJWT = None
     try:
         validationObjJWT = jwt.decode(token, SIMPLE_JWT['SIGNING_KEY'], algorithms=[SIMPLE_JWT['ALGORITHM']])
@@ -83,12 +74,12 @@ def skip_for_paths():
     return decorator
 
 def createJsonResponse(request, token = None):
-    c1 = ''
+    authentication_token = ''
     if token:
         header,payload1,signature = str(token).split(".")
-        c1 = header+'.'+payload1
+        authentication_token = header+'.'+payload1
     else:
-        c1=request.COOKIES.get('_c1')
+        authentication_token = request.COOKIES.get('authentication_token', "").split(".")[0]
     data_map = dict()
     data_map['data'] = dict()
     response = Response(content_type = 'application/json') 
@@ -98,25 +89,15 @@ def createJsonResponse(request, token = None):
     response.renderer_context = {}
     response.data['message'] = 'success'
     response.data['status'] = True
-    response.data['_c1'] = c1
+    response.data['authentication_token'] = authentication_token
     response.status_code = 200
     return response
 
 def createCookies(token,response):
-    header,payload,signature = str(token).split(".")
     response.set_cookie(
-        key = "_c1",
-        value = header+"."+payload,
+        key = "authentication_token",
+        value = token,
         max_age = SIMPLE_JWT['SESSION_COOKIE_MAX_AGE'],
-        secure = SIMPLE_JWT['AUTH_COOKIE_SECURE'],
-        httponly = False,
-        samesite = SIMPLE_JWT['AUTH_COOKIE_SAMESITE'],
-        # domain = SIMPLE_JWT['SESSION_COOKIE_DOMAIN'],
-    )
-    response.set_cookie(
-        key = "_c2",
-        value = signature,
-        expires = SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'],
         secure = SIMPLE_JWT['AUTH_COOKIE_SECURE'],
         httponly = True,
         samesite = SIMPLE_JWT['AUTH_COOKIE_SAMESITE'],
@@ -125,10 +106,7 @@ def createCookies(token,response):
     return response
 
 def check_authentication(request):
-    token=""
-    c1=request.COOKIES.get('_c1')
-    c2=request.COOKIES.get('_c2')
-    if(c1 and c2): token = c1+"."+c2
+    token = request.COOKIES.get('authentication_token', "")
     validationObjJWT = None
     try:
         validationObjJWT = jwt.decode(token, SIMPLE_JWT['SIGNING_KEY'], algorithms=[SIMPLE_JWT['ALGORITHM']])
@@ -137,10 +115,7 @@ def check_authentication(request):
         return validationObjJWT
 
 def refresh_cookies(request,response):
-    token=""
-    c1=request.COOKIES.get('_c1')
-    c2=request.COOKIES.get('_c2')
-    if(c1 and c2):    token = c1+"."+c2
+    token = request.COOKIES.get('authentication_token', "")
     createCookies(token, response)
 
 
