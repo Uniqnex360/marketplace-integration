@@ -16,7 +16,7 @@ Including another URLconf
 """
 from django.urls import path
 from omnisight.operations.common_operations import checkEmailExistOrNot, signupUser,loginUser, forgotPassword, changePassword
-from omnisight.operations.walmart_operations import fetchAllProducts
+from omnisight.operations.walmart_operations import fetchAllProducts,fetchProductDetails
 
 urlpatterns = [
     
@@ -27,6 +27,7 @@ urlpatterns = [
     path('forgotPassword/',forgotPassword,name="forgotPassword"),
     path('changePassword/',changePassword,name="changePassword"),
     path('fetchAllProducts/',fetchAllProducts,name="fetchAllProducts"),
+    path('fetchProductDetails/',fetchProductDetails,name='fetchProductDetails')
 
 
 ]

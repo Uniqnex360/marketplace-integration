@@ -5,8 +5,8 @@ import re
 
 
 class Marketplace(Document):
-    name = StringField(required=True, unique=True)  # Marketplace name
-    url = StringField(required=True)  # Marketplace URL
+    name = StringField()  # Marketplace name
+    url = StringField()  # Marketplace URL
     created_at = StringField()  # Timestamp when the marketplace was added
     updated_at = StringField()  # Timestamp when the marketplace was last updated
 
@@ -15,7 +15,7 @@ class Marketplace(Document):
 
 class Category(Document):
     name = StringField(required=True, unique=True)  # Category name
-    parent_category = StringField()  # Parent category (if applicable)
+    parent_category_id = ReferenceField('self', null=True)  # Parent category (if applicable)
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
     breadcrumb_path = ListField(StringField())  # Hierarchical category path
     level = IntField()  # Category level
@@ -30,23 +30,23 @@ class Price(EmbeddedDocument):
 
 class Product(Document):
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
-    sku = StringField(required=True, unique=True)  # Stock Keeping Unit
+    sku = StringField()  # Stock Keeping Unit
     wpid = StringField()  # Walmart Product ID
     asin = StringField()  # Amazon Standard Identification Number
     upc = StringField()  # Universal Product Code
     gtin = StringField()  # Global Trade Item Number
     product_name = StringField(required=True)  # Name of the product
     category = StringField()  # General category
-    shelf_path = ListField(StringField())  # Breadcrumb path (for Walmart)
+    shelf_path = StringField()  # Breadcrumb path (for Walmart)
     product_type = StringField()  # Specific product classification
     brand = StringField()  # Brand of the product
     manufacturer = StringField()  # Manufacturer Name
-    condition = StringField(choices=['New', 'Used', 'Refurbished'], default='New')  # Product condition
-    availability = StringField(choices=['In_stock', 'Out_of_stock'], default='In_stock')  # Availability status
+    condition = StringField()  # Product condition
+    availability = StringField()  # Availability status
     price = EmbeddedDocumentField(Price)  # Nested price object
     published_status = StringField()  # e.g., SYSTEM_PROBLEM
-    unpublished_reasons = DictField()  # Reasons if product is unpublished
-    lifecycle_status = StringField(choices=['ACTIVE', 'INACTIVE'], default='ACTIVE')  # Whether product is still being sold
+    unpublished_reasons = StringField()  # Reasons if product is unpublished
+    lifecycle_status = StringField()  # Whether product is still being sold
     is_duplicate = BooleanField(default=False)  # Whether it's a duplicate listing
     created_at = StringField()  # Timestamp when the product was added
     updated_at = StringField()  # Timestamp when the product was last updated

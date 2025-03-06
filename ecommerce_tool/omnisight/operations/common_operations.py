@@ -135,10 +135,10 @@ def forgotPassword(request):
             DatabaseModel.update_documents(user.objects,{'id' : user_obj.id},{"otp" : otp, 'otp_generated_time' : datetime.now()})
             name = f"{user_obj.first_name} {user_obj.last_name}"
 
-            subject = "Reset Your Password - Data Extraction"
+            subject = "Reset Your Password - Market Place"
             body = f"""Dear {name},  
 
-                       We received a request to reset your password for your Data Extraction account.  
+                       We received a request to reset your password for your Market Place account.  
 
                        Your **verification code** for password reset is: **{otp}**  
 
@@ -149,8 +149,8 @@ def forgotPassword(request):
                        If you need further assistance, feel free to contact our support team.  
 
                        Best regards,  
-                       The Data Extraction Team  
-                       [https://doccrux.netlify.app/](https://doccrux.netlify.app/) 
+                       The Market Place Team  
+                       [https://marketplace.netlify.app/](https://marketplace.netlify.app/) 
                         """
             send_email(json_req['email'].lower(), subject, body)
             data['status'] = True

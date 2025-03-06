@@ -66,15 +66,15 @@ def getAccesstoken(user_id):
         current_time = datetime.now()
 
         # Get the creation time of the access token
-        creation_time = exist_access_token_obj.creation_time
+        creation_time = exist_access_token_obj.updation_time
 
         # Check if the current time is greater than the creation time plus 14 minutes
-        if current_time > creation_time + timedelta(minutes=14):
+        if current_time < creation_time + timedelta(minutes=14):
             access_token_str = exist_access_token_obj.access_token_str
         else:
             access_token_str = oauthFunction()
             if access_token_str != None:
-                DatabaseModel.update_documents(access_token.objects,{"id" : exist_access_token_obj.id},{"access_token_str" : access_token_str})
+                DatabaseModel.update_documents(access_token.objects,{"id" : exist_access_token_obj.id},{"access_token_str" : access_token_str,"updation_time" : datetime.now()})
     else:
         access_token_str = oauthFunction()
         DatabaseModel.save_documents(access_token,{"user_id" : ObjectId(user_id),"access_token_str" : access_token_str})
