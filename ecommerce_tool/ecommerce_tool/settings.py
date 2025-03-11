@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers
 
 # Load environment variables from .env file
 load_dotenv()
@@ -30,6 +31,25 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
 CORS_ALLOW_ALL_ORIGINS = True
+
+# CORS_ORIGIN_ALLOW_ALL = True
+CORS_ALLOW_CREDENTIALS = True
+
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://192.168.30.191:4200",
+    "https://b2bop.netlify.app"
+]
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://192.168.30.191:4200",
+    "https://b2bop.netlify.app"
+]
+#CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'content-type',
+]
 
 
 # Application definition
@@ -164,10 +184,16 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 # Read API keys
+#WALMART API KEYS
 WALMART_API_KEY = os.getenv('WALMART_API_KEY')
 WALMART_SECRET_KEY = os.getenv('WALMART_SECRET_KEY')
-# AMAZON_API_KEY = os.getenv('AMAZON_API_KEY')
-# AMAZON_SECRET_KEY = os.getenv('AMAZON_SECRET_KEY')
+
+#AMAZON API KEYS
+AMAZON_API_KEY = os.getenv('AMAZON_API_KEY')
+AMAZON_SECRET_KEY = os.getenv('AMAZON_SECRET_KEY')
+REFRESH_TOKEN = os.getenv('AMAZON_REFRESH_TOKEN')
+MARKETPLACE_ID = os.getenv('MARKETPLACE_ID')
+SELLER_ID = os.getenv('SELLER_ID')
 
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
 
