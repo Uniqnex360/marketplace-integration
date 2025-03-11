@@ -199,11 +199,10 @@ def changePassword(request):
 @csrf_exempt
 def loginUser(request):
     jsonRequest = JSONParser().parse(request)
-    user_data_obj = list(user.objects(**jsonRequest)) 
+    user_data_obj = DatabaseModel.get_document(user.objects,jsonRequest)
     token = ''
     valid = False
     if user_data_obj:
-        user_data_obj = user_data_obj[0]
         DatabaseModel.update_documents(user.objects,{"id" : user_data_obj.id},{'last_login' : datetime.now()})
         role_name = user_data_obj.role_id.name
         payload = {

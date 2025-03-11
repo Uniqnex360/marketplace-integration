@@ -7,6 +7,7 @@ import re
 class Marketplace(Document):
     name = StringField()  # Marketplace name
     url = StringField()  # Marketplace URL
+    image_url = StringField()  # Marketplace logo URL
     created_at = StringField()  # Timestamp when the marketplace was added
     updated_at = StringField()  # Timestamp when the marketplace was last updated
 
@@ -21,36 +22,93 @@ class Category(Document):
     level = IntField()  # Category level
     created_at = StringField()  # Timestamp when the category was added
     updated_at = StringField()  # Timestamp when the category was last updated
+    end_level = BooleanField(default=False)  # Whether the category is the last level in the hierarchy
+
+
+class Brand(Document):
+    name = StringField()  # Brand name
+    description = StringField()  # Brand description
+    website = StringField()  # Brand website
+    marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
 
 
 
-class Price(EmbeddedDocument):
-    currency = StringField(required=True)  # e.g., 'USD'
-    amount = FloatField(required=True)  # e.g., 38.19
+class Manufacturer(Document):
+    name = StringField()  # Manufacturer name
+    description = StringField()  # Manufacturer description
+    website = StringField()  # Manufacturer website
+    marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
+
+
+
 
 class Product(Document):
-    marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
-    sku = StringField()  # Stock Keeping Unit
-    wpid = StringField()  # Walmart Product ID
-    asin = StringField()  # Amazon Standard Identification Number
+    # General Product Details
+    product_title = StringField()
+    product_description = StringField()
+    product_id = StringField()  # Can store ASIN, UPC, GTIN, WPID
+    product_id_type = StringField()
+    sku = StringField()
+    price = FloatField()
+    currency = StringField()
+    quantity = IntField(default=0)
+    item_condition = StringField()
+    item_note = StringField()  # Additional notes about item condition
+
+    # Platform-Specific Identifiers
+    listing_id = StringField()  # Amazon Listing ID
     upc = StringField()  # Universal Product Code
     gtin = StringField()  # Global Trade Item Number
-    product_name = StringField(required=True)  # Name of the product
-    category = StringField()  # General category
-    shelf_path = StringField()  # Breadcrumb path (for Walmart)
-    product_type = StringField()  # Specific product classification
-    brand = StringField()  # Brand of the product
-    manufacturer = StringField()  # Manufacturer Name
-    condition = StringField()  # Product condition
-    availability = StringField()  # Availability status
-    price = EmbeddedDocumentField(Price)  # Nested price object
-    published_status = StringField()  # e.g., SYSTEM_PROBLEM
-    unpublished_reasons = StringField()  # Reasons if product is unpublished
-    lifecycle_status = StringField()  # Whether product is still being sold
-    is_duplicate = BooleanField(default=False)  # Whether it's a duplicate listing
-    created_at = StringField()  # Timestamp when the product was added
-    updated_at = StringField()  # Timestamp when the product was last updated
+    asin = StringField()  # Amazon Standard Identification Number
+    model_number = StringField()
+    
+    # Image & Category
+    image_url = StringField() # Main image URL
+    image_urls = ListField(StringField())  # Additional image URLs
+    zshop_category = StringField()
+    zshop_browse_path = StringField()
+    
+    # Shipping Details
+    delivery_partner = StringField()
+    merchant_shipping_group = StringField()
+    will_ship_internationally = BooleanField(default=False)
+    expedited_shipping = BooleanField(default=False)
+    zshop_shipping_fee = StringField()
 
+    # Listing & Availability
+    open_date = DateTimeField()
+    availability = StringField()
+    lifecycle_status = StringField()  # e.g., "Active", "Inactive", "Discontinued"
+    published_status = StringField()
+    unpublished_reasons = StringField()  # If unpublished, list reasons
+    
+    # Variants & Grouping
+    variant_group_id = StringField()
+    variant_group_info = DictField()
+    
+    # Platform-Specific Extras
+    zshop_storefront_feature = BooleanField(default=False)
+    zshop_boldface = BooleanField(default=False)
+    bid_for_featured_placement = BooleanField(default=False)
+    
+    # Other Metadata
+    add_delete = StringField()
+    pending_quantity = IntField(default=0)
+    is_duplicate = BooleanField(default=False)
+    shelf_path = StringField()  # Walmart shelf location
+    product_type = StringField()  # e.g., Electronics, Clothing
+
+    category = StringField()  # e.g., "Electronics > Computers > Laptops"
+    attributes = DictField()  # Additional attributes (e.g., color, size, weight)
+    features = ListField(StringField())  # List of product features
+    brand_name = StringField()  # Brand name
+    brand_id = ReferenceField(Brand)  # Reference to the brand
+
+    manufacturer_name = StringField()  # Manufacturer name
+    manufacturer_id = ReferenceField(Manufacturer)  # Reference to the manufacturer
+    marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
+    created_at = DateTimeField(default=datetime.now())  # Timestamp when the product was added
+    updated_at = DateTimeField(default=datetime.now())  # Timestamp when the product was last updated
 
 
 class ignore_api_functions(Document):
@@ -64,11 +122,6 @@ class mail_template(Document):
     default_template = StringField()
     cutomize_template = StringField()
 
-
-def validateEmail(value):
-    mail_re = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    if(not re.fullmatch(mail_re, value)):
-        raise ValidationError("Email format is invalid")
 
 class role(Document):
     name = StringField()
@@ -101,4 +154,5 @@ class access_token(Document):
     access_token_str = StringField()
     creation_time = DateTimeField(default=datetime.now())
     updation_time = DateTimeField(default=datetime.now())
+    marketplace_id = ReferenceField(Marketplace)
 
