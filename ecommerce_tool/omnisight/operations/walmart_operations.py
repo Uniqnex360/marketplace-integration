@@ -69,7 +69,7 @@ def fetchProductDetails(request):
     ACCESS_TOKEN = getAccesstoken(user_id)
 
     # Walmart API URL for product details
-    PRODUCT_DETAILS_URL = f"https://marketplace.walmartapis.com/v3/items/{sku}?include=all"
+    PRODUCT_DETAILS_URL = f"https://marketplace.walmartapis.com/v3/items/{sku}?include=images,attributes,fulfillment,variants,productType"
 
     # Headers for authentication
     headers = {
@@ -205,32 +205,52 @@ def fetchAllorders(request):
     orders = []
     user_id = request.GET.get('user_id')
     access_token = getAccesstoken(user_id)
-    limit = request.GET.get('limit')
-    ORDERS_URL = f"https://marketplace.walmartapis.com/v3/orders?createdStartDate=2024-01-01T00:00:00Z&limit={limit}"
-    """
-    Fetch orders from Walmart API using the generated access token.
-    """
+    limit = int(request.GET.get('limit', 100))  # Default limit = 100 if not provided
+    skip = int(request.GET.get('skip', 0))  # Default skip = 0 if not provided
+    
+    base_url = "https://marketplace.walmartapis.com/v3/orders"
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "WM_SEC.ACCESS_TOKEN": access_token,  # Required token header
-        "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),  # Generate a unique UUID for tracking
-        "WM_SVC.NAME": "Walmart Marketplace",  # Walmart Service Name
+        "WM_SEC.ACCESS_TOKEN": access_token,  
+        "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),  
+        "WM_SVC.NAME": "Walmart Marketplace",  
         "Accept": "application/json"
     }
 
-    response = requests.get(ORDERS_URL, headers=headers)
+    total_fetched = 0
+    next_cursor = None  # Pagination cursor
 
-    if response.status_code == 200:
-        print("✅ Orders Fetched Successfully!")
-        result = response.json()
-        d = json.dumps(result)
-        d= json.loads(d)
-        orders = d['list']['elements']['order']
-        
-    else:
-        print(f"❌ Error fetching orders: [HTTP {response.status_code}] {response.text}")
+    while total_fetched < (skip + limit):
+        print(skip ,limit)
+        # Construct the URL with cursor if available
+        url = f"{base_url}?createdStartDate=2024-01-01T00:00:00Z&limit=100"
+        if next_cursor:
+            url = f"{base_url}{next_cursor}"  # Use the nextCursor provided by Walmart
 
-    return orders
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 200:
+            result = response.json()
+            fetched_orders = result.get('list', {}).get('elements', {}).get('order', [])
+            total_fetched += len(fetched_orders)
+
+            # Skip the first `skip` orders
+            if total_fetched >= skip:
+                orders.extend(fetched_orders)
+
+            # Stop if we have enough orders
+            if len(orders) >= limit:
+                break
+
+            # Get the nextCursor for pagination
+            next_cursor = result.get("list", {}).get("meta", {}).get("nextCursor")
+            if not next_cursor:
+                break  # No more pages left
+            
+        else:
+            print(f"❌ Error fetching orders: [HTTP {response.status_code}] {response.text}")
+            break
+    return orders[:limit]  # Return the exact number of requested orders
 
 
 
@@ -297,3 +317,86 @@ def fetchBrand(request):
         print(f"❌ Error fetching order details: [HTTP {response.status_code}] {response.text}")
 
     return data
+
+
+# Function to process the Excel file
+def process_excel_for_walmartorders(file_path):
+    df = pd.read_excel(file_path)
+    marketplace = "Walmart"
+    marketplace_id = ObjectId('67c9460fa5194f500892c0d2')
+
+    for index, row in df.iterrows():
+        # print(f"Processing row {index + 1}...",row)
+        print(f"Processing row {index}...")
+        shipNode = eval(row['shipNode']) if pd.notnull(row['shipNode']) else {}
+        order_details = eval(row['orderLines']) if pd.notnull(row['orderLines']) else []
+        order_total = 0
+        currency = "USD"
+        order_status = ""
+        for order_line_ins in order_details['orderLine']:
+            for charge_ins in order_line_ins['charges']['charge']:
+                tax =0
+                if charge_ins['tax'] != None:
+                    tax = float(charge_ins['tax']['taxAmount']['amount'])
+                order_total += float(charge_ins['chargeAmount']['amount']) + tax
+                currency = charge_ins['chargeAmount']['currency']
+
+            order_status = order_line_ins['orderLineStatuses']['orderLineStatus'][0]['status']
+
+        order_date = row['orderDate'] if pd.notnull(row['orderDate']) else ""
+        if order_date != "":
+            order_date = datetime.fromtimestamp(int(order_date)/1000)
+        
+
+        order_obj = DatabaseModel.get_document(Order.objects,{"purchase_order_id" : str(row['purchaseOrderId'])})
+        if order_obj != None:
+            print(f"Order with purchase order ID {row['purchaseOrderId']} already exists. Skipping...")
+            DatabaseModel.update_documents(Order.objects,{"purchase_order_id" : str(row['purchaseOrderId'])},{"order_status" : order_status,"currency" : currency,"order_total" : order_total})     
+            
+        else:
+            print(f"Creating order with purchase order ID {row['purchaseOrderId']}...")
+            order = Order(
+                marketplace_id=marketplace_id,
+                purchase_order_id=str(row['purchaseOrderId']) if pd.notnull(row['purchaseOrderId']) else "",
+                customer_order_id=str(row['customerOrderId']) if pd.notnull(row['customerOrderId']) else "",
+                customer_email_id=str(row['customerEmailId']) if pd.notnull(row['customerEmailId']) else "",
+                order_date = order_date,
+                shipping_information = eval(row['shippingInfo']) if pd.notnull(row['shippingInfo']) else "",
+                fulfillment_channel = shipNode['type'],
+                order_details = order_details['orderLine'],
+                order_total = order_total,
+                currency = currency,
+                order_status = order_status,
+            )
+            order.save()
+
+
+
+file_path1 = "/home/lexicon/walmart/WALMARTORDER@orders.xlsx"
+# process_excel_for_walmartorders(file_path1)
+
+
+
+def update_product_images_from_csv(file_path):
+    df = pd.read_csv(file_path)
+    marketplace_id = ObjectId('67c9460fa5194f500892c0d2')
+
+    for index, row in df.iterrows():
+        print(f"Processing row {index + 1}...")
+        sku = str(row['SKU']) if pd.notnull(row['SKU']) else ""
+        image_url = row['Primary Image URL'] if pd.notnull(row['Primary Image URL']) else ""
+
+        if sku and image_url:
+            product = DatabaseModel.get_document(Product.objects, {"sku": sku, "marketplace_id": marketplace_id})
+            if product:
+                product.image_url = image_url
+                product.save()
+                print(f"✅ Updated image for SKU: {sku}")
+            else:
+                print(f"❌ Product with SKU: {sku} not found")
+        else:
+            print(f"❌ Invalid data in row {index + 1}")
+
+# # Example usage
+# file_path = "/home/lexicon/walmart/ItemReport_10001414684_2025-03-13T104436.754000.csv"
+# update_product_images_from_csv(file_path)

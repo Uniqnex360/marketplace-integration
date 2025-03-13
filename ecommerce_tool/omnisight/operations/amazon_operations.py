@@ -8,7 +8,7 @@ from ecommerce_tool.crud import DatabaseModel
 from bson import ObjectId
 import json
 from ecommerce_tool.settings import MARKETPLACE_ID
-
+import ast
 
 
 
@@ -168,7 +168,7 @@ def processImage(image_list):
 
 def updateAmazonProductsBasedonAsins(request):
     # user_id = request.GET.get('user_id')
-    marketplace_id = ObjectId('67ce8f51ab471ccbb9f5d9ff')#DatabaseModel.get_document(Marketplace.objects, {"name": "Amazon"}, ["id"]).id
+    marketplace_id = DatabaseModel.get_document(Marketplace.objects, {"name": "Amazon"}, ["id"]).id
     access_token = "Atza|IwEBIO-JJcX7ZC4FM4CUZVsijnQiBSQI94df81jHXQbMhsVLmybpuDUz2tdkvP4-6MdpzimIkjsCLYO107lhPeFNKROyfcxURqaC0lrCEEd5feErYyqGHL-PfRe2ywlWXq3rT8Cst_TAVy37nROHdaw51BcrLUpvFnY31oFmIKZwxTOfIBL_bhmks-RwrbB6C5MJFcTG0sxXXKMsOdCw1081aaPXVk2Xo_G87agQpbQRGiQwsszQZ0bfc4BxGSfZZzuhFhpGrv5YDWCdsQLptJawZSRBi889C-5tUi1G0-Vu1ZD4wqsemOOnDDmEZM77clC_EQKVm3E-q9QuLVTk1yxn_WUw"
     pipeline = [
         {
@@ -273,22 +273,82 @@ def updateAmazonProductsBasedonAsins(request):
 
     return True
 
+
+def converttime(iso_string):
+    converted_datetime = datetime.fromisoformat(iso_string[:-1] + "+00:00")
+    return converted_datetime
+
             
-           
+def process_excel_for_amazonOrders(file_path):
+    df = pd.read_excel(file_path)
+    marketplace_id = ObjectId('67ce8f51ab471ccbb9f5d9ff')
 
+    for index, row in df.iterrows():
+        currency = "USD"
+        order_total = 0.0
+        BuyerEmail = ""
+        OrderTotal = ast.literal_eval(row['OrderTotal']) if pd.notnull(row['OrderTotal']) else {}
+        customer_email_id = ast.literal_eval(row['BuyerInfo']) if pd.notnull(row['BuyerInfo']) else {}
+        if customer_email_id != {}:
+            BuyerEmail = customer_email_id['BuyerEmail']
 
-# def s():
-#     pipeline = [
-#         {
-#             "$group" : {
-#                 "_id" : None,
-#                 "category_list" : {"$addToSet" : "$category"},
-#             }
-#         }
-#     ]
-#     category_list = list(Product.objects.aggregate(*(pipeline)))[0]['category_list']
-#     for category in category_list:
-#         DatabaseModel.update_documents(Category.objects,{"name" : category},{"end_level" : True})
+        if OrderTotal != {}:
+            currency = OrderTotal['CurrencyCode']
+            order_total = OrderTotal['Amount']
 
+        order_obj = DatabaseModel.get_document(Order.objects,{"purchase_order_id" : str(row['AmazonOrderId'])})
+        if order_obj != None:
+            print(f"Order with purchase order ID {row['AmazonOrderId']} already exists. Skipping...")
 
-# s()
+            access_token= "Atza|IwEBIM_q3I6A40putZMxZ1nkcckzdK7IfMAGKWv0tiAzCa9po4oW38FyEdSPjW0GfNm7Xbh6QYVGjIGp9Y93tMxosHpYiF5PygyMICL7vP14BhNNBMvZmEnGFSyCj7ScRDTA5dJfgSLSvsEEjCyIBGzOa9sZH2DClyuzYCSPn2BttUHHyxYOOGyFeanyel1H0xsBVs3hHboU878MUmsejZEJ_cjGYUXgzlJ5GiYi_DVy4RGCM39Ylwlq2sAxxMpJdlaSBCJITpsU0ZSetiMBmYLRPRLz5dawUEAull0KvR21U3bzncVlfER3kAxIjFf6A44nsrCY68BGe6iy91urByXOme7e"
+            url = f"https://sellingpartnerapi-na.amazon.com/orders/v0/orders/{str(row['AmazonOrderId'])}/orderItems"
+
+            # Headers
+            headers = {
+                "x-amz-access-token": access_token,
+                "Content-Type": "application/json"
+            }
+
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                report_url = response.json().get("payload")
+                DatabaseModel.update_documents(Order.objects,{"purchase_order_id" : str(row['AmazonOrderId'])},{"order_details" : report_url['OrderItems']})
+        else:
+            order = Order(
+                marketplace_id=marketplace_id,
+                customer_email_id = BuyerEmail,
+                purchase_order_id=str(row['AmazonOrderId']) if pd.notnull(row['AmazonOrderId']) else "",
+                earliest_ship_date=converttime(row['EarliestShipDate']) if pd.notnull(row['EarliestShipDate']) else "",
+                sales_channel=str(row['SalesChannel']) if pd.notnull(row['SalesChannel']) else "",
+                number_of_items_shipped=int(row['NumberOfItemsShipped']) if pd.notnull(row['NumberOfItemsShipped']) else "",
+                order_type=str(row['OrderType']) if pd.notnull(row['OrderType']) else "",
+                is_premium_order=True if int(row['IsPremiumOrder'])==1 else False if pd.notnull(row['IsPremiumOrder']) else "",
+                is_prime=True if int(row['IsPrime'])==1 else False if pd.notnull(row['IsPrime']) else "",
+                fulfillment_channel = str(row['FulfillmentChannel']) if pd.notnull(row['FulfillmentChannel']) else "",
+                number_of_items_unshipped = int(row['NumberOfItemsUnshipped']) if pd.notnull(row['NumberOfItemsUnshipped']) else "",
+                has_regulated_items=True if int(row['HasRegulatedItems'])==1 else False if pd.notnull(row['HasRegulatedItems']) else "",
+                is_replacement_order=False if row['HasRegulatedItems']=="false" else True if pd.notnull(row['HasRegulatedItems']) else "",
+                is_sold_by_ab=True if int(row['HasRegulatedItems'])==1 else False if pd.notnull(row['HasRegulatedItems']) else "",
+                latest_ship_date = converttime(row['LatestShipDate']) if pd.notnull(row['LatestShipDate']) else "",
+                ship_service_level=str(row['ShipServiceLevel']) if pd.notnull(row['ShipServiceLevel']) else "",
+                order_date=converttime(row['PurchaseDate']) if pd.notnull(row['PurchaseDate']) else "",
+                is_ispu=True if int(row['IsISPU'])==1 else False if pd.notnull(row['IsISPU']) else "",
+                order_status = str(row['OrderStatus']) if pd.notnull(row['OrderStatus']) else "",
+                shipping_information = ast.literal_eval(row['ShippingAddress']) if pd.notnull(row['ShippingAddress']) else {},
+                is_access_point_order=True if int(row['IsAccessPointOrder'])==1 else False if pd.notnull(row['IsAccessPointOrder']) else "",
+                seller_order_id = str(row['SellerOrderId']) if pd.notnull(row['SellerOrderId']) else "",
+                payment_method = str(row['PaymentMethod']) if pd.notnull(row['PaymentMethod']) else "",
+                is_business_order = True if int(row['IsBusinessOrder'])==1 else False if pd.notnull(row['IsBusinessOrder']) else "",
+                order_total = order_total,
+                currency = currency,
+                payment_method_details = eval(row['PaymentMethodDetails'])[0] if pd.notnull(row['PaymentMethodDetails']) else "",
+                is_global_express_enabled = True if int(row['IsGlobalExpressEnabled'])==1 else False if pd.notnull(row['IsGlobalExpressEnabled']) else "",
+                last_update_date = converttime(row['LastUpdateDate']) if pd.notnull(row['LastUpdateDate']) else "",
+                shipment_service_level_category = str(row['ShipmentServiceLevelCategory']) if pd.notnull(row['ShipmentServiceLevelCategory']) else "",
+                automated_shipping_settings = ast.literal_eval(row['AutomatedShippingSettings']) if pd.notnull(row['AutomatedShippingSettings']) else {},
+                
+            )
+            order.save()
+
+file_path2 = "/home/lexicon/walmart/Amazonorders.xlsx"
+# process_excel_for_amazonOrders(file_path2)

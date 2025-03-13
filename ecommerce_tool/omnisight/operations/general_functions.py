@@ -7,6 +7,8 @@ import pandas as pd
 from ecommerce_tool.crud import DatabaseModel
 from bson import ObjectId
 import json
+from rest_framework.parsers import JSONParser
+from django.views.decorators.csrf import csrf_exempt
 
 
 
@@ -25,26 +27,32 @@ def getMarketplaceList(request):
     return marketplace_list
 
 
-
+@csrf_exempt
 def getProductList(request):
     data = dict()
-    marketplace_id = request.GET.get('marketplace_id')
-    skip = int(request.GET.get('skip'))
-    limit = int(request.GET.get('limit'))
-    marketplace = request.GET.get('marketplace')
-    category_name = request.GET.get('category_name')
+    json_request = JSONParser().parse(request)
+    print(json_request)
+    marketplace_id = json_request.get('marketplace_id')
+    skip = int(json_request.get('skip'))
+    limit = int(json_request.get('limit'))
+    marketplace = json_request.get('marketplace')
+    category_name = json_request.get('category_name')
+    brand_id_list = json_request.get('brand_id_list')
     pipeline = []
     count_pipeline = []
-    if marketplace != None and marketplace != "" and marketplace == "all":
-        pass
-    else:
-        match = {
-            "$match" : {
-                "marketplace_id" : ObjectId(marketplace_id)
-            }
-        },
-        pipeline.append(match)
-        count_pipeline.append(match)
+    match = {}
+    if marketplace_id != None and marketplace_id != "":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+    if category_name != None and category_name != "" and category_name != []:
+        match['category'] = {"$in":category_name}
+    if brand_id_list != None and brand_id_list != "" and brand_id_list != []:
+        match['brand_id'] = {"$in":[ObjectId(brand_id) for brand_id in brand_id_list]}
+    if match != {}:
+        match_pipeline = {
+            "$match" : match}
+        print(match_pipeline)
+        pipeline.append(match_pipeline)
+        count_pipeline.append(match_pipeline)
     pipeline.extend([
         {
             "$lookup" : {
@@ -105,15 +113,25 @@ def getProductCategoryList(request):
         match['marketplace_id'] = ObjectId(marketplace_id)
     match['end_level'] = True
     pipeline = [
-        match,
         {
-            "$project" : {
-                "_id" : 0,
-                "id" : {"$toString" : "$_id"},
-                "name" : 1
+            "$match": match    
+        },
+        {
+            "$lookup": {
+                "from": "product",
+                "localField": "name",
+                "foreignField": "category",
+                "as": "products"
             }
         },
-        
+        {
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "name": 1,
+                "product_count": {"$size": "$products"}
+            }
+        },
     ]
     category_list = list(Category.objects.aggregate(*(pipeline)))
     data['category_list'] = category_list
@@ -134,13 +152,215 @@ def getBrandList(request):
         pipeline.append(match)
     pipeline.extend([
         {
+            "$lookup": {
+                "from": "product",
+                "localField": "_id",
+                "foreignField": "brand_id",
+                "as": "products"
+            }
+        },
+        {
             "$project" : {
                 "_id" : 0,
                 "id" : {"$toString" : "$_id"},
-                "name" : 1
+                "name" : 1,
+                "product_count": {"$size": "$products"}
             }
         }
     ])
     brand_list = list(Brand.objects.aggregate(*(pipeline)))
     data['brand_list'] = brand_list
+    return data
+
+
+def fetchProductDetails(request):
+    data = dict()
+    product_id = request.GET.get('product_id')
+    pipeline = [
+        {
+            "$match" : {
+                "_id" : ObjectId(product_id)
+            }
+        },
+        {
+            "$project" : {
+                "_id" : 0,
+                "id" : {"$toString" : "$_id"},
+                "product_title" : {"$ifNull" : ["$product_title", ""]},
+                "product_description" : {"$ifNull" : ["$product_description", ""]},
+                "product_id" : {"$ifNull" : ["$product_id", ""]},
+                "product_id_type" : {"$ifNull" : ["$product_id_type", ""]},
+                "sku" : {"$ifNull" : ["$sku", ""]},
+                "price" : {"$ifNull" : ["$price", 0]},
+                "currency" : {"$ifNull" : ["$currency", ""]},
+                "quantity" : {"$ifNull" : ["$quantity", 0]},
+                "item_condition" : {"$ifNull" : ["$item_condition", ""]},
+                "item_note" : {"$ifNull" : ["$item_note", ""]},
+                "listing_id" : {"$ifNull" : ["$listing_id", ""]},
+                "upc" : {"$ifNull" : ["$upc", ""]},
+                "gtin" : {"$ifNull" : ["$gtin", ""]},
+                "asin" : {"$ifNull" : ["$asin", ""]},
+                "model_number" : {"$ifNull" : ["$model_number", ""]},
+                "category" : {"$ifNull" : ["$category", ""]},
+                "brand_name" : {"$ifNull" : ["$brand_name", ""]},
+                "manufacturer_name" : {"$ifNull" : ["$manufacturer_name", ""]},
+                "attributes" : {"$ifNull" : ["$attributes", {}]},
+                "features" : {"$ifNull" : ["$features", []]},
+                "shelf_path" : {"$ifNull" : ["$shelf_path", ""]},
+                "image_url" : {"$ifNull" : ["$image_url", ""]},
+                "image_urls" : {"$ifNull" : ["$image_urls", []]}
+            }
+        }
+    ]
+    product_details = list(Product.objects.aggregate(*(pipeline)))
+    if len(product_details):
+        data = product_details[0]
+    return data
+
+
+
+@csrf_exempt
+def fetchAllorders(request):
+    data = dict()
+    orders = []
+    count_pipeline = []
+    json_request = JSONParser().parse(request)
+    user_id = json_request.get('user_id')
+    limit = int(json_request.get('limit', 100))  # Default limit = 100 if not provided
+    skip = int(json_request.get('skip', 0))  # Default skip = 0 if not provided
+    pipeline = [
+
+        {
+            "$lookup": {
+                "from": "marketplace",
+                "localField": "marketplace_id",
+                "foreignField": "_id",
+                "as": "marketplace_ins"
+            }
+        },
+        {
+            "$unwind": "$marketplace_ins"
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "purchase_order_id": "$purchase_order_id",
+                "order_date": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%dT%H:%M:%S.%LZ",
+                        "date": "$order_date",
+                    }
+                    },
+                "order_status": "$order_status",
+                "order_total": "$order_total",
+                "currency": "$currency",
+                "marketplace_name": "$marketplace_ins.name",
+
+            }
+        },
+        {
+            "$skip": skip
+        },
+        {
+            "$limit": limit
+        }
+    ]
+    orders = list(Order.objects.aggregate(*(pipeline)))
+    count_pipeline.extend([
+        {
+            "$count": "total_count"
+        }
+    ])
+    total_count_result = list(Order.objects.aggregate(*(count_pipeline)))
+    total_count = total_count_result[0]['total_count'] if total_count_result else 0
+    data['orders'] = orders
+    data['total_count'] = total_count
+    return data
+
+
+def fetchOrderDetails(request):
+    data = dict()
+    user_id = request.GET.get('user_id')
+    order_id = request.GET.get('order_id')
+    pipeline = [
+        {
+            "$match": {
+                "_id": ObjectId(order_id)
+            }
+        },
+        {
+            "$lookup": {
+                "from": "marketplace",
+                "localField": "marketplace_id",
+                "foreignField": "_id",
+                "as": "marketplace_ins"
+            }
+        },
+        {
+            "$unwind": "$marketplace_ins"
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "purchase_order_id": "$purchase_order_id",
+                "customer_order_id": "$customer_order_id",
+                "seller_order_id": "$seller_order_id",
+                "customer_email_id": "$customer_email_id",
+                "order_date": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%dT%H:%M:%S.%LZ",
+                        "date": "$order_date",
+                    }
+                },
+                "earliest_ship_date": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%dT%H:%M:%S.%LZ",
+                        "date": "$earliest_ship_date",
+                    }
+                },
+                "latest_ship_date": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%dT%H:%M:%S.%LZ",
+                        "date": "$latest_ship_date",
+                    }
+                },
+                "last_update_date": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%dT%H:%M:%S.%LZ",
+                        "date": "$last_update_date",
+                    }
+                },
+                "shipping_information": "$shipping_information",
+                "ship_service_level": "$ship_service_level",
+                "shipment_service_level_category": "$shipment_service_level_category",
+                "automated_shipping_settings": "$automated_shipping_settings",
+                "order_details": "$order_details",
+                "order_status": "$order_status",
+                "number_of_items_shipped": "$number_of_items_shipped",
+                "number_of_items_unshipped": "$number_of_items_unshipped",
+                "fulfillment_channel": "$fulfillment_channel",
+                "sales_channel": "$sales_channel",
+                "order_type": "$order_type",
+                "is_premium_order": "$is_premium_order",
+                "is_prime": "$is_prime",
+                "has_regulated_items": "$has_regulated_items",
+                "is_replacement_order": "$is_replacement_order",
+                "is_sold_by_ab": "$is_sold_by_ab",
+                "is_ispu": "$is_ispu",
+                "is_access_point_order": "$is_access_point_order",
+                "is_business_order": "$is_business_order",
+                "marketplace_name": "$marketplace_ins.name",
+                "payment_method": "$payment_method",
+                "payment_method_details": "$payment_method_details",
+                "order_total": "$order_total",
+                "currency": "$currency",
+                "is_global_express_enabled": "$is_global_express_enabled",
+            }
+        }
+    ]
+    order_details = list(Order.objects.aggregate(*(pipeline)))
+    if len(order_details):
+        data = order_details[0]
     return data

@@ -52,6 +52,7 @@ class Product(Document):
     price = FloatField()
     currency = StringField()
     quantity = IntField(default=0)
+    quantity_unit = StringField()
     item_condition = StringField()
     item_note = StringField()  # Additional notes about item condition
 
@@ -156,3 +157,53 @@ class access_token(Document):
     updation_time = DateTimeField(default=datetime.now())
     marketplace_id = ReferenceField(Marketplace)
 
+
+
+class Order(Document):
+    # Tracking IDs
+    purchase_order_id = StringField()  # ID generated after a customer orders a product
+    customer_order_id = StringField()  # ID from the customer's perspective for tracking
+    seller_order_id = StringField()  # ID used by the seller for internal purposes
+
+    # Customer details
+    customer_email_id = StringField()  # Email of the customer
+
+    # Order timing
+    order_date = DateTimeField()  # Date when the order was placed
+    earliest_ship_date = DateTimeField()  # Minimum date for product delivery
+    latest_ship_date = DateTimeField()  # Maximum date for product delivery
+    last_update_date = DateTimeField()  # Most recent order update date
+
+    # Shipping information
+    shipping_information = DictField()  # Contains nested address/details for customer delivery
+    ship_service_level = StringField()  # Shipping speed or service
+    shipment_service_level_category = StringField()  # High-level service category (e.g., express, standard)
+    automated_shipping_settings = DictField()  # Amazon settings for automatically selecting shipping methods
+
+    # Order details and status
+    order_details = ListField(DictField())  # List of order lines with details for each ordered item
+    order_status = StringField()  # Tracking order lifecycle
+    number_of_items_shipped = IntField()  # Number of items that have been shipped
+    number_of_items_unshipped = IntField()  # Number of items pending shipment
+
+    # Fulfillment and sales
+    fulfillment_channel = StringField()  # Who is fulfilling the order
+    sales_channel = StringField()  # The channel through which the order was placed
+    order_type = StringField()  # Order type based on purchase basis
+    is_premium_order = BooleanField()  # Indicates whether premium cost applies for non-prime members
+    is_prime = BooleanField()  # True if the order is placed by a prime account
+    has_regulated_items = BooleanField()  # True if order includes items requiring special handling
+    is_replacement_order = BooleanField()  # True if the order is a replacement due to defects, lost items, etc.
+    is_sold_by_ab = BooleanField()  # True if the product is sold directly by Amazon
+    is_ispu = BooleanField()  # True if the order is meant for in-store pickup
+    is_access_point_order = BooleanField()  # True if the order uses an access point location (e.g., lockers)
+    is_business_order = BooleanField()  # True if this is a business (B2B) order
+
+    # Marketplace and payment
+    marketplace = StringField()  # Marketplace from which the order originated
+    marketplace_id = ReferenceField(Marketplace)  # Identifier for the marketplace
+    payment_method = StringField()  # Type of payment used
+    payment_method_details = StringField()  # Detailed information about the payment method
+    order_total = FloatField()  # Total order cost including products, shipping, and taxes
+    currency = StringField()  # Currency used for the order
+    is_global_express_enabled = BooleanField()  # True if fast shipping is available for international orders
