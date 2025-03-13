@@ -4,7 +4,7 @@ import uuid
 import xml.etree.ElementTree as ET  # Import XML parser
 from ecommerce_tool.settings import WALMART_API_KEY, WALMART_SECRET_KEY
 from ecommerce_tool.crud import DatabaseModel
-from omnisight.models import access_token
+from omnisight.models import access_token, Marketplace
 from datetime import datetime, timedelta
 from bson import ObjectId
 
@@ -60,7 +60,8 @@ def oauthFunction():
 
 
 def getAccesstoken(user_id):
-    exist_access_token_obj = DatabaseModel.get_document(access_token.objects,{"user_id" : user_id})
+    marketplace_id = DatabaseModel.get_document(Marketplace.objects,{"name" : "Walmart"},['id']).id
+    exist_access_token_obj = DatabaseModel.get_document(access_token.objects,{"user_id" : user_id,"marketplace_id" : marketplace_id},['access_token_str','updation_time'])
     if exist_access_token_obj != None:
         # Get the current time
         current_time = datetime.now()
@@ -77,5 +78,5 @@ def getAccesstoken(user_id):
                 DatabaseModel.update_documents(access_token.objects,{"id" : exist_access_token_obj.id},{"access_token_str" : access_token_str,"updation_time" : datetime.now()})
     else:
         access_token_str = oauthFunction()
-        DatabaseModel.save_documents(access_token,{"user_id" : ObjectId(user_id),"access_token_str" : access_token_str})
+        DatabaseModel.save_documents(access_token,{"user_id" : ObjectId(user_id),"access_token_str" : access_token_str,"marketplace_id" : marketplace_id})
     return access_token_str

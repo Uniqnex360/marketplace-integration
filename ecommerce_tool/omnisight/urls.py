@@ -16,8 +16,8 @@ Including another URLconf
 """
 from django.urls import path
 from omnisight.operations.common_operations import checkEmailExistOrNot, signupUser,loginUser, forgotPassword, changePassword
-from omnisight.operations.walmart_operations import fetchAllProducts,fetchProductDetails, fetchAllorders, fetchOrderDetails, fetchBrand
-from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList
+from omnisight.operations.walmart_operations import fetchAllProducts, fetchBrand,fetchOrderDetails
+from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins
 
@@ -30,9 +30,6 @@ urlpatterns = [
     path('forgotPassword/',forgotPassword,name="forgotPassword"),
     path('changePassword/',changePassword,name="changePassword"),
     path('fetchAllProducts/',fetchAllProducts,name="fetchAllProducts"),
-    path('fetchProductDetails/',fetchProductDetails,name='fetchProductDetails'),
-    path('fetchAllorders/',fetchAllorders,name='fetchAllorders'),
-    path('fetchOrderDetails/',fetchOrderDetails,name='fetchOrderDetails'),
 
     path('fetchBrand/',fetchBrand,name='fetch Brand'),
 
@@ -42,6 +39,9 @@ urlpatterns = [
     path('getProductList/',getProductList,name="getProductList"),
     path('getProductCategoryList/',getProductCategoryList,name="getProductCategoryList"),
     path('getBrandList/',getBrandList,name="getBrandList"),
+    path('fetchProductDetails/',fetchProductDetails,name="fetchProductDetails"),
+    path('fetchAllorders/',fetchAllorders,name="fetchAllorders"),
+    path('fetchOrderDetails/',fetchOrderDetails,name='fetchOrderDetails'),
 
 
     #AMAZON URLS
