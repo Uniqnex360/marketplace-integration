@@ -31,13 +31,14 @@ def getMarketplaceList(request):
 def getProductList(request):
     data = dict()
     json_request = JSONParser().parse(request)
-    print(json_request)
     marketplace_id = json_request.get('marketplace_id')
     skip = int(json_request.get('skip'))
     limit = int(json_request.get('limit'))
     marketplace = json_request.get('marketplace')
     category_name = json_request.get('category_name')
     brand_id_list = json_request.get('brand_id_list')
+    sort_by = json_request.get('sort_by')
+    sort_by_value = json_request.get('sort_by_value')
     pipeline = []
     count_pipeline = []
     match = {}
@@ -86,9 +87,16 @@ def getProductList(request):
             "$skip" : skip
         },
         {
-            "$limit" : limit
+            "$limit" : 1500#limit
         }
     ])
+    if sort_by != None and sort_by != "":
+        sort = {
+            "$sort" : {
+                sort_by : int(sort_by_value)
+            }
+        }
+        pipeline.append(sort)
     product_list = list(Product.objects.aggregate(*(pipeline)))
     # Get total product count
     count_pipeline.extend([
@@ -235,10 +243,11 @@ def fetchProductDetails(request):
 def getOrdersBasedOnProduct(request):
     data = dict()
     product_id = request.GET.get('product_id')
+
     pipeline = [
         {
-            "$match" : {
-                "_id" : ObjectId(product_id)
+            "$match": {
+                "_id": ObjectId(product_id)  # Ensure product_id is a valid ObjectId
             }
         },
         {
@@ -252,21 +261,63 @@ def getOrdersBasedOnProduct(request):
         {
             "$unwind": {
                 "path": "$marketplace_ins",
-                "preserveNullAndEmptyArrays": True
             }
         },
         {
             "$lookup": {
                 "from": "order",
-                "localField": "marketplace_id",
-                "foreignField": "marketplace_id",
+                "let": {
+                    "marketplace_id": "$marketplace_id",
+                    "product_title": "$product_title",
+                    "marketplace_name": "$marketplace_ins.name"
+                },
+                "pipeline": [
+                    {
+                        "$match": {
+                            "$expr": {
+                                "$eq": ["$marketplace_id", "$$marketplace_id"]
+                            }
+                        }
+                    },
+                    {
+                        "$addFields": {
+                            "filtered_order": {
+                                "$filter": {
+                                    "input": "$order_details",
+                                    "as": "item",
+                                    "cond": {
+                                        "$or": [
+                                            {
+                                                "$and": [
+                                                    {"$eq": ["$$marketplace_name", "Amazon"]},
+                                                    {"$eq": ["$$item.Title", "$$product_title"]}
+                                                ]
+                                            },
+                                            {
+                                                "$and": [
+                                                    {"$ne": ["$$marketplace_name", "Amazon"]},
+                                                    {"$eq": ["$$item.item.productName", "$$product_title"]}
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    {
+                        "$match": {
+                            "filtered_order": {"$ne": []}  # Ensure at least one matching order exists
+                        }
+                    }
+                ],
                 "as": "order_ins"
             }
         },
         {
             "$unwind": {
                 "path": "$order_ins",
-                "preserveNullAndEmptyArrays": True
+                "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
             }
         },
         {
@@ -284,39 +335,27 @@ def getOrdersBasedOnProduct(request):
                 "order_total": "$order_ins.order_total",
                 "currency": "$order_ins.currency",
                 "marketplace_name": "$marketplace_ins.name",
-                "product_name": {
-                    "$cond": {
-                        "if": {"$eq": ["$marketplace_ins.name", "Amazon"]},
-                        "then": {
-                            "$arrayElemAt": [
-                                {
-                                    "$filter": {
-                                        "input": "$order_ins.order_details",
-                                        "as": "item",
-                                        "cond": {"$eq": ["$$item.Title", "$product_title"]}
-                                    }
-                                },
-                                0
-                            ]
-                        },
-                        "else": {
-                            "$arrayElemAt": [
-                                {
-                                    "$filter": {
-                                        "input": "$order_ins.order_details",
-                                        "as": "item",
-                                        "cond": {"$eq": ["$$item.item.productName", "$product_title"]}
-                                    }
-                                },
-                                0
-                            ]
-                        }
-                    }
-                }
+                "filtered_order": {"$arrayElemAt": ["$order_ins.filtered_order", 0]}  # Get first matching order item
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "id": 1,
+                "purchase_order_id": 1,
+                "order_date": 1,
+                "order_status": 1,
+                "order_total": 1,
+                "currency": 1,
+                "marketplace_name": 1
             }
         }
     ]
-    orders = list(Product.objects.aggregate(*(pipeline)))
+
+    orders = list(Product.objects.aggregate(*pipeline))
+    if len(orders) == 1 and orders[0]['id'] == None:
+        orders =[]
+
     data['orders'] = orders
     return data
 
@@ -326,12 +365,26 @@ def getOrdersBasedOnProduct(request):
 def fetchAllorders(request):
     data = dict()
     orders = []
+    pipeline = []
     count_pipeline = []
+
     json_request = JSONParser().parse(request)
     user_id = json_request.get('user_id')
     limit = int(json_request.get('limit', 100))  # Default limit = 100 if not provided
     skip = int(json_request.get('skip', 0))  # Default skip = 0 if not provided
-    pipeline = [
+    market_place_id = json_request.get('marketplace_id')
+    sort_by = json_request.get('sort_by')
+    sort_by_value = json_request.get('sort_by_value')
+
+    if market_place_id != None and market_place_id != "" and market_place_id != "all":
+        match = {
+            "$match": {
+                "marketplace_id": ObjectId(market_place_id)
+            }
+        }
+        pipeline.append(match)
+        count_pipeline.append(match)
+    pipeline.extend([
 
         {
             "$lookup": {
@@ -368,7 +421,14 @@ def fetchAllorders(request):
         {
             "$limit": limit
         }
-    ]
+    ])
+    if sort_by != None and sort_by != "":
+        sort = {
+            "$sort" : {
+                sort_by : int(sort_by_value)
+            }
+        }
+        pipeline.append(sort)
     orders = list(Order.objects.aggregate(*(pipeline)))
     count_pipeline.extend([
         {
@@ -377,6 +437,17 @@ def fetchAllorders(request):
     ])
     total_count_result = list(Order.objects.aggregate(*(count_pipeline)))
     total_count = total_count_result[0]['total_count'] if total_count_result else 0
+    pipeline = [
+        {
+            "$project" : {
+                "_id" : 0,
+                "id" : {"$toString" : "$_id"},
+                "name" : 1,
+                "image_url" : 1,
+            }
+        }
+    ]
+    data['marketplace_list'] = list(Marketplace.objects.aggregate(*(pipeline)))
     data['orders'] = orders
     data['total_count'] = total_count
     return data
