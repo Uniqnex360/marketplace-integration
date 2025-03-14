@@ -16,8 +16,8 @@ Including another URLconf
 """
 from django.urls import path
 from omnisight.operations.common_operations import checkEmailExistOrNot, signupUser,loginUser, forgotPassword, changePassword
-from omnisight.operations.walmart_operations import fetchAllProducts, fetchBrand,fetchOrderDetails
-from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders
+from omnisight.operations.walmart_operations import fetchAllProducts, fetchBrand
+from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins
 
@@ -42,6 +42,9 @@ urlpatterns = [
     path('fetchProductDetails/',fetchProductDetails,name="fetchProductDetails"),
     path('fetchAllorders/',fetchAllorders,name="fetchAllorders"),
     path('fetchOrderDetails/',fetchOrderDetails,name='fetchOrderDetails'),
+    path('ordersCountForDashboard/',ordersCountForDashboard,name='ordersCountForDashboard'),
+    path('totalSalesAmount/',totalSalesAmount,name='totalSalesAmount'),
+    path('getOrdersBasedOnProduct/',getOrdersBasedOnProduct,name='getOrdersBasedOnProduct'),
 
 
     #AMAZON URLS

@@ -377,6 +377,34 @@ file_path1 = "/home/lexicon/walmart/WALMARTORDER@orders.xlsx"
 
 
 
+def saveBrand(marketplace_id,name):
+    pipeline = [
+    {"$match": {"name": name,
+                "marketplace_id" : marketplace_id}},
+    {
+        "$project": {
+            "_id": 1
+        }
+        },
+        {
+            "$limit" : 1
+        }
+    
+    ]
+    brand_obj = list(Brand.objects.aggregate(*pipeline))
+    if brand_obj != []:
+        brand_id = brand_obj[0]['_id']
+    if brand_obj == []:
+        brand_obj = DatabaseModel.save_documents(
+            Brand, {
+                "name": name,
+                "marketplace_id" : marketplace_id,
+            }
+        )
+        brand_id = brand_obj.id
+    return brand_id
+
+
 def update_product_images_from_csv(file_path):
     df = pd.read_csv(file_path)
     marketplace_id = ObjectId('67c9460fa5194f500892c0d2')
@@ -384,12 +412,21 @@ def update_product_images_from_csv(file_path):
     for index, row in df.iterrows():
         print(f"Processing row {index + 1}...")
         sku = str(row['SKU']) if pd.notnull(row['SKU']) else ""
-        image_url = row['Primary Image URL'] if pd.notnull(row['Primary Image URL']) else ""
+        quantity = row['Input Quantity'] if pd.notnull(row['Input Quantity']) else ""
+        # try:
+        #     brand_name = brand_name = row['Brand'] if pd.notnull(row['Brand']) else ""
+        #     brand_id = saveBrand(marketplace_id,brand_name)
+        # except:
+        #     brand_name = ""
+        #     brand_id = None
 
-        if sku and image_url:
+        if sku and quantity:
             product = DatabaseModel.get_document(Product.objects, {"sku": sku, "marketplace_id": marketplace_id})
             if product:
-                product.image_url = image_url
+                # product.image_url = image_url
+                # product.brand_id = brand_id
+                # product.brand_name = brand_name
+                product.quantity = quantity
                 product.save()
                 print(f"✅ Updated image for SKU: {sku}")
             else:
@@ -398,5 +435,5 @@ def update_product_images_from_csv(file_path):
             print(f"❌ Invalid data in row {index + 1}")
 
 # # Example usage
-# file_path = "/home/lexicon/walmart/ItemReport_10001414684_2025-03-13T104436.754000.csv"
+# file_path = "/home/lexicon/walmart/InventoryReport_10001414684_2025-03-13T032956.541000.csv"
 # update_product_images_from_csv(file_path)

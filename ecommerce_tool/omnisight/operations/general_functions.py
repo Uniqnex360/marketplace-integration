@@ -183,6 +183,17 @@ def fetchProductDetails(request):
             }
         },
         {
+            "$lookup": {
+                "from": "marketplace",
+                "localField": "marketplace_id",
+                "foreignField": "_id",
+                "as": "marketplace_ins"
+            }
+        },
+        {
+            "$unwind": "$marketplace_ins"
+        },
+        {
             "$project" : {
                 "_id" : 0,
                 "id" : {"$toString" : "$_id"},
@@ -194,6 +205,9 @@ def fetchProductDetails(request):
                 "price" : {"$ifNull" : ["$price", 0]},
                 "currency" : {"$ifNull" : ["$currency", ""]},
                 "quantity" : {"$ifNull" : ["$quantity", 0]},
+                "published_status" : 1,
+                "marketplace_ins" : "$marketplace_ins.name",
+                "marketplace_image_url" : "$marketplace_ins.image_url",
                 "item_condition" : {"$ifNull" : ["$item_condition", ""]},
                 "item_note" : {"$ifNull" : ["$item_note", ""]},
                 "listing_id" : {"$ifNull" : ["$listing_id", ""]},
@@ -215,6 +229,95 @@ def fetchProductDetails(request):
     product_details = list(Product.objects.aggregate(*(pipeline)))
     if len(product_details):
         data = product_details[0]
+    return data
+
+
+def getOrdersBasedOnProduct(request):
+    data = dict()
+    product_id = request.GET.get('product_id')
+    pipeline = [
+        {
+            "$match" : {
+                "_id" : ObjectId(product_id)
+            }
+        },
+        {
+            "$lookup": {
+                "from": "marketplace",
+                "localField": "marketplace_id",
+                "foreignField": "_id",
+                "as": "marketplace_ins"
+            }
+        },
+        {
+            "$unwind": {
+                "path": "$marketplace_ins",
+                "preserveNullAndEmptyArrays": True
+            }
+        },
+        {
+            "$lookup": {
+                "from": "order",
+                "localField": "marketplace_id",
+                "foreignField": "marketplace_id",
+                "as": "order_ins"
+            }
+        },
+        {
+            "$unwind": {
+                "path": "$order_ins",
+                "preserveNullAndEmptyArrays": True
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$order_ins._id"},
+                "purchase_order_id": "$order_ins.purchase_order_id",
+                "order_date": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%dT%H:%M:%S.%LZ",
+                        "date": "$order_ins.order_date",
+                    }
+                },
+                "order_status": "$order_ins.order_status",
+                "order_total": "$order_ins.order_total",
+                "currency": "$order_ins.currency",
+                "marketplace_name": "$marketplace_ins.name",
+                "product_name": {
+                    "$cond": {
+                        "if": {"$eq": ["$marketplace_ins.name", "Amazon"]},
+                        "then": {
+                            "$arrayElemAt": [
+                                {
+                                    "$filter": {
+                                        "input": "$order_ins.order_details",
+                                        "as": "item",
+                                        "cond": {"$eq": ["$$item.Title", "$product_title"]}
+                                    }
+                                },
+                                0
+                            ]
+                        },
+                        "else": {
+                            "$arrayElemAt": [
+                                {
+                                    "$filter": {
+                                        "input": "$order_ins.order_details",
+                                        "as": "item",
+                                        "cond": {"$eq": ["$$item.item.productName", "$product_title"]}
+                                    }
+                                },
+                                0
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    ]
+    orders = list(Product.objects.aggregate(*(pipeline)))
+    data['orders'] = orders
     return data
 
 
@@ -364,3 +467,52 @@ def fetchOrderDetails(request):
     if len(order_details):
         data = order_details[0]
     return data
+
+
+def ordersCountForDashboard(request):
+    data = dict()
+    marketplace_id = request.GET.get('marketplace_id')
+    pipeline = []
+    if marketplace_id != None and marketplace_id != "":
+        match = {
+            "$match" : {
+                "marketplace_id" : ObjectId(marketplace_id)
+            }
+        }
+        pipeline.append(match)
+    pipeline.extend([
+        {
+            "$group": {
+                "_id": None,
+                "count": {"$sum": 1}
+            }
+        }
+    ])
+    order_status_count = list(Order.objects.aggregate(*(pipeline)))
+    data['total_order_count'] = order_status_count
+    return data
+
+
+def totalSalesAmount(request):
+    data = dict()
+    marketplace_id = request.GET.get('marketplace_id')
+    pipeline = []
+    if marketplace_id != None and marketplace_id != "":
+        match = {
+            "$match" : {
+                "marketplace_id" : ObjectId(marketplace_id)
+            }
+        }
+        pipeline.append(match)
+    pipeline.extend([
+        {
+            "$group": {
+                "_id": None,
+                "total_sales": {"$sum": "$order_total"}
+            }
+        }
+    ])
+    total_sales = list(Order.objects.aggregate(*(pipeline)))
+    data['total_sales'] = total_sales[0]['total_sales'] if total_sales else 0
+    return data
+
