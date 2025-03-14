@@ -528,7 +528,7 @@ def fetchOrderDetails(request):
                 "marketplace_name": "$marketplace_ins.name",
                 "payment_method": "$payment_method",
                 "payment_method_details": "$payment_method_details",
-                "order_total": "$order_total",
+                "order_total": {"$round":["$order_total",2]},
                 "currency": "$currency",
                 "is_global_express_enabled": "$is_global_express_enabled",
             }
