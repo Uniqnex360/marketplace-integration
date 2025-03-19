@@ -437,3 +437,88 @@ def update_product_images_from_csv(file_path):
 # # Example usage
 # file_path = "/home/lexicon/walmart/InventoryReport_10001414684_2025-03-13T032956.541000.csv"
 # update_product_images_from_csv(file_path)
+
+
+from datetime import datetime
+
+def process_walmart_order(json_data):
+    """Processes a single Walmart order item and saves it to the OrderItems collection."""
+    try:
+        product = DatabaseModel.get_document(Product.objects, {"product_title": json_data.get("item", {}).get("productName", "")}, ["id"])
+        product_id = product.id if product else None
+    except:
+        product_id = None
+
+    # Helper function to safely extract money values
+    def get_money(field_path, default_currency="USD"):
+        field = json_data
+        for key in field_path:
+            if isinstance(field, list):  # If the field is a list, get the first element
+                field = field[0] if field else {}
+            field = field.get(key, {}) if isinstance(field, dict) else {}
+        return {
+            "CurrencyCode": field.get("currency", default_currency),
+            "Amount": float(field.get("amount", 0.0))
+        }
+
+    # Extract necessary fields safely
+    order_line_statuses = json_data.get("orderLineStatuses", {}).get("orderLineStatus", [])
+    order_line_status = order_line_statuses[0] if order_line_statuses else {}
+
+    tracking_info = order_line_status.get("trackingInfo", {})
+
+    order_item = OrderItems(
+        OrderId=json_data.get("lineNumber", ""),
+        Platform="Walmart",
+        ProductDetails=ProductDetails(
+            product_id= product_id,
+            Title=json_data.get("item", {}).get("productName", "Unknown Product"),
+            SKU=json_data.get("item", {}).get("sku", "Unknown SKU"),
+            Condition=json_data.get("item", {}).get("condition", "Unknown Condition"),
+            QuantityOrdered=int(json_data.get("orderLineQuantity", {}).get("amount", 0)),
+            QuantityShipped=int(order_line_status.get("statusQuantity", {}).get("amount", 0)),
+        ),
+        Pricing=Pricing(
+            ItemPrice=Money(**get_money(["charges", "charge", 0, "chargeAmount"])),
+            ItemTax=Money(**get_money(["charges", "charge", 0, "tax", "taxAmount"]))
+        ),
+        Fulfillment=Fulfillment(
+            FulfillmentOption=json_data.get("fulfillment", {}).get("fulfillmentOption", "Unknown"),
+            ShipMethod=json_data.get("fulfillment", {}).get("shipMethod", "Unknown"),
+            Carrier=tracking_info.get("carrierName", {}).get("carrier", "Unknown"),
+            TrackingNumber=tracking_info.get("trackingNumber", "Unknown"),
+            TrackingURL=tracking_info.get("trackingURL", "Unknown"),
+            ShipDateTime=datetime.fromtimestamp(tracking_info.get("shipDateTime", 0) / 1000) if tracking_info.get("shipDateTime") else None
+        ),
+        OrderStatus=OrderStatus(
+            Status=order_line_status.get("status", "Unknown"),
+            StatusDate=datetime.fromtimestamp(json_data.get("statusDate", 0) / 1000) if json_data.get("statusDate") else None
+        ),
+        TaxCollection=TaxCollection(
+            Model="MarketplaceFacilitator",
+            ResponsibleParty="Walmart"
+        ),
+        IsGift=False,
+        BuyerInfo=None
+    )
+
+    order_item.save()  # Save to MongoDB
+
+    return order_item  # Return reference to saved OrderItems document
+
+
+
+def updateOrdersItemsDetails(request):
+    """Updates order items details for Walmart orders in the database."""
+    marketplace_id = DatabaseModel.get_document(Marketplace.objects, {"name": "Walmart"}).id
+    order_list = DatabaseModel.list_documents(Order.objects, {"marketplace_id": marketplace_id}, ["id", "order_details"])
+
+    for ins in order_list:
+        order_items = []
+        for item in ins.order_details:
+            order_item = process_walmart_order(item)
+            order_items.append(order_item)
+
+        DatabaseModel.update_documents(Order.objects, {"id": ins.id}, {"order_items": order_items})
+
+    return True

@@ -16,10 +16,10 @@ Including another URLconf
 """
 from django.urls import path
 from omnisight.operations.common_operations import checkEmailExistOrNot, signupUser,loginUser, forgotPassword, changePassword
-from omnisight.operations.walmart_operations import fetchAllProducts, fetchBrand
-from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct
+from omnisight.operations.walmart_operations import fetchAllProducts, fetchBrand,updateOrdersItemsDetails
+from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation
 
-from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins
+from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon
 
 urlpatterns = [
     
@@ -46,10 +46,18 @@ urlpatterns = [
     path('totalSalesAmount/',totalSalesAmount,name='totalSalesAmount'),
     path('getOrdersBasedOnProduct/',getOrdersBasedOnProduct,name='getOrdersBasedOnProduct'),
 
+    #Custom Order
+    path("getProductListForOrdercreation/",getProductListForOrdercreation,name="getProductListForOrdercreation"),
+
+    path("createManualOrder/",createManualOrder,name="createManualOrder"),
+
 
     #AMAZON URLS
-    path('updateAmazonProductsBasedonAsins/',updateAmazonProductsBasedonAsins,name="updateAmazonProductsBasedonAsins")
-    
+    path('updateAmazonProductsBasedonAsins/',updateAmazonProductsBasedonAsins,name="updateAmazonProductsBasedonAsins"),
+    path('updateOrdersItemsDetailsAmazon/',updateOrdersItemsDetailsAmazon,name="updateOrdersItemsDetailsAmazon"),
+
+    #Walmart
+    path('updateOrdersItemsDetails/',updateOrdersItemsDetails,name='updateOrdersItemsDetails')
 
 
 ]

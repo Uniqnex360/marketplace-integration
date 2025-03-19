@@ -158,6 +158,58 @@ class access_token(Document):
     marketplace_id = ReferenceField(Marketplace)
 
 
+class Money(EmbeddedDocument):
+    CurrencyCode = StringField(required=True)
+    Amount = FloatField(required=True)
+
+class Pricing(EmbeddedDocument):
+    ItemPrice = EmbeddedDocumentField(Money, required=True)
+    ItemTax = EmbeddedDocumentField(Money, default=None)
+    PromotionDiscount = EmbeddedDocumentField(Money, default=None)
+
+class ProductDetails(EmbeddedDocument):
+    product_id = ReferenceField(Product)
+    Title = StringField(required=True)
+    SKU = StringField(required=True)
+    ASIN = StringField(default=None)
+    Condition = StringField(default=None)
+    QuantityOrdered = IntField(required=True)
+    QuantityShipped = IntField(required=True)
+
+class Fulfillment(EmbeddedDocument):
+    FulfillmentOption = StringField(default=None)
+    ShipMethod = StringField(default=None)
+    Carrier = StringField(default=None)
+    TrackingNumber = StringField(default=None)
+    TrackingURL = StringField(default=None)
+    ShipDateTime = DateTimeField(default=None)
+
+class OrderStatus(EmbeddedDocument):
+    STATUS_CHOICES = ("Pending", "Shipped", "Delivered", "Canceled", "Returned")
+    Status = StringField(required=True)
+    StatusDate = DateTimeField(required=True)
+
+class TaxCollection(EmbeddedDocument):
+    Model = StringField(required=True)
+    ResponsibleParty = StringField(required=True)
+
+class BuyerInfo(EmbeddedDocument):
+    Name = StringField(default=None)
+    Email = StringField(default=None)
+    Address = DictField(default=None)
+
+class OrderItems(Document):
+    OrderId = StringField(required=True)
+    Platform = StringField(required=True)
+    ProductDetails = EmbeddedDocumentField(ProductDetails, required=True)
+    Pricing = EmbeddedDocumentField(Pricing, required=True)
+    Fulfillment = EmbeddedDocumentField(Fulfillment, default=None)
+    OrderStatus = EmbeddedDocumentField(OrderStatus, default=None)
+    TaxCollection = EmbeddedDocumentField(TaxCollection, required=True)
+    IsGift = BooleanField(required=True)
+    BuyerInfo = EmbeddedDocumentField(BuyerInfo, default=None)
+
+
 
 class Order(Document):
     # Tracking IDs
@@ -182,6 +234,7 @@ class Order(Document):
 
     # Order details and status
     order_details = ListField(DictField())  # List of order lines with details for each ordered item
+    order_items =  ListField(ReferenceField(OrderItems))  # List of order lines with details for each ordered item
     order_status = StringField()  # Tracking order lifecycle
     number_of_items_shipped = IntField()  # Number of items that have been shipped
     number_of_items_unshipped = IntField()  # Number of items pending shipment
@@ -207,3 +260,24 @@ class Order(Document):
     order_total = FloatField()  # Total order cost including products, shipping, and taxes
     currency = StringField()  # Currency used for the order
     is_global_express_enabled = BooleanField()  # True if fast shipping is available for international orders
+
+
+
+class customOrder(Document):
+    product_id = ReferenceField(Product)
+    product_title = StringField()
+    sku = StringField()
+    customer_name = StringField()
+    to_address = StringField()
+    quantity = IntField()
+    unit_price = FloatField()
+    total_price = FloatField()
+    taxes = FloatField(default=0.0)
+    phone_number = StringField()
+    purchase_order_date = DateTimeField(default=datetime.now())
+    expected_delivery_date = DateTimeField(default=datetime.now())
+    supplier_name = StringField()
+    mark_order_as_shipped = BooleanField(default=False)
+    mark_order_as_paid = BooleanField(default=False)
+    tags = ListField(StringField())
+    notes = StringField()

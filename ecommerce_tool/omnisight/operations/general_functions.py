@@ -9,6 +9,7 @@ from bson import ObjectId
 import json
 from rest_framework.parsers import JSONParser
 from django.views.decorators.csrf import csrf_exempt
+from datetime import datetime, timedelta
 
 
 
@@ -453,10 +454,12 @@ def fetchAllorders(request):
     return data
 
 
+
 def fetchOrderDetails(request):
-    data = dict()
+    data = {}
     user_id = request.GET.get('user_id')
     order_id = request.GET.get('order_id')
+
     pipeline = [
         {
             "$match": {
@@ -478,66 +481,111 @@ def fetchOrderDetails(request):
             "$project": {
                 "_id": 0,
                 "id": {"$toString": "$_id"},
-                "purchase_order_id": "$purchase_order_id",
-                "customer_order_id": "$customer_order_id",
-                "seller_order_id": "$seller_order_id",
-                "customer_email_id": "$customer_email_id",
+                "purchase_order_id": {"$ifNull": ["$purchase_order_id", ""]},
+                "customer_order_id": {"$ifNull": ["$customer_order_id", ""]},
+                "seller_order_id": {"$ifNull": ["$seller_order_id", ""]},
+                "customer_email_id": {"$ifNull": ["$customer_email_id", ""]},
                 "order_date": {
                     "$dateToString": {
                         "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                        "date": "$order_date",
+                        "date": {"$ifNull": ["$order_date", None]},
                     }
                 },
                 "earliest_ship_date": {
                     "$dateToString": {
                         "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                        "date": "$earliest_ship_date",
+                        "date": {"$ifNull": ["$earliest_ship_date", None]},
                     }
                 },
                 "latest_ship_date": {
                     "$dateToString": {
                         "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                        "date": "$latest_ship_date",
+                        "date": {"$ifNull": ["$latest_ship_date", None]},
                     }
                 },
                 "last_update_date": {
                     "$dateToString": {
                         "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                        "date": "$last_update_date",
+                        "date": {"$ifNull": ["$last_update_date", None]},
                     }
                 },
-                "shipping_information": "$shipping_information",
-                "ship_service_level": "$ship_service_level",
-                "shipment_service_level_category": "$shipment_service_level_category",
-                "automated_shipping_settings": "$automated_shipping_settings",
-                "order_details": "$order_details",
-                "order_status": "$order_status",
-                "number_of_items_shipped": "$number_of_items_shipped",
-                "number_of_items_unshipped": "$number_of_items_unshipped",
-                "fulfillment_channel": "$fulfillment_channel",
-                "sales_channel": "$sales_channel",
-                "order_type": "$order_type",
-                "is_premium_order": "$is_premium_order",
-                "is_prime": "$is_prime",
-                "has_regulated_items": "$has_regulated_items",
-                "is_replacement_order": "$is_replacement_order",
-                "is_sold_by_ab": "$is_sold_by_ab",
-                "is_ispu": "$is_ispu",
-                "is_access_point_order": "$is_access_point_order",
-                "is_business_order": "$is_business_order",
-                "marketplace_name": "$marketplace_ins.name",
-                "payment_method": "$payment_method",
-                "payment_method_details": "$payment_method_details",
-                "order_total": {"$round":["$order_total",2]},
-                "currency": "$currency",
-                "is_global_express_enabled": "$is_global_express_enabled",
+                "shipping_information": {"$ifNull": ["$shipping_information", {}]},
+                "ship_service_level": {"$ifNull": ["$ship_service_level", ""]},
+                "shipment_service_level_category": {"$ifNull": ["$shipment_service_level_category", ""]},
+                "automated_shipping_settings": {"$ifNull": ["$automated_shipping_settings", {}]},
+                "order_status": {"$ifNull": ["$order_status", ""]},
+                "number_of_items_shipped": {"$ifNull": ["$number_of_items_shipped", 0]},
+                "number_of_items_unshipped": {"$ifNull": ["$number_of_items_unshipped", 0]},
+                "fulfillment_channel": {"$ifNull": ["$fulfillment_channel", ""]},
+                "sales_channel": {"$ifNull": ["$sales_channel", ""]},
+                "order_type": {"$ifNull": ["$order_type", ""]},
+                "is_premium_order": {"$ifNull": ["$is_premium_order", False]},
+                "is_prime": {"$ifNull": ["$is_prime", False]},
+                "has_regulated_items": {"$ifNull": ["$has_regulated_items", False]},
+                "is_replacement_order": {"$ifNull": ["$is_replacement_order", False]},
+                "is_sold_by_ab": {"$ifNull": ["$is_sold_by_ab", False]},
+                "is_ispu": {"$ifNull": ["$is_ispu", False]},
+                "is_access_point_order": {"$ifNull": ["$is_access_point_order", False]},
+                "is_business_order": {"$ifNull": ["$is_business_order", False]},
+                "marketplace_name": {"$ifNull": ["$marketplace_ins.name", ""]},
+                "payment_method": {"$ifNull": ["$payment_method", ""]},
+                "payment_method_details": {"$ifNull": ["$payment_method_details", []]},
+                "order_total": {"$ifNull": [{"$round": ["$order_total", 2]}, 0]},
+                "currency": {"$ifNull": ["$currency", ""]},
+                "is_global_express_enabled": {"$ifNull": ["$is_global_express_enabled", False]},
+                "order_items": {"$ifNull": ["$order_items", []]}
             }
         }
     ]
-    order_details = list(Order.objects.aggregate(*(pipeline)))
-    if len(order_details):
+
+    order_details = list(Order.objects.aggregate(*pipeline))
+
+    if order_details:
+        
         data = order_details[0]
+        # Fetch OrderItems details using the IDs
+        order_items_ids = data.get("order_items", [])
+        if order_items_ids:
+            order_items = DatabaseModel.list_documents(OrderItems.objects,{"id__in" : order_items_ids})
+            
+            serialized_items = []
+            for item in order_items:
+                serialized_item = {
+                    "id": str(item.id),
+                    "OrderId": item.OrderId,
+                    "Platform": item.Platform,
+                    "ProductDetails": {
+                        "product_id": str(item.ProductDetails.product_id.id) if item.ProductDetails and item.ProductDetails.product_id else None,
+                        "Title": item.ProductDetails.Title if item.ProductDetails else None,
+                        "SKU": item.ProductDetails.SKU if item.ProductDetails else None,
+                        "Condition": item.ProductDetails.Condition if item.ProductDetails else None,
+                        "QuantityOrdered": item.ProductDetails.QuantityOrdered if item.ProductDetails else 0,
+                        "QuantityShipped": item.ProductDetails.QuantityShipped if item.ProductDetails else 0
+                    },
+                    "Pricing": item.Pricing.to_mongo() if hasattr(item.Pricing, "to_mongo") else (dict(item.Pricing) if item.Pricing else {}),
+                    "Fulfillment": {
+                        "FulfillmentOption": item.Fulfillment.FulfillmentOption if item.Fulfillment else None,
+                        "ShipMethod": item.Fulfillment.ShipMethod if item.Fulfillment else None,
+                        "Carrier": item.Fulfillment.Carrier if item.Fulfillment else None,
+                        "TrackingNumber": item.Fulfillment.TrackingNumber if item.Fulfillment else None,
+                        "TrackingURL": item.Fulfillment.TrackingURL if item.Fulfillment else None,
+                        "ShipDateTime": item.Fulfillment.ShipDateTime.isoformat() if item.Fulfillment and item.Fulfillment.ShipDateTime else None
+                    },
+                    "OrderStatus": {
+                        "Status": item.OrderStatus.Status if item.OrderStatus else None,
+                        "StatusDate": item.OrderStatus.StatusDate.isoformat() if item.OrderStatus and item.OrderStatus.StatusDate else None
+                    },
+                    "TaxCollection": item.TaxCollection.to_mongo() if hasattr(item.TaxCollection, "to_mongo") else (dict(item.TaxCollection) if item.TaxCollection else {}),
+                    "IsGift": item.IsGift
+                }
+                serialized_items.append(serialized_item)
+            
+            data["order_items"] = serialized_items
+        else:
+            data["order_items"] = []
+
     return data
+
 
 
 def ordersCountForDashboard(request):
@@ -587,3 +635,384 @@ def totalSalesAmount(request):
     data['total_sales'] = total_sales[0]['total_sales'] if total_sales else 0
     return data
 
+
+@csrf_exempt
+def salesAnalytics(request):
+    data = dict()
+    try:
+        json_request = JSONParser().parse(request)
+        date_range = json_request.get('date_range', '7days')  # Default to 7 days
+        start_date = json_request.get('start_date')  # Optional custom start date
+        end_date = json_request.get('end_date')  # Optional custom end date
+
+        # Determine the date range
+        if date_range == '1day':
+            start_date = datetime.now() - timedelta(days=1)
+        elif date_range == '7days':
+            start_date = datetime.now() - timedelta(days=7)
+        elif date_range == '1month':
+            start_date = datetime.now() - timedelta(days=30)
+        elif start_date and end_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        else:
+            start_date = datetime.now() - timedelta(days=7)
+
+        end_date = end_date or datetime.now()
+
+        # Sales count and values per day
+        pipeline = [
+            {
+                "$match": {
+                    "order_date": {
+                        "$gte": start_date,
+                        "$lte": end_date
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "year": {"$year": "$order_date"},
+                        "month": {"$month": "$order_date"},
+                        "day": {"$dayOfMonth": "$order_date"}
+                    },
+                    "sales_count": {"$sum": 1},
+                    "sales_value": {"$sum": "$order_total"}
+                }
+            },
+            {
+                "$sort": {"_id": 1}
+            }
+        ]
+        sales_data = list(Order.objects.aggregate(*pipeline))
+
+        # Sales data by category
+        category_pipeline = [
+            {
+                "$match": {
+                    "order_date": {
+                        "$gte": start_date,
+                        "$lte": end_date
+                    }
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "product",
+                    "localField": "order_details.product_id",
+                    "foreignField": "_id",
+                    "as": "product_details"
+                }
+            },
+            {
+                "$unwind": "$product_details"
+            },
+            {
+                "$group": {
+                    "_id": "$product_details.category",
+                    "sales_count": {"$sum": 1},
+                    "sales_value": {"$sum": "$order_total"}
+                }
+            },
+            {
+                "$sort": {"sales_value": -1}
+            }
+        ]
+        category_data = list(Order.objects.aggregate(*category_pipeline))
+
+        # Sales data by channels
+        channel_pipeline = [
+            {
+                "$match": {
+                    "order_date": {
+                        "$gte": start_date,
+                        "$lte": end_date
+                    }
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "marketplace",
+                    "localField": "marketplace_id",
+                    "foreignField": "_id",
+                    "as": "marketplace_details"
+                }
+            },
+            {
+                "$unwind": "$marketplace_details"
+            },
+            {
+                "$group": {
+                    "_id": "$marketplace_details.name",
+                    "sales_count": {"$sum": 1},
+                    "sales_value": {"$sum": "$order_total"}
+                }
+            },
+            {
+                "$sort": {"sales_value": -1}
+            }
+        ]
+        channel_data = list(Order.objects.aggregate(*channel_pipeline))
+
+        data['sales_data'] = sales_data
+        data['category_data'] = category_data
+        data['channel_data'] = channel_data
+    except Exception as e:
+        data['error'] = str(e)
+    return data
+
+
+#----------------------ORDER CREATION-------------------------------------
+
+
+@csrf_exempt
+def getProductListForOrdercreation(request):
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id')
+    skip = int(json_request.get('skip',0))
+    limit = int(json_request.get('limit',50))
+    search_query = json_request.get('search_query')
+    pipeline = []
+    match = {}
+    if marketplace_id != None and marketplace_id != "":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+    if search_query != None and search_query != "":
+        match['product_title'] = {"$regex": search_query, "$options": "i"}
+    if match != {}:
+        match_pipeline = {
+            "$match" : match}
+        pipeline.append(match_pipeline)
+    pipeline.extend([
+        {
+            "$project" : {
+                "_id" : 0,
+                "id" : {"$toString" : "$_id"},
+                "product_title" : 1,
+                "sku" : 1,
+                "price" : 1,
+            }
+        },
+        {
+            "$skip" : skip
+        },
+        {
+            "$limit" : limit
+        }
+    ])
+    product_list = list(Product.objects.aggregate(*(pipeline)))
+    
+    return product_list
+
+
+@csrf_exempt
+def createManualOrder(request):
+    data = dict()
+    json_request = JSONParser().parse(request)
+    print("json_request",json_request)
+    product_id = json_request.get('product_id')
+    product_title = json_request.get('product_title')
+    sku = json_request.get('sku')
+    customer_name = json_request.get('customer_name')
+    to_address = json_request.get('to_address')
+    quantity = int(json_request.get('quantity', 1))
+    unit_price = DatabaseModel.get_document(Product.objects,{"id": product_id},['price']).price
+    taxes = float(json_request.get('taxes')) if json_request.get('taxes') != '' else 0.0
+    phone_number = json_request.get('phone_number')
+    # purchase_order_date = json_request.get('purchase_order_date')
+    expected_delivery_date = datetime.strptime(json_request.get('expected_delivery_date'), '%Y-%m-%d') if json_request.get('expected_delivery_date') else None
+    supplier_name = json_request.get('supplier_name')
+    tags = json_request.get('tags') if json_request.get('tags') != '' else []
+    notes = json_request.get('notes', '')
+
+    total_price = (unit_price * quantity) + taxes
+
+    manual_order = customOrder(
+        product_id=ObjectId(product_id),
+        product_title=product_title,
+        sku=sku,
+        customer_name=customer_name,
+        to_address=to_address,
+        quantity=quantity,
+        unit_price=unit_price,
+        total_price=total_price,
+        taxes=taxes,
+        phone_number=phone_number,
+        # purchase_order_date=purchase_order_date,
+        expected_delivery_date=expected_delivery_date,
+        supplier_name=supplier_name,
+        tags=tags,
+        notes=notes
+    )
+    manual_order.save()
+    data['message'] = "Manual order created successfully."
+    data['order_id'] = str(manual_order.id)
+    return data
+
+
+@csrf_exempt
+def listManualOrders(request):
+    data = dict()
+    pipeline = [
+        {
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "product_title": 1,
+                "sku": 1,
+                "customer_name": 1,
+                "to_address": 1,
+                "quantity": 1,
+                "unit_price": 1,
+                "total_price": 1,
+                "taxes": 1,
+                "phone_number": 1,
+                "purchase_order_date": 1,
+                "expected_delivery_date": 1,
+                "supplier_name": 1,
+                "mark_order_as_shipped": 1,
+                "mark_order_as_paid": 1,
+                "tags": 1,
+                "notes": 1
+            }
+        }
+    ]
+    manual_orders = list(customOrder.objects.aggregate(*pipeline))
+    data['manual_orders'] = manual_orders
+    return data
+
+
+@csrf_exempt
+def updateManualOrder(request):
+    data = dict()
+    try:
+        json_request = JSONParser().parse(request)
+        order_id = json_request.get('order_id')
+        manual_order = customOrder.objects.get(id=ObjectId(order_id))
+
+        manual_order.product_title = json_request.get('product_title', manual_order.product_title)
+        manual_order.sku = json_request.get('sku', manual_order.sku)
+        manual_order.customer_name = json_request.get('customer_name', manual_order.customer_name)
+        manual_order.to_address = json_request.get('to_address', manual_order.to_address)
+        manual_order.quantity = int(json_request.get('quantity', manual_order.quantity))
+        manual_order.unit_price = float(json_request.get('unit_price', manual_order.unit_price))
+        manual_order.taxes = float(json_request.get('taxes', manual_order.taxes))
+        manual_order.phone_number = json_request.get('phone_number', manual_order.phone_number)
+        manual_order.purchase_order_date = json_request.get('purchase_order_date', manual_order.purchase_order_date)
+        manual_order.expected_delivery_date = json_request.get('expected_delivery_date', manual_order.expected_delivery_date)
+        manual_order.supplier_name = json_request.get('supplier_name', manual_order.supplier_name)
+        manual_order.mark_order_as_shipped = json_request.get('mark_order_as_shipped', manual_order.mark_order_as_shipped)
+        manual_order.mark_order_as_paid = json_request.get('mark_order_as_paid', manual_order.mark_order_as_paid)
+        manual_order.tags = json_request.get('tags', manual_order.tags)
+        manual_order.notes = json_request.get('notes', manual_order.notes)
+
+        manual_order.total_price = (manual_order.unit_price * manual_order.quantity) + manual_order.taxes
+        manual_order.save()
+
+        data['message'] = "Manual order updated successfully."
+    except customOrder.DoesNotExist:
+        data['error'] = "Manual order not found."
+    except Exception as e:
+        data['error'] = str(e)
+    return data
+
+
+@csrf_exempt
+def fetchManualOrderDetails(request):
+    data = dict()
+    try:
+        order_id = request.GET.get('order_id')
+        manual_order = customOrder.objects.get(id=ObjectId(order_id))
+
+        data['order_details'] = {
+            "id": str(manual_order.id),
+            "product_title": manual_order.product_title,
+            "sku": manual_order.sku,
+            "customer_name": manual_order.customer_name,
+            "to_address": manual_order.to_address,
+            "quantity": manual_order.quantity,
+            "unit_price": manual_order.unit_price,
+            "total_price": manual_order.total_price,
+            "taxes": manual_order.taxes,
+            "phone_number": manual_order.phone_number,
+            "purchase_order_date": manual_order.purchase_order_date,
+            "expected_delivery_date": manual_order.expected_delivery_date,
+            "supplier_name": manual_order.supplier_name,
+            "mark_order_as_shipped": manual_order.mark_order_as_shipped,
+            "mark_order_as_paid": manual_order.mark_order_as_paid,
+            "tags": manual_order.tags,
+            "notes": manual_order.notes,
+        }
+    except customOrder.DoesNotExist:
+        data['error'] = "Manual order not found."
+    except Exception as e:
+        data['error'] = str(e)
+    return data
+
+
+#--------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+@csrf_exempt
+def mostSellingProducts(request):
+    data = dict()
+    try:
+        # Pipeline to get top 5 most selling products based on channels
+        pipeline = [
+            {
+                "$lookup": {
+                    "from": "order",
+                    "localField": "_id",
+                    "foreignField": "order_details.product_id",
+                    "as": "orders"
+                }
+            },
+            {
+                "$unwind": "$orders"
+            },
+            {
+                "$lookup": {
+                    "from": "marketplace",
+                    "localField": "orders.marketplace_id",
+                    "foreignField": "_id",
+                    "as": "marketplace_details"
+                }
+            },
+            {
+                "$unwind": "$marketplace_details"
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "product_id": "$_id",
+                        "product_title": "$product_title",
+                        "sku": "$sku",
+                        "marketplace_name": "$marketplace_details.name"
+                    },
+                    "total_quantity_sold": {"$sum": "$orders.order_details.quantity"}
+                }
+            },
+            {
+                "$sort": {"total_quantity_sold": -1}
+            },
+            {
+                "$limit": 5
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "product_id": {"$toString": "$_id.product_id"},
+                    "product_title": "$_id.product_title",
+                    "sku": "$_id.sku",
+                    "marketplace_name": "$_id.marketplace_name",
+                    "total_quantity_sold": 1
+                }
+            }
+        ]
+
+        top_products = list(Product.objects.aggregate(*pipeline))
+        data['top_products'] = top_products
+    except Exception as e:
+        data['error'] = str(e)
+    return data
