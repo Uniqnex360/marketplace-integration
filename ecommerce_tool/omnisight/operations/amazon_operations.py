@@ -61,8 +61,71 @@ def process_excel_for_amazon(file_path):
         )
         product.save()
 
-# file_path2 = "/home/lexicon/Documents/amazon_products.xlsx"
+file_path2 = "/home/lexicon/Documents/newww.xlsx"
 # process_excel_for_amazon(file_path2)
+
+
+
+def new_process_excel_for_amazon(file_path):
+    df = pd.read_excel(file_path)
+    marketplace_id = ObjectId('67ce8f51ab471ccbb9f5d9ff')
+
+    for index, row in df.iterrows():
+        print(f"Processing row {index}...{row['asin1']}")
+        # try:
+        #     price=float(row['price']) if pd.notnull(row['price']) else 0.0
+        # except:
+        #     price = 0.0
+
+        # try:
+        #     quantity=int(row['quantity']) if pd.notnull(row['quantity']) else 0
+        # except:
+        #     quantity = 0
+        # # Create the product
+        # try:
+        #     open_date = pd.to_datetime(row['open-date']) if pd.notnull(row['open-date']) else None
+        # except:
+        #     open_date = None
+        product_obj = DatabaseModel.get_document(Product.objects,{"asin" : row['asin1']}) 
+        if product_obj != None:
+            print(f"✅ Updated image for SKU: {row['asin1']}")
+
+            product_title = str(row['item-name']) if pd.notnull(row['item-name']) else ""
+            price = float(row['price']) if pd.notnull(row['price']) else 0.0
+            sku = str(row['seller-sku']) if pd.notnull(row['seller-sku']) else ""
+            product_id = str(row['product-id']) if pd.notnull(row['product-id']) else ""
+            DatabaseModel.update_documents(Product.objects,{"asin" : row['asin1']},{"product_title" : product_title,"price" : price,"sku":sku,"product_id" : product_id})
+        # else:
+        #     product = Product(
+        #         marketplace_id=marketplace_id,
+        #         sku=str(row['seller-sku']) if pd.notnull(row['seller-sku']) else "",
+        #         product_title=row['item-name'] if pd.notnull(row['item-name']) else "",
+        #         product_description=str(row['item-description']) if pd.notnull(row['item-description']) else "",
+        #         price=price,
+        #         quantity=quantity,
+        #         open_date=open_date,
+        #         image_url=str(row['image-url']) if pd.notnull(row['image-url']) else "",
+        #         zshop_shipping_fee=str(row['zshop-shipping-fee']) if pd.notnull(row['zshop-shipping-fee']) else "",
+        #         item_note=str(row['item-note']) if pd.notnull(row['item-note']) else "",
+        #         item_condition=str(row['item-condition']) if pd.notnull(row['item-condition']) else "",
+        #         zshop_category=str(row['zshop-category1']) if pd.notnull(row['zshop-category1']) else "",
+        #         zshop_browse_path=str(row['zshop-browse-path']) if pd.notnull(row['zshop-browse-path']) else "",
+        #         zshop_storefront_feature=row['zshop-storefront-feature'] if pd.notnull(row['zshop-storefront-feature']) else "",
+        #         asin=str(row['asin1']) if pd.notnull(row['asin1']) else (str(row['asin2']) if pd.notnull(row['asin2']) else (str(row['asin3']) if pd.notnull(row['asin3']) else "")),
+        #         will_ship_internationally=bool(row['will-ship-internationally']),
+        #         expedited_shipping=bool(row['expedited-shipping']),
+        #         zshop_boldface=bool(row['zshop-boldface']),
+        #         product_id=str(row['product-id']) if pd.notnull(row['product-id']) else "",
+        #         bid_for_featured_placement=row['bid-for-featured-placement'] if pd.notnull(row['bid-for-featured-placement']) else "",
+        #         add_delete=row['add-delete'] if pd.notnull(row['add-delete']) else "",
+        #         pending_quantity=0,
+        #         delivery_partner=str(row['fulfillment-channel']) if pd.notnull(row['fulfillment-channel']) else "",
+        #         published_status=str(row['status']) if pd.notnull(row['status']) else "",
+        #     )
+        #     product.save()
+
+file_path2 = "/home/lexicon/Documents/newww.xlsx"
+# new_process_excel_for_amazon(file_path2)
 
 def saveProductCategory(marketplace_id,name):
     pipeline = [
@@ -154,12 +217,18 @@ def processImage(image_list):
     main_image = ""
     images = []
 
-    for image in image_list:
-        if image['height'] > 1000:
-            if image['variant'] == "MAIN":
-                main_image = image['link']
-            else:
-                images.append(image['link'])
+    main_image_candidates = [image for image in image_list if image['variant'] == "MAIN"]
+    other_image_candidates = [image for image in image_list if image['variant'] != "MAIN"]
+
+    def select_image(candidates):
+        for height in [1000, 500, 75]:
+            for image in candidates:
+                if image['height'] >= height:
+                    return image['link']
+        return ""
+
+    main_image = select_image(main_image_candidates)
+    images = [select_image([image]) for image in other_image_candidates if select_image([image])]
 
     return main_image, images
 
@@ -169,7 +238,7 @@ def processImage(image_list):
 def updateAmazonProductsBasedonAsins(request):
     # user_id = request.GET.get('user_id')
     marketplace_id = DatabaseModel.get_document(Marketplace.objects, {"name": "Amazon"}, ["id"]).id
-    access_token = "Atza|IwEBIO-JJcX7ZC4FM4CUZVsijnQiBSQI94df81jHXQbMhsVLmybpuDUz2tdkvP4-6MdpzimIkjsCLYO107lhPeFNKROyfcxURqaC0lrCEEd5feErYyqGHL-PfRe2ywlWXq3rT8Cst_TAVy37nROHdaw51BcrLUpvFnY31oFmIKZwxTOfIBL_bhmks-RwrbB6C5MJFcTG0sxXXKMsOdCw1081aaPXVk2Xo_G87agQpbQRGiQwsszQZ0bfc4BxGSfZZzuhFhpGrv5YDWCdsQLptJawZSRBi889C-5tUi1G0-Vu1ZD4wqsemOOnDDmEZM77clC_EQKVm3E-q9QuLVTk1yxn_WUw"
+    access_token = "Atza|IwEBIL0fPh7bGrkBS8Bo8UyjBeoyreB9C76S8jL8LUhEMqmkPvgjfQla3z5_WMsV8Sd2P7YU36YSxhKDQ9SgAUbVLqYpFnrgCPkc6oviGpK5JfwA4u4n0qDICD-BSNzIZ9uE6lctaNSbQCLy2r2QZN7eZSL7QLKMgmBfICs6uJ3UMmjJWXuCU847r2GwbMnRAONZYM2KbnUTp1nOvURQV_vsVHTvB0hxMxd5R4qsF1_4VUZ7FBEF1uzY7qmvS1Htdo6-Ex478taZAWWKY7aA9RAKa_YuzbzTPfCWJIyaO8xtqYsI6QtIz4M3wcLr1B_3atF_FJndfnLhE8pMncMz9mpRND9F"
     pipeline = [
         {
             "$match" : {
@@ -189,6 +258,7 @@ def updateAmazonProductsBasedonAsins(request):
         print(f"Processing product {i}...")
         i+=1
         if product_ins['asin'] != "":
+            print("ASIN IRUKU................................................")
             PRODUCTS_URL = "https://sellingpartnerapi-na.amazon.com/catalog/2022-04-01/items"
             """Fetch product details including images & specifications using ASIN."""
             
@@ -208,7 +278,7 @@ def updateAmazonProductsBasedonAsins(request):
             if response.status_code == 200:
 
                 product_data = response.json()
-                print(product_data['summaries'][0])
+                # print(product_data['summaries'][0])
 
                 try:
                     category_name = product_data['summaries'][0]['browseClassification']['displayName']
@@ -248,6 +318,7 @@ def updateAmazonProductsBasedonAsins(request):
                 except:
                     brand_name = ""
                     brand_id = None
+                print("processImage(product_data['images'][0]['images'])",product_data['images'][0]['images'])
                 
                 main_image, images = processImage(product_data['images'][0]['images'])
 
@@ -270,6 +341,9 @@ def updateAmazonProductsBasedonAsins(request):
                 product.attributes = product_data['attributes']
                 product.save()
                 print(f"✅ Updated product {product.product_title}")
+            else:
+                print("ASIN IRUKU.................ANA DATA ILLA...............................")
+                print("Error getting access token:", response.text)
 
     return True
 
@@ -352,3 +426,71 @@ def process_excel_for_amazonOrders(file_path):
 
 file_path2 = "/home/lexicon/walmart/Amazonorders.xlsx"
 # process_excel_for_amazonOrders(file_path2)
+
+
+def process_amazon_order(json_data):
+    """Processes a single Amazon order item and saves it to the OrderItems collection."""
+    try:
+        product = DatabaseModel.get_document(Product.objects, {"product_title": json_data.get("Title", "")}, ["id"])
+        product_id = product.id if product else None
+    except:
+        product_id = None
+
+    # Helper function to extract money values safely
+    def get_money(field_name):
+        return {
+            "CurrencyCode": json_data.get(field_name, {}).get("CurrencyCode", "USD"),
+            "Amount": float(json_data.get(field_name, {}).get("Amount", 0.0))
+        }
+
+    order_item = OrderItems(
+        OrderId=json_data.get("OrderItemId", ""),
+        Platform="Amazon",
+        ProductDetails=ProductDetails(
+            product_id = product_id,
+            Title=json_data.get("Title", "Unknown Product"),
+            SKU=json_data.get("SellerSKU", "Unknown SKU"),
+            ASIN=json_data.get("ASIN", "Unknown ASIN"),
+            QuantityOrdered=int(json_data.get("QuantityOrdered", 0)),
+            QuantityShipped=int(json_data.get("QuantityShipped", 0)),
+        ),
+        Pricing=Pricing(
+            ItemPrice=Money(**get_money("ItemPrice")),
+            ItemTax=Money(**get_money("ItemTax")),
+            PromotionDiscount=Money(**get_money("PromotionDiscount"))
+        ),
+        TaxCollection=TaxCollection(
+            Model=json_data.get("TaxCollection", {}).get("Model", "Unknown"),
+            ResponsibleParty=json_data.get("TaxCollection", {}).get("ResponsibleParty", "Unknown")
+        ),
+        IsGift=json_data.get("IsGift", "false") == "true",
+        BuyerInfo=json_data.get("BuyerInfo", None)
+    )
+    order_item.save()  # Save to MongoDB
+
+    return order_item  # Return reference to the saved OrderItems document
+
+
+def updateOrdersItemsDetailsAmazon(request):
+    """Fetches Amazon orders, processes each item, and updates the Order collection."""
+    marketplace = DatabaseModel.get_document(Marketplace.objects, {"name": "Amazon"}, ["id"])
+    if not marketplace:
+        print("Amazon Marketplace not found!")
+        return False
+
+    marketplace_id = marketplace.id
+    order_list = DatabaseModel.list_documents(Order.objects, {"marketplace_id": marketplace_id}, ["id", "order_details"])
+
+    for order in order_list:
+        order_items_refs = []  # Store references to OrderItems documents
+
+        for item in order.order_details:
+            print(item)
+            processed_item = process_amazon_order(item)
+            order_items_refs.append(processed_item)  # Append reference
+
+        # Update Order document with references to OrderItems
+        DatabaseModel.update_documents(Order.objects, {"id": order.id}, {"order_items": order_items_refs})
+
+    print("Amazon orders updated successfully!")
+    return True
