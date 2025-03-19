@@ -32,9 +32,11 @@ def getMarketplaceList(request):
 def getProductList(request):
     data = dict()
     json_request = JSONParser().parse(request)
+    print(json_request)
     marketplace_id = json_request.get('marketplace_id')
     skip = int(json_request.get('skip'))
     limit = int(json_request.get('limit'))
+    search_query = json_request.get('search_query')   
     marketplace = json_request.get('marketplace')
     category_name = json_request.get('category_name')
     brand_id_list = json_request.get('brand_id_list')
@@ -49,6 +51,12 @@ def getProductList(request):
         match['category'] = {"$in":category_name}
     if brand_id_list != None and brand_id_list != "" and brand_id_list != []:
         match['brand_id'] = {"$in":[ObjectId(brand_id) for brand_id in brand_id_list]}
+    if search_query != None and search_query != "":
+        search_query = search_query.strip() 
+        match["$or"] = [
+            {"product_title": {"$regex": search_query, "$options": "i"}},
+            {"sku": {"$regex": search_query, "$options": "i"}},
+        ]
     if match != {}:
         match_pipeline = {
             "$match" : match}
@@ -88,7 +96,7 @@ def getProductList(request):
             "$skip" : skip
         },
         {
-            "$limit" : 1500#limit
+            "$limit" : limit
         }
     ])
     if sort_by != None and sort_by != "":
@@ -768,12 +776,14 @@ def salesAnalytics(request):
 
 @csrf_exempt
 def getProductListForOrdercreation(request):
+    data = dict()
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
     skip = int(json_request.get('skip',0))
     limit = int(json_request.get('limit',50))
     search_query = json_request.get('search_query')
     pipeline = []
+    count_pipeline = []
     match = {}
     if marketplace_id != None and marketplace_id != "":
         match['marketplace_id'] = ObjectId(marketplace_id)
@@ -801,6 +811,15 @@ def getProductListForOrdercreation(request):
         }
     ])
     product_list = list(Product.objects.aggregate(*(pipeline)))
+    count_pipeline.extend([
+        {
+            "$count": "total_count"
+        }
+    ])
+    total_count_result = list(Product.objects.aggregate(*(count_pipeline)))
+    total_count = total_count_result[0]['total_count'] if total_count_result else 0
+
+    data['total_count'] = total_count
     
     return product_list
 
