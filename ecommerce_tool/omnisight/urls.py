@@ -17,7 +17,7 @@ Including another URLconf
 from django.urls import path
 from omnisight.operations.common_operations import checkEmailExistOrNot, signupUser,loginUser, forgotPassword, changePassword
 from omnisight.operations.walmart_operations import fetchAllProducts, fetchBrand,updateOrdersItemsDetails
-from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation
+from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon
 
@@ -45,11 +45,14 @@ urlpatterns = [
     path('ordersCountForDashboard/',ordersCountForDashboard,name='ordersCountForDashboard'),
     path('totalSalesAmount/',totalSalesAmount,name='totalSalesAmount'),
     path('getOrdersBasedOnProduct/',getOrdersBasedOnProduct,name='getOrdersBasedOnProduct'),
+    path("getSalesTrendPercentage/",getSalesTrendPercentage,name="getSalesTrendPercentage"),
+    path("fetchSalesSummary/",fetchSalesSummary,name="fetchSalesSummary"),
 
     #Custom Order
     path("getProductListForOrdercreation/",getProductListForOrdercreation,name="getProductListForOrdercreation"),
-
     path("createManualOrder/",createManualOrder,name="createManualOrder"),
+    path("listManualOrders/",listManualOrders,name="listManualOrders"),
+    path("fetchManualOrderDetails/",fetchManualOrderDetails,name="fetchManualOrderDetails"),
 
 
     #AMAZON URLS

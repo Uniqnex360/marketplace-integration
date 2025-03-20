@@ -281,3 +281,52 @@ class customOrder(Document):
     mark_order_as_paid = BooleanField(default=False)
     tags = ListField(StringField())
     notes = StringField()
+
+
+
+
+class Boder(Document):
+    # Order details
+    order_id = StringField(required=True, unique=True)  # Internal order ID
+    sku_id = StringField(required=True)
+    ordered_products = ListField(StringField(), required=True)  # List of product names
+    quantity = IntField(required=True)
+    price = FloatField(required=True)
+    shipment_type = StringField()  # e.g., "Standard", "Express"
+    channel = StringField(required=True)  # e.g., "Amazon", "Shopify"
+    order_status = StringField(required=True, choices=["Open", "pending", "delivered", "closed", "cancelled"])
+
+    # Payment details
+    payment_status = StringField(required=True)  # e.g., "Paid", "Pending"
+    payment_mode = StringField(required=True)  # e.g., "Credit Card", "PayPal"
+    invoice = StringField()  # Invoice URL or identifier
+    transaction_id = StringField()
+    tax = FloatField(default=0.0)
+    discount = FloatField(default=0.0)
+
+    # Address and contact information
+    shipping_address = StringField(required=True)
+    mail = StringField(required=True)
+    contact_number = StringField(required=True)
+    customer_note = StringField()  # Any note provided by the customer
+
+    # Shipping details
+    package_dimensions = StringField()  # e.g., "10x5x3 inches"
+    weight = FloatField()  # Weight of package
+    shipment_cost = FloatField()  # Cost of shipping
+    shipment_speed = StringField()  # e.g., "Express", "Standard"
+    shipment_mode = StringField()  # e.g., "Air", "Ground"
+    carrier = StringField()  # Shipping carrier name
+    tracking_number = StringField()  # Tracking number provided by carrier
+    shipping_label = StringField()  # URL or identifier for the shipping label
+    shipping_label_preview = StringField()  # URL for label preview
+    shipping_label_print = StringField()  # URL or instructions for printing the label
+
+    # Channel details
+    channel_name = StringField(required=True)  # e.g., "Amazon", "Shopify"
+    channel_order_id = StringField()  # Order ID from the channel
+    fulfillment_type = StringField()  # e.g., "FBA", "FBM"
+
+    # Optional timestamps
+    created_at = DateTimeField(default=datetime.utcnow)
+    updated_at = DateTimeField(default=datetime.utcnow)
