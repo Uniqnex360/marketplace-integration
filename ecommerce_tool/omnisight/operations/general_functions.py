@@ -27,7 +27,7 @@ def getMarketplaceList(request):
     marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
     return marketplace_list
 
-
+#---------------------------------------------PRODUCT APIS---------------------------------------------------
 @csrf_exempt
 def getProductList(request):
     data = dict()
@@ -369,6 +369,8 @@ def getOrdersBasedOnProduct(request):
     return data
 
 
+#---------------------------------ORDER APIS-------------------------------------------------------------------
+
 
 @csrf_exempt
 def fetchAllorders(request):
@@ -643,183 +645,7 @@ def fetchOrderDetails(request):
     return data
 
 
-
-def ordersCountForDashboard(request):
-    data = dict()
-    marketplace_id = request.GET.get('marketplace_id')
-    pipeline = []
-    if marketplace_id != None and marketplace_id != "":
-        match = {
-            "$match" : {
-                "marketplace_id" : ObjectId(marketplace_id)
-            }
-        }
-        pipeline.append(match)
-    pipeline.extend([
-        {
-            "$group": {
-                "_id": None,
-                "count": {"$sum": 1}
-            }
-        }
-    ])
-    order_status_count = list(Order.objects.aggregate(*(pipeline)))
-    data['total_order_count'] = order_status_count
-    return data
-
-
-def totalSalesAmount(request):
-    data = dict()
-    marketplace_id = request.GET.get('marketplace_id')
-    pipeline = []
-    if marketplace_id != None and marketplace_id != "":
-        match = {
-            "$match" : {
-                "marketplace_id" : ObjectId(marketplace_id)
-            }
-        }
-        pipeline.append(match)
-    pipeline.extend([
-        {
-            "$group": {
-                "_id": None,
-                "total_sales": {"$sum": "$order_total"}
-            }
-        }
-    ])
-    total_sales = list(Order.objects.aggregate(*(pipeline)))
-    data['total_sales'] = total_sales[0]['total_sales'] if total_sales else 0
-    return data
-
-
-@csrf_exempt
-def salesAnalytics(request):
-    data = dict()
-    try:
-        json_request = JSONParser().parse(request)
-        date_range = json_request.get('date_range', '7days')  # Default to 7 days
-        start_date = json_request.get('start_date')  # Optional custom start date
-        end_date = json_request.get('end_date')  # Optional custom end date
-
-        # Determine the date range
-        if date_range == '1day':
-            start_date = datetime.now() - timedelta(days=1)
-        elif date_range == '7days':
-            start_date = datetime.now() - timedelta(days=7)
-        elif date_range == '1month':
-            start_date = datetime.now() - timedelta(days=30)
-        elif start_date and end_date:
-            start_date = datetime.strptime(start_date, '%Y-%m-%d')
-            end_date = datetime.strptime(end_date, '%Y-%m-%d')
-        else:
-            start_date = datetime.now() - timedelta(days=7)
-
-        end_date = end_date or datetime.now()
-
-        # Sales count and values per day
-        pipeline = [
-            {
-                "$match": {
-                    "order_date": {
-                        "$gte": start_date,
-                        "$lte": end_date
-                    }
-                }
-            },
-            {
-                "$group": {
-                    "_id": {
-                        "year": {"$year": "$order_date"},
-                        "month": {"$month": "$order_date"},
-                        "day": {"$dayOfMonth": "$order_date"}
-                    },
-                    "sales_count": {"$sum": 1},
-                    "sales_value": {"$sum": "$order_total"}
-                }
-            },
-            {
-                "$sort": {"_id": 1}
-            }
-        ]
-        sales_data = list(Order.objects.aggregate(*pipeline))
-
-        # Sales data by category
-        category_pipeline = [
-            {
-                "$match": {
-                    "order_date": {
-                        "$gte": start_date,
-                        "$lte": end_date
-                    }
-                }
-            },
-            {
-                "$lookup": {
-                    "from": "product",
-                    "localField": "order_details.product_id",
-                    "foreignField": "_id",
-                    "as": "product_details"
-                }
-            },
-            {
-                "$unwind": "$product_details"
-            },
-            {
-                "$group": {
-                    "_id": "$product_details.category",
-                    "sales_count": {"$sum": 1},
-                    "sales_value": {"$sum": "$order_total"}
-                }
-            },
-            {
-                "$sort": {"sales_value": -1}
-            }
-        ]
-        category_data = list(Order.objects.aggregate(*category_pipeline))
-
-        # Sales data by channels
-        channel_pipeline = [
-            {
-                "$match": {
-                    "order_date": {
-                        "$gte": start_date,
-                        "$lte": end_date
-                    }
-                }
-            },
-            {
-                "$lookup": {
-                    "from": "marketplace",
-                    "localField": "marketplace_id",
-                    "foreignField": "_id",
-                    "as": "marketplace_details"
-                }
-            },
-            {
-                "$unwind": "$marketplace_details"
-            },
-            {
-                "$group": {
-                    "_id": "$marketplace_details.name",
-                    "sales_count": {"$sum": 1},
-                    "sales_value": {"$sum": "$order_total"}
-                }
-            },
-            {
-                "$sort": {"sales_value": -1}
-            }
-        ]
-        channel_data = list(Order.objects.aggregate(*channel_pipeline))
-
-        data['sales_data'] = sales_data
-        data['category_data'] = category_data
-        data['channel_data'] = channel_data
-    except Exception as e:
-        data['error'] = str(e)
-    return data
-
-
-#----------------------ORDER CREATION-------------------------------------
+#----------------------ORDER CREATION---------------------------------------------------------------------------
 
 
 @csrf_exempt
@@ -1057,9 +883,181 @@ def fetchManualOrderDetails(request):
     return data
 
 
-#--------------------------------------------------------------------------------------------------------------------------------------
+#-------------------------------------DASH BOARD APIS-------------------------------------------------------------------------------------------------
+
+def ordersCountForDashboard(request):
+    data = dict()
+    marketplace_id = request.GET.get('marketplace_id')
+    pipeline = []
+    if marketplace_id != None and marketplace_id != "":
+        match = {
+            "$match" : {
+                "marketplace_id" : ObjectId(marketplace_id)
+            }
+        }
+        pipeline.append(match)
+    pipeline.extend([
+        {
+            "$group": {
+                "_id": None,
+                "count": {"$sum": 1}
+            }
+        }
+    ])
+    order_status_count = list(Order.objects.aggregate(*(pipeline)))
+    data['total_order_count'] = order_status_count
+    return data
 
 
+def totalSalesAmount(request):
+    data = dict()
+    marketplace_id = request.GET.get('marketplace_id')
+    pipeline = []
+    if marketplace_id != None and marketplace_id != "":
+        match = {
+            "$match" : {
+                "marketplace_id" : ObjectId(marketplace_id)
+            }
+        }
+        pipeline.append(match)
+    pipeline.extend([
+        {
+            "$group": {
+                "_id": None,
+                "total_sales": {"$sum": "$order_total"}
+            }
+        }
+    ])
+    total_sales = list(Order.objects.aggregate(*(pipeline)))
+    data['total_sales'] = total_sales[0]['total_sales'] if total_sales else 0
+    return data
+
+
+@csrf_exempt
+def salesAnalytics(request):
+    data = dict()
+    try:
+        json_request = JSONParser().parse(request)
+        date_range = json_request.get('date_range', '7days')  # Default to 7 days
+        start_date = json_request.get('start_date')  # Optional custom start date
+        end_date = json_request.get('end_date')  # Optional custom end date
+
+        # Determine the date range
+        if date_range == '1day':
+            start_date = datetime.now() - timedelta(days=1)
+        elif date_range == '7days':
+            start_date = datetime.now() - timedelta(days=7)
+        elif date_range == '1month':
+            start_date = datetime.now() - timedelta(days=30)
+        elif start_date and end_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        else:
+            start_date = datetime.now() - timedelta(days=7)
+
+        end_date = end_date or datetime.now()
+
+        # Sales count and values per day
+        pipeline = [
+            {
+                "$match": {
+                    "order_date": {
+                        "$gte": start_date,
+                        "$lte": end_date
+                    }
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "year": {"$year": "$order_date"},
+                        "month": {"$month": "$order_date"},
+                        "day": {"$dayOfMonth": "$order_date"}
+                    },
+                    "sales_count": {"$sum": 1},
+                    "sales_value": {"$sum": "$order_total"}
+                }
+            },
+            {
+                "$sort": {"_id": 1}
+            }
+        ]
+        sales_data = list(Order.objects.aggregate(*pipeline))
+
+        # Sales data by category
+        category_pipeline = [
+            {
+                "$match": {
+                    "order_date": {
+                        "$gte": start_date,
+                        "$lte": end_date
+                    }
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "product",
+                    "localField": "order_details.product_id",
+                    "foreignField": "_id",
+                    "as": "product_details"
+                }
+            },
+            {
+                "$unwind": "$product_details"
+            },
+            {
+                "$group": {
+                    "_id": "$product_details.category",
+                    "sales_count": {"$sum": 1},
+                    "sales_value": {"$sum": "$order_total"}
+                }
+            },
+            {
+                "$sort": {"sales_value": -1}
+            }
+        ]
+        category_data = list(Order.objects.aggregate(*category_pipeline))
+
+        # Sales data by channels
+        channel_pipeline = [
+            {
+                "$match": {
+                    "order_date": {
+                        "$gte": start_date,
+                        "$lte": end_date
+                    }
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "marketplace",
+                    "localField": "marketplace_id",
+                    "foreignField": "_id",
+                    "as": "marketplace_details"
+                }
+            },
+            {
+                "$unwind": "$marketplace_details"
+            },
+            {
+                "$group": {
+                    "_id": "$marketplace_details.name",
+                    "sales_count": {"$sum": 1},
+                    "sales_value": {"$sum": "$order_total"}
+                }
+            },
+            {
+                "$sort": {"sales_value": -1}
+            }
+        ]
+        channel_data = list(Order.objects.aggregate(*channel_pipeline))
+
+        data['sales_data'] = sales_data
+        data['category_data'] = category_data
+        data['channel_data'] = channel_data
+    except Exception as e:
+        data['error'] = str(e)
+    return data
 
 @csrf_exempt
 def mostSellingProducts(request):
