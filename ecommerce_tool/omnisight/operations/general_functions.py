@@ -380,8 +380,6 @@ def fetchAllorders(request):
     count_pipeline = []
 
     json_request = JSONParser().parse(request)
-    print("111111111111111111111111111111111111111111111111111111")
-    print("json_request",json_request)
     user_id = json_request.get('user_id')
     limit = int(json_request.get('limit', 100))  # Default limit = 100 if not provided
     skip = int(json_request.get('skip', 0))  # Default skip = 0 if not provided
@@ -417,7 +415,13 @@ def fetchAllorders(request):
                     sort_by : int(sort_by_value)
                 }
             }
-            pipeline.append(sort)
+        else:
+            sort = {
+                "$sort" : {
+                    "_id" : -1
+                }
+            }
+        pipeline.append(sort)
 
         manual_orders = list(customOrder.objects.aggregate(*pipeline))
         count_pipeline = [
@@ -888,24 +892,75 @@ def fetchManualOrderDetails(request):
 def ordersCountForDashboard(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
-    pipeline = []
-    if marketplace_id != None and marketplace_id != "":
-        match = {
-            "$match" : {
-                "marketplace_id" : ObjectId(marketplace_id)
-            }
-        }
-        pipeline.append(match)
-    pipeline.extend([
+    print(marketplace_id)
+    
+    if marketplace_id == "all":
+        pipeline = [
         {
             "$group": {
                 "_id": None,
                 "count": {"$sum": 1}
             }
         }
-    ])
-    order_status_count = list(Order.objects.aggregate(*(pipeline)))
-    data['total_order_count'] = order_status_count
+        ]
+        order_status_count = list(Order.objects.aggregate(*(pipeline)))
+        total_order_count = order_status_count[0].get('count', 0)
+        data['total_order_count'] = {
+            "value" : total_order_count,
+            "percentage" : f"{100.00}%"
+        }
+        pipeline = [
+            {
+                "$project" : {
+                    "_id" : 1,
+                    "name" : 1,
+                }
+            }
+        ]
+        marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
+        for ins in marketplace_list:
+            pipeline= [
+                {
+                    "$match" : {
+                        "marketplace_id" : ins['_id']
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": None,
+                        "count": {"$sum": 1}
+                    }
+                }
+            ]
+            order_status_count = list(Order.objects.aggregate(*(pipeline)))
+            if order_status_count:
+                order_status_count = order_status_count[0].get('count', 0)
+                percentage = round((order_status_count/total_order_count) * 100,2)
+                data[ins['name']] = {
+                    "count" : order_status_count,
+                    "percentage" : f"{percentage}%"
+                }
+    elif marketplace_id != "all":
+        pipeline= [
+                {
+                    "$match" : {
+                        "marketplace_id" : ObjectId(marketplace_id)
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": None,
+                        "count": {"$sum": 1}
+                    }
+                }
+            ]
+        order_status_count = list(Order.objects.aggregate(*(pipeline)))
+        if order_status_count:
+            order_status_count = order_status_count[0].get('count', 0)
+            data['total_order_count'] = {
+            "value" : order_status_count,
+            "percentage" : f"{100.00}%"
+            }
     return data
 
 
@@ -1062,64 +1117,67 @@ def salesAnalytics(request):
 @csrf_exempt
 def mostSellingProducts(request):
     data = dict()
-    try:
-        # Pipeline to get top 5 most selling products based on channels
-        pipeline = [
-            {
-                "$lookup": {
-                    "from": "order",
-                    "localField": "_id",
-                    "foreignField": "order_details.product_id",
-                    "as": "orders"
-                }
-            },
-            {
-                "$unwind": "$orders"
-            },
-            {
-                "$lookup": {
-                    "from": "marketplace",
-                    "localField": "orders.marketplace_id",
-                    "foreignField": "_id",
-                    "as": "marketplace_details"
-                }
-            },
-            {
-                "$unwind": "$marketplace_details"
-            },
-            {
-                "$group": {
-                    "_id": {
-                        "product_id": "$_id",
-                        "product_title": "$product_title",
-                        "sku": "$sku",
-                        "marketplace_name": "$marketplace_details.name"
-                    },
-                    "total_quantity_sold": {"$sum": "$orders.order_details.quantity"}
-                }
-            },
-            {
-                "$sort": {"total_quantity_sold": -1}
-            },
-            {
-                "$limit": 5
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "product_id": {"$toString": "$_id.product_id"},
-                    "product_title": "$_id.product_title",
-                    "sku": "$_id.sku",
-                    "marketplace_name": "$_id.marketplace_name",
-                    "total_quantity_sold": 1
-                }
+    pipeline = list()
+    marketplace_id = request.GET.get('marketplace_id')
+    # Pipeline to get top 5 most selling products based on sales count and revenue
+    pipeline.extend([
+        {
+            "$lookup": {
+                "from": "product",
+                "localField": "ProductDetails.product_id",
+                "foreignField": "_id",
+                "as": "product_ins"
             }
-        ]
+        },
+        {
+            "$unwind": "$product_ins"
+        }])
+    if marketplace_id != None and marketplace_id != "":
+        match = {
+            "$match" : {
+                "product_ins.marketplace_id" : ObjectId(marketplace_id)
+            }
+        }
+        pipeline.append(match)
 
-        top_products = list(Product.objects.aggregate(*pipeline))
-        data['top_products'] = top_products
-    except Exception as e:
-        data['error'] = str(e)
+    pipeline2 = [{
+            "$group": {
+                "_id": {
+                    "product_id": "$ProductDetails.product_id",
+                    "product_title": "$product_ins.product_title",
+                    "sku": "$product_ins.sku",
+                    "image_url": "$product_ins.image_url",
+                    "price": "$product_ins.price"
+                },
+                "total_quantity_sold": {"$sum": "$ProductDetails.QuantityOrdered"},
+                "total_revenue": {"$sum": {"$multiply": ["$ProductDetails.QuantityOrdered", "$product_ins.price"]}}
+            }
+        },
+        # {
+        #     "$sort": {"total_quantity_sold": -1}
+        # },
+        # {
+        #     "$limit": 5
+        # },
+        {
+            "$project": {
+                "_id": 0,
+                "product_id": {"$toString": "$_id.product_id"},
+                "product_title": "$_id.product_title",
+                "sku": "$_id.sku",
+                "product_image": "$_id.image_url",
+                "price": "$_id.price",
+                "sales_count": "$total_quantity_sold",
+                "revenue": {"$round": ["$total_revenue", 2]}
+            }
+        },
+        {
+            "$sort": {"sales_count": -1}
+        },
+    ]
+    pipeline.extend(pipeline2)
+    top_products = list(OrderItems.objects.aggregate(*pipeline))
+    data['top_products'] = top_products
     return data
 
 
@@ -1287,3 +1345,9 @@ def fetchSalesSummary(request):
         data['total_units_sold'] = 0
         data['total_sold_product_count'] = 0
     return data
+
+
+
+
+
+
