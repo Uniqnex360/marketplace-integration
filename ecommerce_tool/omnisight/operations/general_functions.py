@@ -1118,7 +1118,7 @@ def salesAnalytics(request):
 def mostSellingProducts(request):
     data = dict()
     pipeline = list()
-    marketplace_id = request.GET.get('marketplace_id')
+    marketPlaceId = request.GET.get('marketPlaceId')
     # Pipeline to get top 5 most selling products based on sales count and revenue
     pipeline.extend([
         {
@@ -1132,10 +1132,10 @@ def mostSellingProducts(request):
         {
             "$unwind": "$product_ins"
         }])
-    if marketplace_id != None and marketplace_id != "":
+    if marketPlaceId != None and marketPlaceId != "" and marketPlaceId != "all":
         match = {
             "$match" : {
-                "product_ins.marketplace_id" : ObjectId(marketplace_id)
+                "product_ins.marketplace_id" : ObjectId(marketPlaceId)
             }
         }
         pipeline.append(match)
