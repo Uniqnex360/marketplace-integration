@@ -16,7 +16,7 @@ Including another URLconf
 """
 from django.urls import path
 from omnisight.operations.common_operations import checkEmailExistOrNot, signupUser,loginUser, forgotPassword, changePassword
-# from omnisight.operations.walmart_operations import fetchAllProducts, fetchBrand,updateOrdersItemsDetails
+from omnisight.operations.walmart_operations import updateOrdersItemsDetails
 from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary, salesAnalytics, mostSellingProducts
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon
@@ -65,15 +65,10 @@ urlpatterns = [
     path('updateOrdersItemsDetailsAmazon/',updateOrdersItemsDetailsAmazon,name="updateOrdersItemsDetailsAmazon"),
 
     #Walmart
-    # path('updateOrdersItemsDetails/',updateOrdersItemsDetails,name='updateOrdersItemsDetails')
+    path('updateOrdersItemsDetails/',updateOrdersItemsDetails,name='updateOrdersItemsDetails')
 
 
 ]
-
-
-#uykhl;i
-
-
 
 
 

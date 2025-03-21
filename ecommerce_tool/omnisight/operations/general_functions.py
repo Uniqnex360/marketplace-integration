@@ -1174,6 +1174,9 @@ def mostSellingProducts(request):
         {
             "$sort": {"sales_count": -1}
         },
+        {
+            "$limit": 7
+        },
     ]
     pipeline.extend(pipeline2)
     top_products = list(OrderItems.objects.aggregate(*pipeline))
