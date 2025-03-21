@@ -220,7 +220,7 @@ def getAccesstoken(user_id):
 
 # import requests
 
-ACCESS_TOKEN = get_access_token()  
+# ACCESS_TOKEN = get_access_token()  
 
 # def get_marketplace_ids():
 #     url = "https://sellingpartnerapi-na.amazon.com/sellers/v1/marketplaceParticipations"
@@ -286,37 +286,37 @@ ACCESS_TOKEN = get_access_token()
 
 
 
-import requests
+# import requests
 
-MARKETPLACE_ID = "ATVPDKIKX0DER"  # Amazon US
+# MARKETPLACE_ID = "ATVPDKIKX0DER"  # Amazon US
 
 
-def update_product_title(sku, new_title):
-    url = f"https://sellingpartnerapi-na.amazon.com/listings/2021-08-01/items/{SELLER_ID}/{sku}"
+# def update_product_title(sku, new_title):
+#     url = f"https://sellingpartnerapi-na.amazon.com/listings/2021-08-01/items/{SELLER_ID}/{sku}"
 
-    headers = {
-        "x-amz-access-token": ACCESS_TOKEN,
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
+#     headers = {
+#         "x-amz-access-token": ACCESS_TOKEN,
+#         "Content-Type": "application/json",
+#         "Accept": "application/json"
+#     }
 
-    # JSON payload with updated title
-    payload = {
-        "productType": "PRODUCT",  # Ensure this matches your product category
-        "attributes": {
-            "title": new_title
-        },
-        "marketplaceIds": [MARKETPLACE_ID]
-    }
+#     # JSON payload with updated title
+#     payload = {
+#         "productType": "PRODUCT",  # Ensure this matches your product category
+#         "attributes": {
+#             "title": new_title
+#         },
+#         "marketplaceIds": [MARKETPLACE_ID]
+#     }
 
-    # Send the request
-    response = requests.put(url, headers=headers, json=payload)
+#     # Send the request
+#     response = requests.put(url, headers=headers, json=payload)
 
-    # Handle response
-    if response.status_code in [200, 202]:
-        print(f"✅ Title updated for SKU: {sku}")
-    else:
-        print(f"❌ Failed to update title for SKU {sku}: {response.text}")
+#     # Handle response
+#     if response.status_code in [200, 202]:
+#         print(f"✅ Title updated for SKU: {sku}")
+#     else:
+#         print(f"❌ Failed to update title for SKU {sku}: {response.text}")
 
-# Example usage
-# update_product_title("AVE106-16", "COVERGIRL Exhibitionist Lipstick Metallic, Rendezvous 535, 0.123 Ounce11")
+# # Example usage
+# # update_product_title("AVE106-16", "COVERGIRL Exhibitionist Lipstick Metallic, Rendezvous 535, 0.123 Ounce11")

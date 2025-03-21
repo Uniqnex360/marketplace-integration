@@ -16,8 +16,8 @@ Including another URLconf
 """
 from django.urls import path
 from omnisight.operations.common_operations import checkEmailExistOrNot, signupUser,loginUser, forgotPassword, changePassword
-from omnisight.operations.walmart_operations import fetchAllProducts, fetchBrand,updateOrdersItemsDetails
-from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary
+# from omnisight.operations.walmart_operations import fetchAllProducts, fetchBrand,updateOrdersItemsDetails
+from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary, salesAnalytics, mostSellingProducts
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon
 
@@ -29,9 +29,9 @@ urlpatterns = [
     path('loginUser/', loginUser, name='loginUser'),
     path('forgotPassword/',forgotPassword,name="forgotPassword"),
     path('changePassword/',changePassword,name="changePassword"),
-    path('fetchAllProducts/',fetchAllProducts,name="fetchAllProducts"),
+    # path('fetchAllProducts/',fetchAllProducts,name="fetchAllProducts"),
 
-    path('fetchBrand/',fetchBrand,name='fetch Brand'),
+    # path('fetchBrand/',fetchBrand,name='fetch Brand'),
 
 
     #GENERAL URLS
@@ -42,11 +42,16 @@ urlpatterns = [
     path('fetchProductDetails/',fetchProductDetails,name="fetchProductDetails"),
     path('fetchAllorders/',fetchAllorders,name="fetchAllorders"),
     path('fetchOrderDetails/',fetchOrderDetails,name='fetchOrderDetails'),
+    path('getOrdersBasedOnProduct/',getOrdersBasedOnProduct,name='getOrdersBasedOnProduct'),
+
+
+    #Dash Board Functions...........................
     path('ordersCountForDashboard/',ordersCountForDashboard,name='ordersCountForDashboard'),
     path('totalSalesAmount/',totalSalesAmount,name='totalSalesAmount'),
-    path('getOrdersBasedOnProduct/',getOrdersBasedOnProduct,name='getOrdersBasedOnProduct'),
     path("getSalesTrendPercentage/",getSalesTrendPercentage,name="getSalesTrendPercentage"),
     path("fetchSalesSummary/",fetchSalesSummary,name="fetchSalesSummary"),
+    path("salesAnalytics/",salesAnalytics,name="salesAnalytics"),
+    path("mostSellingProducts/",mostSellingProducts,name='mostSellingProducts'),
 
     #Custom Order
     path("getProductListForOrdercreation/",getProductListForOrdercreation,name="getProductListForOrdercreation"),
@@ -60,7 +65,7 @@ urlpatterns = [
     path('updateOrdersItemsDetailsAmazon/',updateOrdersItemsDetailsAmazon,name="updateOrdersItemsDetailsAmazon"),
 
     #Walmart
-    path('updateOrdersItemsDetails/',updateOrdersItemsDetails,name='updateOrdersItemsDetails')
+    # path('updateOrdersItemsDetails/',updateOrdersItemsDetails,name='updateOrdersItemsDetails')
 
 
 ]
