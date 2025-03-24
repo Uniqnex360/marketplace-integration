@@ -1,7 +1,7 @@
 import requests
 import uuid
 import xml.etree.ElementTree as ET  # Import XML parser
-from omnisight.operations.amazon_utils import getAccesstoken
+from omnisight.operations.amazon_utils import getAccesstoken, get_access_token
 from omnisight.models import *
 import pandas as pd
 from ecommerce_tool.crud import DatabaseModel
@@ -9,6 +9,7 @@ from bson import ObjectId
 import json
 from ecommerce_tool.settings import MARKETPLACE_ID
 import ast
+from datetime import datetime, timedelta
 
 
 
@@ -494,3 +495,107 @@ def updateOrdersItemsDetailsAmazon(request):
 
     print("Amazon orders updated successfully!")
     return True
+
+
+
+def syncRecentAmazonOrders():
+    access_token = get_access_token()
+    if not access_token:
+        return None
+
+    url = "https://sellingpartnerapi-na.amazon.com/orders/v0/orders"
+    
+    # Amazon only allows retrieving orders from the last 180 days
+    created_after = (datetime.utcnow() - timedelta(days=18000)).isoformat()
+
+    headers = {
+        "x-amz-access-token": access_token,
+        "Content-Type": "application/json"
+    }
+
+    params = {
+        "MarketplaceIds": MARKETPLACE_ID,
+        "CreatedAfter": created_after,
+        "MaxResultsPerPage": 100  # Get max orders per page
+    }
+
+    orders = []
+    response = requests.get(url, headers=headers, params=params)
+
+    if response.status_code == 200:
+        orders_data = response.json()
+        orders = orders_data.get("payload").get('Orders')
+        # Check for more pages
+        marketplace_id = DatabaseModel.get_document(Marketplace.objects,{"name" : "Amazon"},['id']).id
+
+        for row in orders:
+            order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": str(row.get('AmazonOrderId', ""))})
+            if order_obj:
+                print(f"Order with purchase order ID {row.get('AmazonOrderId', '')} already exists. Skipping...")
+            else:
+                order_details = list()
+                order_items = list()
+                currency = "USD"
+                order_total = 0.0
+                BuyerEmail = ""
+                OrderTotal = row.get('OrderTotal', {})
+                customer_email_id = row.get('BuyerInfo', {})
+                if customer_email_id:
+                    BuyerEmail = customer_email_id.get('BuyerEmail', "")
+
+                if OrderTotal:
+                    currency = OrderTotal.get('CurrencyCode', "USD")
+                order_total = OrderTotal.get('Amount', 0.0)
+                url = f"https://sellingpartnerapi-na.amazon.com/orders/v0/orders/{str(row.get('AmazonOrderId', ''))}/orderItems"
+
+                # Headers
+                headers = {
+                    "x-amz-access-token": access_token,
+                    "Content-Type": "application/json"
+                }
+
+                response = requests.get(url, headers=headers)
+                if response.status_code == 200:
+                    report_url = response.json().get("payload", {})
+                    order_details =  report_url.get('OrderItems', [])
+                    for order_ins in order_details:
+                        order_items.append(process_amazon_order(order_ins))
+
+                order = Order(
+                    marketplace_id=marketplace_id,
+                    customer_email_id=BuyerEmail,
+                    purchase_order_id=str(row.get('AmazonOrderId', "")),
+                    earliest_ship_date=converttime(row.get('EarliestShipDate', "")) if row.get('EarliestShipDate') else "",
+                    sales_channel=str(row.get('SalesChannel', "")),
+                    number_of_items_shipped=int(row.get('NumberOfItemsShipped', 0)),
+                    order_type=str(row.get('OrderType', "")),
+                    is_premium_order=row.get('IsPremiumOrder', False),
+                    is_prime=row.get('IsPrime', False),
+                    fulfillment_channel=str(row.get('FulfillmentChannel', "")),
+                    number_of_items_unshipped=int(row.get('NumberOfItemsUnshipped', 0)),
+                    has_regulated_items=row.get('HasRegulatedItems', False),
+                    is_replacement_order=row.get('IsReplacementOrder', False),
+                    is_sold_by_ab=row.get('IsSoldByAB', False),
+                    latest_ship_date=converttime(row.get('LatestShipDate', "")) if row.get('LatestShipDate') else "",
+                    ship_service_level=str(row.get('ShipServiceLevel', "")),
+                    order_date=converttime(row.get('PurchaseDate', "")) if row.get('PurchaseDate') else "",
+                    is_ispu=row.get('IsISPU', False),
+                    order_status=str(row.get('OrderStatus', "")),
+                    shipping_information=row.get('ShippingAddress', {}),
+                    is_access_point_order=row.get('IsAccessPointOrder', False),
+                    seller_order_id=str(row.get('SellerOrderId', "")),
+                    payment_method=str(row.get('PaymentMethod', "")),
+                    is_business_order=row.get('IsBusinessOrder', False),
+                    order_total=order_total,
+                    currency=currency,
+                    payment_method_details=row.get('PaymentMethodDetails', [])[0] if row.get('PaymentMethodDetails') else "",
+                    is_global_express_enabled=row.get('IsGlobalExpressEnabled', False),
+                    last_update_date=converttime(row.get('LastUpdateDate', "")) if row.get('LastUpdateDate') else "",
+                    shipment_service_level_category=str(row.get('ShipmentServiceLevelCategory', "")),
+                    automated_shipping_settings=row.get('AutomatedShippingSettings', {}),
+                    order_details =order_details,
+                    order_items = order_items
+                )
+                order.save()
+           
+    return orders

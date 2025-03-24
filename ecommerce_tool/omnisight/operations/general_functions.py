@@ -380,12 +380,15 @@ def fetchAllorders(request):
     count_pipeline = []
 
     json_request = JSONParser().parse(request)
+    print("json_request",json_request,"\n\n\n")
     user_id = json_request.get('user_id')
     limit = int(json_request.get('limit', 100))  # Default limit = 100 if not provided
     skip = int(json_request.get('skip', 0))  # Default skip = 0 if not provided
     market_place_id = json_request.get('marketplace_id')
     sort_by = json_request.get('sort_by')
     sort_by_value = json_request.get('sort_by_value')
+    search_query = json_request.get('search_query')
+        
     if market_place_id != None and market_place_id != "" and market_place_id != "all" and market_place_id == "custom":
         pipeline = [
         {
@@ -443,6 +446,13 @@ def fetchAllorders(request):
         }
         pipeline.append(match)
         count_pipeline.append(match)
+    if search_query != None and search_query != "":
+        search_query = search_query.strip() 
+        match = { "$match" : 
+                    {"purchase_order_id": {"$regex": search_query, "$options": "i"}}}
+            # {"sku": {"$regex": search_query, "$options": "i"}},
+        pipeline.append(match)
+        count_pipeline.append(match)
     if market_place_id != "custom":
         pipeline.extend([
 
@@ -462,12 +472,13 @@ def fetchAllorders(request):
                     "_id": 0,
                     "id": {"$toString": "$_id"},
                     "purchase_order_id": "$purchase_order_id",
-                    "order_date": {
-                        "$dateToString": {
-                            "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                            "date": "$order_date",
-                        }
-                        },
+                    "order_date": "$order_date",
+                    # {
+                    #     "$dateToString": {
+                    #         "format": "%Y-%m-%dT%H:%M:%S.%LZ",
+                    #         "date": "$order_date",
+                    #     }
+                    #     },
                     "order_status": "$order_status",
                     "order_total": "$order_total",
                     "currency": "$currency",
@@ -892,7 +903,6 @@ def fetchManualOrderDetails(request):
 def ordersCountForDashboard(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
-    print(marketplace_id)
     
     if marketplace_id == "all":
         pipeline = [
@@ -957,7 +967,8 @@ def ordersCountForDashboard(request):
         order_status_count = list(Order.objects.aggregate(*(pipeline)))
         if order_status_count:
             order_status_count = order_status_count[0].get('count', 0)
-            data['total_order_count'] = {
+            marketplace_name = DatabaseModel.get_document(Marketplace.objects,{"id" : marketplace_id},['name']).name
+            data[marketplace_name] = {
             "value" : order_status_count,
             "percentage" : f"{100.00}%"
             }
@@ -991,127 +1002,72 @@ def totalSalesAmount(request):
 @csrf_exempt
 def salesAnalytics(request):
     data = dict()
-    try:
-        json_request = JSONParser().parse(request)
-        date_range = json_request.get('date_range', '7days')  # Default to 7 days
-        start_date = json_request.get('start_date')  # Optional custom start date
-        end_date = json_request.get('end_date')  # Optional custom end date
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id')  # Optional marketplace filter
+    date_range = json_request.get('date_range', 'all')  # 'week', 'month', 'year', or 'all'
+    start_date = json_request.get('start_date')  # Optional custom start date
+    end_date = json_request.get('end_date')  # Optional custom end date
 
-        # Determine the date range
-        if date_range == '1day':
-            start_date = datetime.now() - timedelta(days=1)
-        elif date_range == '7days':
-            start_date = datetime.now() - timedelta(days=7)
-        elif date_range == '1month':
-            start_date = datetime.now() - timedelta(days=30)
-        elif start_date and end_date:
-            start_date = datetime.strptime(start_date, '%Y-%m-%d')
-            end_date = datetime.strptime(end_date, '%Y-%m-%d')
-        else:
-            start_date = datetime.now() - timedelta(days=7)
+    # Determine the date range
+    now = datetime.now()
+    if date_range == 'week':
+        start_date = now - timedelta(days=now.weekday())  # Start of the week
+    elif date_range == 'month':
+        start_date = datetime(now.year, now.month, 1)  # Start of the month
+    elif date_range == 'year':
+        start_date = datetime(now.year, 1, 1)  # Start of the year
+    elif start_date and end_date:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+    else:
+        start_date = None  # No filtering for 'all'
 
-        end_date = end_date or datetime.now()
+    end_date = end_date or now
 
-        # Sales count and values per day
-        pipeline = [
-            {
-                "$match": {
-                    "order_date": {
-                        "$gte": start_date,
-                        "$lte": end_date
-                    }
-                }
-            },
-            {
-                "$group": {
-                    "_id": {
-                        "year": {"$year": "$order_date"},
-                        "month": {"$month": "$order_date"},
-                        "day": {"$dayOfMonth": "$order_date"}
-                    },
-                    "sales_count": {"$sum": 1},
-                    "sales_value": {"$sum": "$order_total"}
-                }
-            },
-            {
-                "$sort": {"_id": 1}
+    # Match conditions
+    match_conditions = {}
+    if start_date:
+        match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
+    if marketplace_id:
+        match_conditions["marketplace_id"] = ObjectId(marketplace_id)
+
+    # Pipeline for total sales amount
+    total_sales_pipeline = [
+        {"$match": match_conditions},
+        {"$group": {"_id": None, "total_sales": {"$sum": "$order_total"}}}
+    ]
+    total_sales_result = list(Order.objects.aggregate(*total_sales_pipeline))
+    data['total_sales'] = total_sales_result[0]['total_sales'] if total_sales_result else 0
+
+    # Pipeline for order count and value by order days
+    order_days_pipeline = [
+        {"$match": match_conditions},
+        {
+            "$group": {
+                "_id": {
+                    "year": {"$year": "$order_date"},
+                    "month": {"$month": "$order_date"},
+                    "day": {"$dayOfMonth": "$order_date"}
+                },
+                "order_count": {"$sum": 1},
+                "order_value": {"$sum": "$order_total"}
             }
-        ]
-        sales_data = list(Order.objects.aggregate(*pipeline))
+        },
+        {"$sort": {"_id": 1}}
+    ]
+    order_days_data = list(Order.objects.aggregate(*order_days_pipeline))
 
-        # Sales data by category
-        category_pipeline = [
-            {
-                "$match": {
-                    "order_date": {
-                        "$gte": start_date,
-                        "$lte": end_date
-                    }
-                }
-            },
-            {
-                "$lookup": {
-                    "from": "product",
-                    "localField": "order_details.product_id",
-                    "foreignField": "_id",
-                    "as": "product_details"
-                }
-            },
-            {
-                "$unwind": "$product_details"
-            },
-            {
-                "$group": {
-                    "_id": "$product_details.category",
-                    "sales_count": {"$sum": 1},
-                    "sales_value": {"$sum": "$order_total"}
-                }
-            },
-            {
-                "$sort": {"sales_value": -1}
-            }
-        ]
-        category_data = list(Order.objects.aggregate(*category_pipeline))
+    # Format order days data
+    formatted_order_days = [
+        {
+            "date": f"{day['_id']['year']}-{day['_id']['month']:02d}-{day['_id']['day']:02d}",
+            "order_count": day["order_count"],
+            "order_value": round(day["order_value"],2)
+        }
+        for day in order_days_data
+    ]
 
-        # Sales data by channels
-        channel_pipeline = [
-            {
-                "$match": {
-                    "order_date": {
-                        "$gte": start_date,
-                        "$lte": end_date
-                    }
-                }
-            },
-            {
-                "$lookup": {
-                    "from": "marketplace",
-                    "localField": "marketplace_id",
-                    "foreignField": "_id",
-                    "as": "marketplace_details"
-                }
-            },
-            {
-                "$unwind": "$marketplace_details"
-            },
-            {
-                "$group": {
-                    "_id": "$marketplace_details.name",
-                    "sales_count": {"$sum": 1},
-                    "sales_value": {"$sum": "$order_total"}
-                }
-            },
-            {
-                "$sort": {"sales_value": -1}
-            }
-        ]
-        channel_data = list(Order.objects.aggregate(*channel_pipeline))
-
-        data['sales_data'] = sales_data
-        data['category_data'] = category_data
-        data['channel_data'] = channel_data
-    except Exception as e:
-        data['error'] = str(e)
+    data['order_days'] = formatted_order_days
     return data
 
 @csrf_exempt
@@ -1183,51 +1139,87 @@ def mostSellingProducts(request):
     data['top_products'] = top_products
     return data
 
-
+def change_sign(value):
+    """
+    Change the sign of a given value only if it's negative.
+    
+    Args:
+    value (number): The input value to potentially change the sign of.
+    
+    Returns:
+    number: The input value with its sign changed if it was negative, otherwise unchanged.
+    """
+    if value < 0:
+        return -value
+    else:
+        return value
+    
+    
 @csrf_exempt
 def getSalesTrendPercentage(request):
     data = dict()
     json_request = JSONParser().parse(request)
-    trend_type = json_request.get('trend_type', 'channel')  # 'channel' or 'category'
+    range_type = json_request.get('range_type', 'month')  # 'day', 'week', 'month', 'year'
+    marketplace_id = json_request.get('marketplace_id')  # Marketplace filter (e.g., 'amazon', 'walmart')
 
-    # Get the current month and previous month date ranges
+    # Determine date ranges based on range_type
     now = datetime.now()
-    current_month_start = datetime(now.year, now.month, 1)
-    previous_month_end = current_month_start - timedelta(days=1)
-    previous_month_start = datetime(previous_month_end.year, previous_month_end.month, 1)
+    if range_type == 'day':
+        current_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        previous_start = current_start - timedelta(days=1)
+        previous_end = current_start
+    elif range_type == 'week':
+        current_start = now - timedelta(days=now.weekday())
+        current_start = current_start.replace(hour=0, minute=0, second=0, microsecond=0)
+        previous_start = current_start - timedelta(weeks=1)
+        previous_end = current_start
+    elif range_type == 'month':
+        current_start = datetime(now.year, now.month, 1)
+        previous_month_end = current_start - timedelta(days=1)
+        previous_start = datetime(previous_month_end.year, previous_month_end.month, 1)
+        previous_end = current_start
+    elif range_type == 'year':
+        current_start = datetime(now.year, 1, 1)
+        previous_start = datetime(now.year - 1, 1, 1)
+        previous_end = current_start
+    else:
+        data['error'] = "Invalid range_type provided."
+        return data
 
-    # Match pipeline for current and previous month
+    # Match pipeline for current and previous ranges
     match_pipeline = [
         {
             "$facet": {
-                "current_month": [
+                "current_range": [
                     {
                         "$match": {
                             "order_date": {
-                                "$gte": current_month_start,
+                                "$gte": current_start,
                                 "$lt": now
-                            }
+                            },
+                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id else {})
                         }
                     },
                     {
                         "$group": {
-                            "_id": f"${'marketplace_id' if trend_type == 'channel' else 'category'}",
+                            "_id": "$marketplace_id",
                             "sales_value": {"$sum": "$order_total"}
                         }
                     }
                 ],
-                "previous_month": [
+                "previous_range": [
                     {
                         "$match": {
                             "order_date": {
-                                "$gte": previous_month_start,
-                                "$lt": current_month_start
-                            }
+                                "$gte": previous_start,
+                                "$lt": previous_end
+                            },
+                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id else {})
                         }
                     },
                     {
                         "$group": {
-                            "_id": f"${'marketplace_id' if trend_type == 'channel' else 'category'}",
+                            "_id": "$marketplace_id",
                             "sales_value": {"$sum": "$order_total"}
                         }
                     }
@@ -1239,22 +1231,32 @@ def getSalesTrendPercentage(request):
     trend_data = list(Order.objects.aggregate(*match_pipeline))
 
     if trend_data:
-        current_month_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["current_month"]}
-        previous_month_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["previous_month"]}
+        current_range_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["current_range"]}
+        previous_range_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["previous_range"]}
 
-        trend_percentage = []
-        for key in set(current_month_data.keys()).union(previous_month_data.keys()):
-            current_value = current_month_data.get(key, 0)
-            previous_value = previous_month_data.get(key, 0)
-            percentage_change = ((current_value - previous_value) / previous_value * 100) if previous_value != 0 else (100 if current_value > 0 else 0)
-            trend_percentage.append({
-                "id": str(key),
-                "current_month_sales": current_value,
-                "previous_month_sales": previous_value,
-                "trend_percentage": round(percentage_change, 2)
-            })
-
-        data['trend_percentage'] = trend_percentage
+        if not marketplace_id:  # Combine all marketplaces if marketplace_id is None
+            current_total = sum(current_range_data.values())
+            previous_total = sum(previous_range_data.values())
+            percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
+            data['trend_percentage'] = [{
+                "id": "all",
+                "current_range_sales": current_total,
+                "previous_range_sales": previous_total,
+                "trend_percentage": change_sign(round(percentage_change, 2))
+            }]
+        else:  # Provide data for the specific marketplace
+            trend_percentage = []
+            for key in set(current_range_data.keys()).union(previous_range_data.keys()):
+                current_value = current_range_data.get(key, 0)
+                previous_value = previous_range_data.get(key, 0)
+                percentage_change = ((current_value - previous_value) / previous_value * 100) if previous_value != 0 else (100 if current_value > 0 else 0)
+                trend_percentage.append({
+                    "id": str(key),
+                    "current_range_sales": current_value,
+                    "previous_range_sales": previous_value,
+                    "trend_percentage": change_sign(round(percentage_change, 2))
+                })
+            data['trend_percentage'] = trend_percentage
     else:
         data['trend_percentage'] = []
 
