@@ -1,12 +1,14 @@
 import requests
 import uuid
 import xml.etree.ElementTree as ET  # Import XML parser
-from omnisight.operations.walmart_utils import getAccesstoken
+from omnisight.operations.walmart_utils import getAccesstoken, oauthFunction
 from omnisight.models import *
 import pandas as pd
 from ecommerce_tool.crud import DatabaseModel
 from bson import ObjectId
 import json
+from datetime import datetime, timedelta
+
 
 
 
@@ -201,7 +203,7 @@ def process_excel_for_walmart(file_path):
 
 
 
-def fetchAllorders(request):
+def fetchAllorders1(request):
     orders = []
     user_id = request.GET.get('user_id')
     access_token = getAccesstoken(user_id)
@@ -448,17 +450,26 @@ def process_walmart_order(json_data):
         product_id = product.id if product else None
     except:
         product_id = None
+    try:
+        product_price = {
+            "CurrencyCode": json_data['charges']['charge'][0]['chargeAmount']['currency'],
+            "Amount": float(json_data['charges']['charge'][0]['chargeAmount']['amount'])
+        }
+    except:
+        product_price = {
+            "CurrencyCode": "USD",
+            "Amount": 0.0
+        }
 
-    # Helper function to safely extract money values
-    def get_money(field_path, default_currency="USD"):
-        field = json_data
-        for key in field_path:
-            if isinstance(field, list):  # If the field is a list, get the first element
-                field = field[0] if field else {}
-            field = field.get(key, {}) if isinstance(field, dict) else {}
-        return {
-            "CurrencyCode": field.get("currency", default_currency),
-            "Amount": float(field.get("amount", 0.0))
+    try:
+        tax_price ={
+            "CurrencyCode": json_data['charges']['charge'][0]['tax']['taxAmount']['currency'],
+            "Amount": float(json_data['charges']['charge'][0]['tax']['taxAmount']['amount'])
+        }
+    except:
+        tax_price =  {
+            "CurrencyCode": "USD",
+            "Amount": 0.0
         }
 
     # Extract necessary fields safely
@@ -479,8 +490,8 @@ def process_walmart_order(json_data):
             QuantityShipped=int(order_line_status.get("statusQuantity", {}).get("amount", 0)),
         ),
         Pricing=Pricing(
-            ItemPrice=Money(**get_money(["charges", "charge", 0, "chargeAmount"])),
-            ItemTax=Money(**get_money(["charges", "charge", 0, "tax", "taxAmount"]))
+            ItemPrice=Money(**product_price),
+            ItemTax=Money(**tax_price)
         ),
         Fulfillment=Fulfillment(
             FulfillmentOption=json_data.get("fulfillment", {}).get("fulfillmentOption", "Unknown"),
@@ -522,3 +533,77 @@ def updateOrdersItemsDetails(request):
         DatabaseModel.update_documents(Order.objects, {"id": ins.id}, {"order_items": order_items})
 
     return True
+
+
+
+
+def syncRecentWalmartOrders():
+    orders = []
+    access_token = oauthFunction()
+    marketplace_id = DatabaseModel.get_document(Marketplace.objects,{'name' : "Walmart"},['id']).id
+    
+    base_url = "https://marketplace.walmartapis.com/v3/orders"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "WM_SEC.ACCESS_TOKEN": access_token,  
+        "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),  
+        "WM_SVC.NAME": "Walmart Marketplace",  
+        "Accept": "application/json"
+    }
+    # Get today's date
+    today = datetime.utcnow()
+    # Fetch last 30 days of orders
+    start_date = (today - timedelta(days=180)).strftime("%Y-%m-%dT00:00:00Z")
+    end_date = today.strftime("%Y-%m-%dT23:59:59Z")
+
+    url = f"{base_url}?createdStartDate={start_date}&createdEndDate={end_date}"
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        result = response.json()
+        fetched_orders = result.get('list', {}).get('elements', {}).get('order', [])
+        # total_fetched += len(fetched_orders)
+
+       
+        orders.extend(fetched_orders)
+        for row in orders:
+            order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": str(row.get('purchaseOrderId', ""))})
+            if order_obj is not None:
+                print(f"Order with purchase order ID {row['purchaseOrderId']} already exists. Skipping...")
+            else:
+                print(f"Creating order with purchase order ID {row['purchaseOrderId']}...")
+                order_items = list()
+                shipNode = eval(str(row['shipNode'])) if row.get('shipNode') else {}
+                order_details = eval(str(row['orderLines'])) if row.get('orderLines') else []
+                order_total = 0
+                currency = "USD"
+                order_status = ""
+                for order_line_ins in order_details.get('orderLine', []):
+                    for charge_ins in order_line_ins.get('charges', {}).get('charge', []):
+                        tax = 0
+                        if charge_ins.get('tax') is not None:
+                            tax = float(charge_ins['tax']['taxAmount']['amount'])
+                        order_total += float(charge_ins['chargeAmount']['amount']) + tax
+                        currency = charge_ins['chargeAmount']['currency']
+                    order_items.append(process_walmart_order(order_line_ins))
+
+                order_status = order_line_ins.get('orderLineStatuses', {}).get('orderLineStatus', [{}])[0].get('status', "")
+
+                order_date = row.get('orderDate', "")
+                if order_date:
+                    order_date = datetime.fromtimestamp(int(order_date) / 1000)
+                order = Order(
+                    marketplace_id=marketplace_id,
+                    purchase_order_id=str(row.get('purchaseOrderId', "")),
+                    customer_order_id=str(row.get('customerOrderId', "")),
+                    customer_email_id=str(row.get('customerEmailId', "")),
+                    order_date=order_date,
+                    shipping_information=eval(row['shippingInfo']) if row.get('shippingInfo') else "",
+                    fulfillment_channel=shipNode.get('type', ""),
+                    order_details=order_details.get('orderLine', []),
+                    order_items = order_items,
+                    order_total=order_total,
+                    currency=currency,
+                    order_status=order_status,
+                )
+                order.save()
+    return orders
