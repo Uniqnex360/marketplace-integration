@@ -64,6 +64,8 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     "rest_framework_simplejwt",
+    'django_celery_beat',
+    'omnisight'
 ]
 
 MIDDLEWARE = [
@@ -200,3 +202,9 @@ SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv('SECRET_KEY')
+
+
+
+CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Change if using RabbitMQ
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
