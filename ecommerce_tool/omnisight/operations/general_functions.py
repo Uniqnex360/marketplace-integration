@@ -32,7 +32,6 @@ def getMarketplaceList(request):
 def getProductList(request):
     data = dict()
     json_request = JSONParser().parse(request)
-    print(json_request)
     marketplace_id = json_request.get('marketplace_id')
     skip = int(json_request.get('skip'))
     limit = int(json_request.get('limit'))
@@ -903,38 +902,43 @@ def fetchManualOrderDetails(request):
 def ordersCountForDashboard(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
-    
+    start_date = request.GET.get('start_date')  # Custom start date
+    end_date = request.GET.get('end_date')  # Custom end date
+
+    match_conditions = {}
+    if start_date and end_date:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
+
     if marketplace_id == "all":
         pipeline = [
-        {
-            "$group": {
-                "_id": None,
-                "count": {"$sum": 1}
+            {"$match": match_conditions},
+            {
+                "$group": {
+                    "_id": None,
+                    "count": {"$sum": 1}
+                }
             }
-        }
         ]
         order_status_count = list(Order.objects.aggregate(*(pipeline)))
-        total_order_count = order_status_count[0].get('count', 0)
+        total_order_count = order_status_count[0].get('count', 0) if order_status_count else 0
         data['total_order_count'] = {
-            "value" : total_order_count,
-            "percentage" : f"{100.00}%"
+            "value": total_order_count,
+            "percentage": f"{100.00}%"
         }
         pipeline = [
             {
-                "$project" : {
-                    "_id" : 1,
-                    "name" : 1,
+                "$project": {
+                    "_id": 1,
+                    "name": 1,
                 }
             }
         ]
         marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
         for ins in marketplace_list:
-            pipeline= [
-                {
-                    "$match" : {
-                        "marketplace_id" : ins['_id']
-                    }
-                },
+            pipeline = [
+                {"$match": {**match_conditions, "marketplace_id": ins['_id']}},
                 {
                     "$group": {
                         "_id": None,
@@ -945,37 +949,33 @@ def ordersCountForDashboard(request):
             order_status_count = list(Order.objects.aggregate(*(pipeline)))
             if order_status_count:
                 order_status_count = order_status_count[0].get('count', 0)
-                percentage = round((order_status_count/total_order_count) * 100,2)
+                percentage = round((order_status_count / total_order_count) * 100, 2) if total_order_count else 0
                 data[ins['name']] = {
-                    "count" : order_status_count,
-                    "percentage" : f"{percentage}%"
+                    "count": order_status_count,
+                    "percentage": f"{percentage}%"
                 }
     elif marketplace_id != "all":
-        pipeline= [
-                {
-                    "$match" : {
-                        "marketplace_id" : ObjectId(marketplace_id)
-                    }
-                },
-                {
-                    "$group": {
-                        "_id": None,
-                        "count": {"$sum": 1}
-                    }
+        pipeline = [
+            {"$match": {**match_conditions, "marketplace_id": ObjectId(marketplace_id)}},
+            {
+                "$group": {
+                    "_id": None,
+                    "count": {"$sum": 1}
                 }
-            ]
+            }
+        ]
         order_status_count = list(Order.objects.aggregate(*(pipeline)))
         if order_status_count:
             order_status_count = order_status_count[0].get('count', 0)
-            marketplace_name = DatabaseModel.get_document(Marketplace.objects,{"id" : marketplace_id},['name']).name
+            marketplace_name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
             data[marketplace_name] = {
-            "value" : order_status_count,
-            "percentage" : f"{100.00}%"
+                "value": order_status_count,
+                "percentage": f"{100.00}%"
             }
             data['total_order_count'] = {
-            "value" : order_status_count,
-            "percentage" : f"{100.00}%"
-        }
+                "value": order_status_count,
+                "percentage": f"{100.00}%"
+            }
     return data
 
 
@@ -1277,15 +1277,22 @@ def fetchSalesSummary(request):
 
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
+    start_date = json_request.get('start_date')  # Optional custom start date
+    end_date = json_request.get('end_date')  # Optional custom end date
+
+    # Add date range filter if provided
+    if start_date and end_date:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        match["order_date"] = {"$gte": start_date, "$lte": end_date}
+
     if marketplace_id:
-        match = {
-            "$match": {
-                "marketplace_id": ObjectId(marketplace_id)
-            }
-        }
-        total_sales_pipeline.append(match)
-        pipeline.append(match)
-        
+        match["marketplace_id"] = ObjectId(marketplace_id)
+
+    if match:
+        match_stage = {"$match": match}
+        total_sales_pipeline.append(match_stage)
+        pipeline.append(match_stage)
 
     # Pipeline to calculate total units sold, total sold product count, and total sales
     total_sales_pipeline.extend([
@@ -1298,7 +1305,7 @@ def fetchSalesSummary(request):
         {
             "$project": {
                 "_id": 0,
-                "total_sales": {"$round" : ["$total_sales",2]}
+                "total_sales": {"$round": ["$total_sales", 2]}
             }
         }
     ])
@@ -1330,15 +1337,15 @@ def fetchSalesSummary(request):
     summary1 = list(Order.objects.aggregate(*pipeline))
     if summary1:
         s_pipeline = [
-            {"$match" : {
-                "_id" : {"$in" : summary1[0]['ids']}
+            {"$match": {
+                "_id": {"$in": summary1[0]['ids']}
             }},
-             {
-            "$group": {
-                "_id": None,
-                "total_units_sold": {"$sum": "$ProductDetails.QuantityOrdered"},
-                "unique_product_ids": {"$addToSet": "$ProductDetails.product_id"},
-            }
+            {
+                "$group": {
+                    "_id": None,
+                    "total_units_sold": {"$sum": "$ProductDetails.QuantityOrdered"},
+                    "unique_product_ids": {"$addToSet": "$ProductDetails.product_id"},
+                }
             },
             {
                 "$project": {
@@ -1355,10 +1362,6 @@ def fetchSalesSummary(request):
     else:
         data['total_units_sold'] = 0
         data['total_sold_product_count'] = 0
+
     return data
-
-
-
-
-
 
