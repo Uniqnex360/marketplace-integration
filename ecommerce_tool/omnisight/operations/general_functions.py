@@ -972,6 +972,10 @@ def ordersCountForDashboard(request):
             "value" : order_status_count,
             "percentage" : f"{100.00}%"
             }
+            data['total_order_count'] = {
+            "value" : order_status_count,
+            "percentage" : f"{100.00}%"
+        }
     return data
 
 
@@ -1003,6 +1007,7 @@ def totalSalesAmount(request):
 def salesAnalytics(request):
     data = dict()
     json_request = JSONParser().parse(request)
+    print("json_request",json_request)
     marketplace_id = json_request.get('marketplace_id')  # Optional marketplace filter
     date_range = json_request.get('date_range', 'all')  # 'week', 'month', 'year', or 'all'
     start_date = json_request.get('start_date')  # Optional custom start date
@@ -1028,7 +1033,7 @@ def salesAnalytics(request):
     match_conditions = {}
     if start_date:
         match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
-    if marketplace_id:
+    if marketplace_id != None and marketplace_id != "all":
         match_conditions["marketplace_id"] = ObjectId(marketplace_id)
 
     # Pipeline for total sales amount
@@ -1239,19 +1244,20 @@ def getSalesTrendPercentage(request):
             previous_total = sum(previous_range_data.values())
             percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
             data['trend_percentage'] = [{
-                "id": "all",
+                "id": "All Channels",
                 "current_range_sales": current_total,
                 "previous_range_sales": previous_total,
                 "trend_percentage": change_sign(round(percentage_change, 2))
             }]
         else:  # Provide data for the specific marketplace
             trend_percentage = []
+            marketplace_name = DatabaseModel.get_document(Marketplace.objects,{"id" : marketplace_id},['name']).name
             for key in set(current_range_data.keys()).union(previous_range_data.keys()):
                 current_value = current_range_data.get(key, 0)
                 previous_value = previous_range_data.get(key, 0)
                 percentage_change = ((current_value - previous_value) / previous_value * 100) if previous_value != 0 else (100 if current_value > 0 else 0)
                 trend_percentage.append({
-                    "id": str(key),
+                    "id": str(marketplace_name),
                     "current_range_sales": current_value,
                     "previous_range_sales": previous_value,
                     "trend_percentage": change_sign(round(percentage_change, 2))
