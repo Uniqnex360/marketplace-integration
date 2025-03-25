@@ -17,7 +17,7 @@ Including another URLconf
 from django.urls import path
 from omnisight.operations.common_operations import checkEmailExistOrNot, signupUser,loginUser, forgotPassword, changePassword
 from omnisight.operations.walmart_operations import updateOrdersItemsDetails, fetchAllorders1, syncRecentWalmartOrders
-from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary, salesAnalytics, mostSellingProducts
+from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary, salesAnalytics, mostSellingProducts, fetchTopSellingCategories
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders
 
@@ -52,6 +52,7 @@ urlpatterns = [
     path("fetchSalesSummary/",fetchSalesSummary,name="fetchSalesSummary"),
     path("salesAnalytics/",salesAnalytics,name="salesAnalytics"),
     path("mostSellingProducts/",mostSellingProducts,name='mostSellingProducts'),
+    path("fetchTopSellingCategories/",fetchTopSellingCategories,name="fetchTopSellingCategories"),
 
     #Custom Order
     path("getProductListForOrdercreation/",getProductListForOrdercreation,name="getProductListForOrdercreation"),

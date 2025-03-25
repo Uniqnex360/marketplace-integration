@@ -15,7 +15,7 @@ class Marketplace(Document):
 
 
 class Category(Document):
-    name = StringField(required=True, unique=True)  # Category name
+    name = StringField(required=True)  # Category name
     parent_category_id = ReferenceField('self', null=True)  # Parent category (if applicable)
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
     breadcrumb_path = ListField(StringField())  # Hierarchical category path
@@ -283,31 +283,39 @@ class customOrder(Document):
     notes = StringField()
 
 
+class product_details(EmbeddedDocument):
+    product_id = ReferenceField(Product)
+    title = StringField(required=True)
+    sku = StringField(required=True)
+    unit_price = FloatField()
+    quantity = IntField()
+
+
 
 
 class Boder(Document):
     # Order details
-    order_id = StringField(required=True, unique=True)  # Internal order ID
-    sku_id = StringField(required=True)
-    ordered_products = ListField(StringField(), required=True)  # List of product names
-    quantity = IntField(required=True)
-    price = FloatField(required=True)
+    order_id = StringField()  # Internal order ID
+    sku_id = StringField()
+    ordered_products = ListField(EmbeddedDocumentField(product_details))  # List of product names
+    total_quantity = IntField()
+    total_price = FloatField()
     shipment_type = StringField()  # e.g., "Standard", "Express"
-    channel = StringField(required=True)  # e.g., "Amazon", "Shopify"
-    order_status = StringField(required=True, choices=["Open", "pending", "delivered", "closed", "cancelled"])
+    channel = StringField()  # e.g., "Amazon", "Shopify"
+    order_status = StringField(choices=["Open", "Pending", "Delivered", "Closed", "Cancelled"],default="Pending")
 
     # Payment details
-    payment_status = StringField(required=True)  # e.g., "Paid", "Pending"
-    payment_mode = StringField(required=True)  # e.g., "Credit Card", "PayPal"
+    payment_status = StringField(default="Pending")  # e.g., "Paid", "Pending"
+    payment_mode = StringField()  # e.g., "Credit Card", "PayPal"
     invoice = StringField()  # Invoice URL or identifier
     transaction_id = StringField()
     tax = FloatField(default=0.0)
     discount = FloatField(default=0.0)
 
     # Address and contact information
-    shipping_address = StringField(required=True)
-    mail = StringField(required=True)
-    contact_number = StringField(required=True)
+    shipping_address = StringField()
+    mail = StringField()
+    contact_number = StringField()
     customer_note = StringField()  # Any note provided by the customer
 
     # Shipping details
@@ -323,7 +331,7 @@ class Boder(Document):
     shipping_label_print = StringField()  # URL or instructions for printing the label
 
     # Channel details
-    channel_name = StringField(required=True)  # e.g., "Amazon", "Shopify"
+    channel_name = StringField()  # e.g., "Amazon", "Shopify"
     channel_order_id = StringField()  # Order ID from the channel
     fulfillment_type = StringField()  # e.g., "FBA", "FBM"
 
