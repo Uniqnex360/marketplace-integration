@@ -1080,8 +1080,32 @@ def mostSellingProducts(request):
     data = dict()
     pipeline = list()
     marketPlaceId = request.GET.get('marketPlaceId')
-    # Pipeline to get top 5 most selling products based on sales count and revenue
+    start_date = request.GET.get('start_date')  # Optional custom start date
+    end_date = request.GET.get('end_date')  # Optional custom end date
+
+    # Match conditions for date range
+    match_conditions = {}
+    if start_date and end_date:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
+
+    # Pipeline to filter orders based on date range and marketplace
     pipeline.extend([
+        {
+            "$lookup": {
+                "from": "order",
+                "localField": "_id",
+                "foreignField": "order_items",
+                "as": "order_data"
+            }
+        },
+        {
+            "$unwind": "$order_data"
+        },
+        {
+            "$match": match_conditions
+        },
         {
             "$lookup": {
                 "from": "product",
@@ -1092,16 +1116,19 @@ def mostSellingProducts(request):
         },
         {
             "$unwind": "$product_ins"
-        }])
-    if marketPlaceId != None and marketPlaceId != "" and marketPlaceId != "all":
+        }
+    ])
+
+    if marketPlaceId and marketPlaceId != "all":
         match = {
-            "$match" : {
-                "product_ins.marketplace_id" : ObjectId(marketPlaceId)
+            "$match": {
+                "product_ins.marketplace_id": ObjectId(marketPlaceId)
             }
         }
         pipeline.append(match)
 
-    pipeline2 = [{
+    pipeline2 = [
+        {
             "$group": {
                 "_id": {
                     "product_id": "$ProductDetails.product_id",
@@ -1114,12 +1141,6 @@ def mostSellingProducts(request):
                 "total_revenue": {"$sum": {"$multiply": ["$ProductDetails.QuantityOrdered", "$product_ins.price"]}}
             }
         },
-        # {
-        #     "$sort": {"total_quantity_sold": -1}
-        # },
-        # {
-        #     "$limit": 5
-        # },
         {
             "$project": {
                 "_id": 0,
@@ -1286,7 +1307,7 @@ def fetchSalesSummary(request):
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
         match["order_date"] = {"$gte": start_date, "$lte": end_date}
 
-    if marketplace_id:
+    if marketplace_id != None and marketplace_id != "all" and marketplace_id != "":
         match["marketplace_id"] = ObjectId(marketplace_id)
 
     if match:
@@ -1333,7 +1354,6 @@ def fetchSalesSummary(request):
             }
         },
     ])
-
     summary1 = list(Order.objects.aggregate(*pipeline))
     if summary1:
         s_pipeline = [
@@ -1365,3 +1385,87 @@ def fetchSalesSummary(request):
 
     return data
 
+@csrf_exempt
+def fetchTopSellingCategories(request):
+    data = dict()
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id')  # Optional marketplace filter
+    limit = int(json_request.get('limit', 15))  # Default limit = 15 if not provided
+    start_date = json_request.get('start_date')  # Optional custom start date
+    end_date = json_request.get('end_date')  # Optional custom end date
+
+    # Match conditions
+    match_conditions = {}
+    if start_date and end_date:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        match_conditions["order_data.order_date"] = {"$gte": start_date, "$lte": end_date}
+    if marketplace_id != None and marketplace_id != "all":
+        match_conditions["marketplace_id"] = ObjectId(marketplace_id)
+
+    # Pipeline to fetch top selling categories based on order value
+    pipeline = [
+        {
+            "$lookup": {
+                "from": "order",
+                "localField": "_id",
+                "foreignField": "order_items",
+                "as": "order_data"
+            }
+        },
+        {
+            "$unwind": "$order_data"
+        },
+        {
+            "$match": match_conditions
+        },
+        {
+            "$lookup": {
+                "from": "product",
+                "localField": "ProductDetails.product_id",
+                "foreignField": "_id",
+                "as": "product_ins"
+            }
+        },
+        {
+            "$unwind": "$product_ins"
+        },
+        {
+            "$lookup": {
+                "from": "category",
+                "localField": "product_ins.category",
+                "foreignField": "name",
+                "as": "category_ins"
+            }
+        },
+        {
+            "$unwind": "$category_ins"
+        },
+        {
+            "$group": {
+                "_id": {
+                    "category_id": "$category_ins._id",
+                    "category_name": "$category_ins.name"
+                },
+                "total_order_value": {"$sum": {"$multiply": ["$ProductDetails.QuantityOrdered", "$product_ins.price"]}}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "category_id": {"$toString": "$_id.category_id"},
+                "category_name": "$_id.category_name",
+                "total_order_value": {"$round": ["$total_order_value", 2]}
+            }
+        },
+        {
+            "$sort": {"total_order_value": -1}
+        },
+        {
+            "$limit": limit
+        }
+    ]
+
+    top_categories = list(OrderItems.objects.aggregate(*pipeline))
+    data['top_categories'] = top_categories
+    return data
