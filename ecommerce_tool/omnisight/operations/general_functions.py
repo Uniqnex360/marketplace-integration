@@ -1088,7 +1088,7 @@ def mostSellingProducts(request):
     if start_date and end_date:
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
-        match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
+        match_conditions["order_data.order_date"] = {"$gte": start_date, "$lte": end_date}
 
     # Pipeline to filter orders based on date range and marketplace
     pipeline.extend([
@@ -1401,7 +1401,7 @@ def fetchTopSellingCategories(request):
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
         match_conditions["order_data.order_date"] = {"$gte": start_date, "$lte": end_date}
     if marketplace_id != None and marketplace_id != "all":
-        match_conditions["marketplace_id"] = ObjectId(marketplace_id)
+        match_conditions["order_data.marketplace_id"] = ObjectId(marketplace_id)
 
     # Pipeline to fetch top selling categories based on order value
     pipeline = [
