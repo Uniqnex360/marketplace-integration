@@ -1142,8 +1142,11 @@ def salesAnalytics(request):
     custom_total_sales_result = list(custom_order.objects.aggregate(*custom_total_sales_pipeline))
     custom_total_sales = custom_total_sales_result[0]['total_sales'] if custom_total_sales_result else 0
 
-    # Combine total sales from both collections
-    data['total_sales'] = total_sales + custom_total_sales
+    if marketplace_id == "custom":
+        data['total_sales'] = custom_total_sales
+    else:
+        # Combine total sales from both collections
+        data['total_sales'] = total_sales + custom_total_sales
 
     # Pipeline for order count and value by order days (Order collection)
     order_days_pipeline = [
@@ -1183,12 +1186,13 @@ def salesAnalytics(request):
 
     # Combine and format order days data
     combined_order_days = {}
-    for day in order_days_data:
-        date_key = f"{day['_id']['year']}-{day['_id']['month']:02d}-{day['_id']['day']:02d}"
-        combined_order_days[date_key] = {
-            "order_count": day["order_count"],
-            "order_value": round(day["order_value"], 2)
-        }
+    if marketplace_id != "custom":
+        for day in order_days_data:
+            date_key = f"{day['_id']['year']}-{day['_id']['month']:02d}-{day['_id']['day']:02d}"
+            combined_order_days[date_key] = {
+                "order_count": day["order_count"],
+                "order_value": round(day["order_value"], 2)
+            }
 
     for day in custom_order_days_data:
         date_key = f"{day['_id']['year']}-{day['_id']['month']:02d}-{day['_id']['day']:02d}"
