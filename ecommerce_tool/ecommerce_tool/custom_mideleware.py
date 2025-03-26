@@ -10,7 +10,12 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from django.conf import settings
 from ecommerce_tool.crud import DatabaseModel
-from omnisight.models import ignore_api_functions 
+from omnisight.models import ignore_api_functions, authenticated_api, user
+from bson import ObjectId
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.parsers import JSONParser
+
+
 
 
 
@@ -119,57 +124,93 @@ def refresh_cookies(request,response):
     createCookies(token, response)
 
 
-class customMiddleware:
-    def __init__(self, get_response):
-        self.get_response = get_response
+import json
 
-    @skip_for_paths()
-    def __call__(self, request):
-        response = createJsonResponse(request)
-        # try:
-        #     jwtObj = check_authentication(request)
-        #     if jwtObj != None:
-        #         refresh_cookies(request, response)
+@csrf_exempt
+def checkAuthentication(request):
+    path = request.path.split("/")
+    user_id = None
+
+    if request.method == "POST":
+        if not request.body:
+            return JsonResponse({"error": "Empty request body"}, status=400)
+
+        try:
+            data = json.loads(request.body.decode("utf-8"))  # Manually parse JSON
+            print("Parsed Data:", data)
+            user_id = data.get("user_id")
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON: {e}")
+            return JsonResponse({"error": "Invalid JSON format"}, status=400)
+
+    elif request.method == "GET":
+        user_id = request.GET.get("user_id", None)
+    if user_id:
+        user_role = DatabaseModel.get_document(user.objects, {"id": ObjectId(user_id)}, ["role_id"]).role_id.id
+        if user_role:
+            has_permission = DatabaseModel.get_document(authenticated_api.objects, {
+                "name__in": path,
+                "allowed_roles__in": [user_role]
+            })
+            return JsonResponse({"authenticated": bool(has_permission)})
+
+    return JsonResponse({"error": "Authentication failed"}, status=403)
+
+
+
+
+
+# class customMiddleware:
+#     def __init__(self, get_response):
+#         self.get_response = get_response
+
+#     @skip_for_paths()
+#     def __call__(self, request):
+#         response = createJsonResponse(request)
+#         # try:
+#         #     jwtObj = check_authentication(request)
+#         #     if jwtObj != None:
+#         #         refresh_cookies(request, response)
                 
                 
-        #         is_authorised = True
-        #         if is_authorised:
-        #             res = self.get_response(request)
-        #             if isinstance(res, Response):
-        #                 response.data['data'] = res.data
-        #             else:
-        #                 response.data['data'] = res
-        #         else:
-        #             response.status_code = status.HTTP_401_UNAUTHORIZED
-        #     else:
-        #         response.status_code = status.HTTP_401_UNAUTHORIZED
-        #         response.data['message'] = 'Invalid token'
-        # except Exception as e:
-        #     print("Exception Class --", e.__class__)
-        #     print("Exception Class name --", e.__class__.__name__)
-        #     print("Exception --")
-        #     print(e)
-        #     response.data['data'] = False
-        #     if (e.__class__.__name__ == 'ExpiredSignatureError' or e.__class__.__name__ == 'DecodeError'):
-        #         response.status_code = status.HTTP_401_UNAUTHORIZED
-        #         response.data['message'] = 'Invalid token'
-        #     elif e.__class__.__name__ == 'ValidationError':
-        #         print(str(e))
-        #         print(e.message)
-        #     else:
-        #         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        res = self.get_response(request)
-        if isinstance(res, HttpResponse) and not isinstance(res, JsonResponse):
-            return res
-        if isinstance(res, Response):
-            response.data['data'] = res.data
-        else:
-            response.data['data'] = res
-        response.accepted_renderer = JSONRenderer()
-        response.accepted_media_type = "application/json"
-        response.renderer_context = {}
-        response.render()
-        return response
+#         #         is_authorised = True
+#         #         if is_authorised:
+#         #             res = self.get_response(request)
+#         #             if isinstance(res, Response):
+#         #                 response.data['data'] = res.data
+#         #             else:
+#         #                 response.data['data'] = res
+#         #         else:
+#         #             response.status_code = status.HTTP_401_UNAUTHORIZED
+#         #     else:
+#         #         response.status_code = status.HTTP_401_UNAUTHORIZED
+#         #         response.data['message'] = 'Invalid token'
+#         # except Exception as e:
+#         #     print("Exception Class --", e.__class__)
+#         #     print("Exception Class name --", e.__class__.__name__)
+#         #     print("Exception --")
+#         #     print(e)
+#         #     response.data['data'] = False
+#         #     if (e.__class__.__name__ == 'ExpiredSignatureError' or e.__class__.__name__ == 'DecodeError'):
+#         #         response.status_code = status.HTTP_401_UNAUTHORIZED
+#         #         response.data['message'] = 'Invalid token'
+#         #     elif e.__class__.__name__ == 'ValidationError':
+#         #         print(str(e))
+#         #         print(e.message)
+#         #     else:
+#         #         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+#         res = self.get_response(request)
+#         if isinstance(res, HttpResponse) and not isinstance(res, JsonResponse):
+#             return res
+#         if isinstance(res, Response):
+#             response.data['data'] = res.data
+#         else:
+#             response.data['data'] = res
+#         response.accepted_renderer = JSONRenderer()
+#         response.accepted_media_type = "application/json"
+#         response.renderer_context = {}
+#         response.render()
+#         return response
 
 
 def send_email(to_email, subject, body):
@@ -188,4 +229,32 @@ def send_email(to_email, subject, body):
         print(f"Failed to send email: {e}")
 
 
-        
+
+class customMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    @skip_for_paths()
+    def __call__(self, request):
+        response = createJsonResponse(request)
+        if not checkAuthentication(request):
+            response.status_code = status.HTTP_401_UNAUTHORIZED
+            response.data['message'] = 'Permission denied'
+            response.accepted_renderer = JSONRenderer()
+            response.accepted_media_type = "application/json"
+            response.renderer_context = {}
+            response.render()
+            return response
+
+        res = self.get_response(request)
+        if isinstance(res, HttpResponse) and not isinstance(res, JsonResponse):
+            return res
+        if isinstance(res, Response):
+            response.data['data'] = res.data
+        else:
+            response.data['data'] = res
+        response.accepted_renderer = JSONRenderer()
+        response.accepted_media_type = "application/json"
+        response.renderer_context = {}
+        response.render()
+        return response
