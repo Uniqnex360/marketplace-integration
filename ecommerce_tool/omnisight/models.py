@@ -263,24 +263,24 @@ class Order(Document):
 
 
 
-class customOrder(Document):
-    product_id = ReferenceField(Product)
-    product_title = StringField()
-    sku = StringField()
-    customer_name = StringField()
-    to_address = StringField()
-    quantity = IntField()
-    unit_price = FloatField()
-    total_price = FloatField()
-    taxes = FloatField(default=0.0)
-    phone_number = StringField()
-    purchase_order_date = DateTimeField(default=datetime.now())
-    expected_delivery_date = DateTimeField(default=datetime.now())
-    supplier_name = StringField()
-    mark_order_as_shipped = BooleanField(default=False)
-    mark_order_as_paid = BooleanField(default=False)
-    tags = ListField(StringField())
-    notes = StringField()
+# class customOrder(Document):
+#     product_id = ReferenceField(Product)
+#     product_title = StringField()
+#     sku = StringField()
+#     customer_name = StringField()
+#     to_address = StringField()
+#     quantity = IntField()
+#     unit_price = FloatField()
+#     total_price = FloatField()
+#     taxes = FloatField(default=0.0)
+#     phone_number = StringField()
+#     purchase_order_date = DateTimeField(default=datetime.now())
+#     expected_delivery_date = DateTimeField(default=datetime.now())
+#     supplier_name = StringField()
+#     mark_order_as_shipped = BooleanField(default=False)
+#     mark_order_as_paid = BooleanField(default=False)
+#     tags = ListField(StringField())
+#     notes = StringField()
 
 
 class product_details(EmbeddedDocument):
@@ -289,14 +289,14 @@ class product_details(EmbeddedDocument):
     sku = StringField(required=True)
     unit_price = FloatField()
     quantity = IntField()
+    quantity_price = FloatField()
 
 
 
 
-class Boder(Document):
+class custom_order(Document):
     # Order details
     order_id = StringField()  # Internal order ID
-    sku_id = StringField()
     ordered_products = ListField(EmbeddedDocumentField(product_details))  # List of product names
     total_quantity = IntField()
     total_price = FloatField()
@@ -314,9 +314,12 @@ class Boder(Document):
 
     # Address and contact information
     shipping_address = StringField()
+    customer_name = StringField()
+    supplier_name = StringField()
     mail = StringField()
     contact_number = StringField()
     customer_note = StringField()  # Any note provided by the customer
+    tags= StringField()
 
     # Shipping details
     package_dimensions = StringField()  # e.g., "10x5x3 inches"
@@ -335,6 +338,15 @@ class Boder(Document):
     channel_order_id = StringField()  # Order ID from the channel
     fulfillment_type = StringField()  # e.g., "FBA", "FBM"
 
+    purchase_order_date = DateTimeField(default=datetime.now())
+    expected_delivery_date = DateTimeField(default=datetime.now())
+
     # Optional timestamps
-    created_at = DateTimeField(default=datetime.utcnow)
-    updated_at = DateTimeField(default=datetime.utcnow)
+    created_at = DateTimeField(default=datetime.now())
+    updated_at = DateTimeField(default=datetime.now())
+
+
+
+class authenticated_api(Document):
+    name = StringField()
+    allowed_roles = ListField(ReferenceField(role))

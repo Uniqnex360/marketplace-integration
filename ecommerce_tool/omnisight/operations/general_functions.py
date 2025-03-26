@@ -379,7 +379,6 @@ def fetchAllorders(request):
     count_pipeline = []
 
     json_request = JSONParser().parse(request)
-    print("json_request",json_request,"\n\n\n")
     user_id = json_request.get('user_id')
     limit = int(json_request.get('limit', 100))  # Default limit = 100 if not provided
     skip = int(json_request.get('skip', 0))  # Default skip = 0 if not provided
@@ -394,12 +393,12 @@ def fetchAllorders(request):
             "$project": {
                 "_id": 0,
                 "id": {"$toString": "$_id"},
-                "sku": {"$ifNull": ["$sku", ""]},
+                "order_id": {"$ifNull": ["$order_id", ""]},
                 "customer_name": {"$ifNull": ["$customer_name", ""]},
-                "to_address": {"$ifNull": ["$to_address", ""]},
-                "quantity": {"$ifNull": ["$quantity", 0]},
+                "shipping_address": {"$ifNull": ["$shipping_address", ""]},
+                "total_quantity": {"$ifNull": ["$total_quantity", 0]},
                 "total_price": {"$ifNull": [{"$round": ["$total_price", 0.0]}, 0.0]},
-                "taxes": {"$ifNull": ["$taxes", 0.0]},
+                # "taxes": {"$ifNull": ["$taxes", 0.0]},
                 "purchase_order_date": {"$ifNull": ["$purchase_order_date", None]},
                 "expected_delivery_date": {"$ifNull": ["$expected_delivery_date", None]},
             }
@@ -425,13 +424,13 @@ def fetchAllorders(request):
             }
         pipeline.append(sort)
 
-        manual_orders = list(customOrder.objects.aggregate(*pipeline))
+        manual_orders = list(custom_order.objects.aggregate(*pipeline))
         count_pipeline = [
             {
                 "$count": "total_count"
             }
         ]
-        total_count_result = list(customOrder.objects.aggregate(*(count_pipeline)))
+        total_count_result = list(custom_order.objects.aggregate(*(count_pipeline)))
         total_count = total_count_result[0]['total_count'] if total_count_result else 0
         data['total_count'] = total_count
         data['manual_orders'] = manual_orders
@@ -482,6 +481,7 @@ def fetchAllorders(request):
                     "order_total": "$order_total",
                     "currency": "$currency",
                     "marketplace_name": "$marketplace_ins.name",
+                    "quantity" : {"$size" : "$order_items"}
 
                 }
             },
@@ -716,42 +716,34 @@ def getProductListForOrdercreation(request):
 def createManualOrder(request):
     data = dict()
     json_request = JSONParser().parse(request)
-    print("json_request",json_request)
-    product_id = json_request.get('product_id')
-    product_title = json_request.get('product_title')
-    sku = json_request.get('sku')
-    customer_name = json_request.get('customer_name')
-    to_address = json_request.get('to_address')
-    quantity = int(json_request.get('quantity', 1))
-    unit_price = DatabaseModel.get_document(Product.objects,{"id": product_id},['price']).price
-    taxes = float(json_request.get('taxes')) if json_request.get('taxes') != '' else 0.0
-    phone_number = json_request.get('phone_number')
+    print("json_request------------------->",json_request)
+    product_detail = list()
+    ordered_products = json_request.get('ordered_products')
+    custom_product_obj = json_request.get('custom_product_obj')
+
+    custom_product_obj['order_id'] = str(''.join([str(uuid.uuid4().int)[:13]]))
+    
     # purchase_order_date = json_request.get('purchase_order_date')
-    expected_delivery_date = datetime.strptime(json_request.get('expected_delivery_date'), '%Y-%m-%d') if json_request.get('expected_delivery_date') else None
-    supplier_name = json_request.get('supplier_name')
-    tags = json_request.get('tags') if json_request.get('tags') != '' else []
-    notes = json_request.get('notes', '')
+    custom_product_obj['expected_delivery_date'] = datetime.strptime(json_request.get(custom_product_obj['expected_delivery_date']), '%Y-%m-%d') if json_request.get(custom_product_obj['expected_delivery_date']) else None
+    try:
+        custom_product_obj['purchase_order_date'] = datetime.strptime(json_request.get(custom_product_obj['purchase_order_date']), '%Y-%m-%d')
+    except:
+        pass
 
-    total_price = (unit_price * quantity) + taxes
+    for ins in ordered_products:
+        product_detail_dict = product_details(
+            product_id=ObjectId(ins.get('product_id')),
+            title=ins.get('title'),
+            sku=ins.get('sku'),
+            unit_price=float(ins.get('unit_price', 0)),
+            quantity=int(ins.get('quantity', 0)),
+            quantity_price=float(ins.get('quantity_price', 0))
+        )
+        product_detail.append(product_detail_dict)
 
-    manual_order = customOrder(
-        product_id=ObjectId(product_id),
-        product_title=product_title,
-        sku=sku,
-        customer_name=customer_name,
-        to_address=to_address,
-        quantity=quantity,
-        unit_price=unit_price,
-        total_price=total_price,
-        taxes=taxes,
-        phone_number=phone_number,
-        # purchase_order_date=purchase_order_date,
-        expected_delivery_date=expected_delivery_date,
-        supplier_name=supplier_name,
-        tags=tags,
-        notes=notes
-    )
-    manual_order.save()
+    custom_product_obj['ordered_products'] = product_detail
+
+    manual_order = DatabaseModel.save_documents(custom_order,custom_product_obj)
     data['message'] = "Manual order created successfully."
     data['order_id'] = str(manual_order.id)
     return data
@@ -760,7 +752,6 @@ def createManualOrder(request):
 def listManualOrders(request):
     data = dict()
     json_request = JSONParser().parse(request)
-    print("json_request",json_request)
     limit = int(json_request.get('limit', 100))  # Default limit = 100 if not provided
     skip = int(json_request.get('skip', 0))  # Default skip = 0 if not provided
     sort_by = json_request.get('sort_by')
@@ -770,12 +761,12 @@ def listManualOrders(request):
             "$project": {
                 "_id": 0,
                 "id": {"$toString": "$_id"},
-                "sku": {"$ifNull": ["$sku", ""]},
+                "order_id": {"$ifNull": ["$order_id", ""]},
                 "customer_name": {"$ifNull": ["$customer_name", ""]},
-                "to_address": {"$ifNull": ["$to_address", ""]},
-                "quantity": {"$ifNull": ["$quantity", 0]},
+                "shipping_address": {"$ifNull": ["$shipping_address", ""]},
+                "total_quantity": {"$ifNull": ["$total_quantity", 0]},
                 "total_price": {"$ifNull": [{"$round": ["$total_price", 0.0]}, 0.0]},
-                "taxes": {"$ifNull": ["$taxes", 0.0]},
+                # "taxes": {"$ifNull": ["$taxes", 0.0]},
                 "purchase_order_date": {"$ifNull": ["$purchase_order_date", None]},
                 "expected_delivery_date": {"$ifNull": ["$expected_delivery_date", None]},
             }
@@ -795,13 +786,13 @@ def listManualOrders(request):
         }
         pipeline.append(sort)
 
-    manual_orders = list(customOrder.objects.aggregate(*pipeline))
+    manual_orders = list(custom_order.objects.aggregate(*pipeline))
     count_pipeline = [
         {
             "$count": "total_count"
         }
     ]
-    total_count_result = list(customOrder.objects.aggregate(*(count_pipeline)))
+    total_count_result = list(custom_order.objects.aggregate(*(count_pipeline)))
     total_count = total_count_result[0]['total_count'] if total_count_result else 0
     data['total_count'] = total_count
     data['manual_orders'] = manual_orders
@@ -813,7 +804,7 @@ def updateManualOrder(request):
     try:
         json_request = JSONParser().parse(request)
         order_id = json_request.get('order_id')
-        manual_order = customOrder.objects.get(id=ObjectId(order_id))
+        manual_order = custom_order.objects.get(id=ObjectId(order_id))
 
         manual_order.product_title = json_request.get('product_title', manual_order.product_title)
         manual_order.sku = json_request.get('sku', manual_order.sku)
@@ -835,7 +826,7 @@ def updateManualOrder(request):
         manual_order.save()
 
         data['message'] = "Manual order updated successfully."
-    except customOrder.DoesNotExist:
+    except custom_order.DoesNotExist:
         data['error'] = "Manual order not found."
     except Exception as e:
         data['error'] = str(e)
@@ -847,50 +838,89 @@ def fetchManualOrderDetails(request):
     order_id = request.GET.get('order_id')
     pipeline = [
         {
-        "$match": {
-            "_id": ObjectId(order_id)
-        }
+            "$match": {
+                "_id": ObjectId(order_id)
+            }
         },
         {
-        "$lookup": {
-            "from": "product",
-            "localField": "product_id",
-            "foreignField": "_id",
-            "as": "product_details"
-        }
+            "$lookup": {
+                "from": "product",
+                "localField": "ordered_products.product_id",
+                "foreignField": "_id",
+                "as": "product_details"
+            }
         },
         {
-        "$unwind": {
-            "path": "$product_details",
-            "preserveNullAndEmptyArrays": True
-        }
-        },
-        {
-        "$project": {
-            "_id": 0,
-            "id": {"$toString": "$_id"},
-            "product_title": 1,
-            "sku": 1,
-            "customer_name": 1,
-            "to_address": 1,
-            "quantity": 1,
-            "unit_price": 1,
-            "total_price": 1,
-            "taxes": 1,
-            "phone_number": 1,
-            "purchase_order_date": 1,
-            "expected_delivery_date": 1,
-            "supplier_name": 1,
-            "mark_order_as_shipped": 1,
-            "mark_order_as_paid": 1,
-            "tags": 1,
-            "notes": 1,
-            "product_image": {"$ifNull": ["$product_details.image_url", ""]}
-        }
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "order_id": {"$ifNull": ["$order_id", ""]},
+                "customer_name": {"$ifNull": ["$customer_name", ""]},
+                "shipping_address": {"$ifNull": ["$shipping_address", ""]},
+                "total_quantity": {"$ifNull": ["$total_quantity", 0]},
+                "total_price": {"$ifNull": ["$total_price", 0.0]},
+                "shipment_type": {"$ifNull": ["$shipment_type", ""]},
+                "channel": {"$ifNull": ["$channel", ""]},
+                "order_status": {"$ifNull": ["$order_status", "Pending"]},
+                "payment_status": {"$ifNull": ["$payment_status", "Pending"]},
+                "payment_mode": {"$ifNull": ["$payment_mode", ""]},
+                "invoice": {"$ifNull": ["$invoice", ""]},
+                "transaction_id": {"$ifNull": ["$transaction_id", ""]},
+                "tax": {"$ifNull": ["$tax", 0.0]},
+                "discount": {"$ifNull": ["$discount", 0.0]},
+                "supplier_name": {"$ifNull": ["$supplier_name", ""]},
+                "mail": {"$ifNull": ["$mail", ""]},
+                "contact_number": {"$ifNull": ["$contact_number", ""]},
+                "customer_note": {"$ifNull": ["$customer_note", ""]},
+                "tags": {"$ifNull": ["$tags", ""]},
+                "package_dimensions": {"$ifNull": ["$package_dimensions", ""]},
+                "weight": {"$ifNull": ["$weight", 0.0]},
+                "shipment_cost": {"$ifNull": ["$shipment_cost", 0.0]},
+                "shipment_speed": {"$ifNull": ["$shipment_speed", ""]},
+                "shipment_mode": {"$ifNull": ["$shipment_mode", ""]},
+                "carrier": {"$ifNull": ["$carrier", ""]},
+                "tracking_number": {"$ifNull": ["$tracking_number", ""]},
+                "shipping_label": {"$ifNull": ["$shipping_label", ""]},
+                "shipping_label_preview": {"$ifNull": ["$shipping_label_preview", ""]},
+                "shipping_label_print": {"$ifNull": ["$shipping_label_print", ""]},
+                "channel_name": {"$ifNull": ["$channel_name", ""]},
+                "channel_order_id": {"$ifNull": ["$channel_order_id", ""]},
+                "fulfillment_type": {"$ifNull": ["$fulfillment_type", ""]},
+                "purchase_order_date": {"$ifNull": ["$purchase_order_date", None]},
+                "expected_delivery_date": {"$ifNull": ["$expected_delivery_date", None]},
+                "created_at": {"$ifNull": ["$created_at", None]},
+                "updated_at": {"$ifNull": ["$updated_at", None]},
+                "ordered_products": {
+                    "$map": {
+                        "input": "$ordered_products",
+                        "as": "product",
+                        "in": {
+                            "product_id": {"$toString": "$$product.product_id"},
+                            "title": {"$ifNull": ["$$product.title", ""]},
+                            "sku": {"$ifNull": ["$$product.sku", ""]},
+                            "unit_price": {"$ifNull": ["$$product.unit_price", 0.0]},
+                            "quantity": {"$ifNull": ["$$product.quantity", 0]},
+                            "quantity_price": {"$ifNull": ["$$product.quantity_price", 0.0]},
+                        }
+                    }
+                }
+            }
         }
     ]
-    manual_order_details = list(customOrder.objects.aggregate(*pipeline))
+    manual_order_details = list(custom_order.objects.aggregate(*pipeline))
     if manual_order_details:
+        for i in manual_order_details[0]['ordered_products']:
+            pipeline = [
+            {"$match": {"_id" : ObjectId(i['product_id'])}},
+            {
+                "$project": {
+                    "_id": None,
+                    "image_url": {"$ifNull": ["$image_url", ""]}
+                }
+            }
+            ]
+            product_image_obj = list(Product.objects.aggregate(*(pipeline)))
+            i['product_image'] = product_image_obj[0].get('image_url')
         data['order_details'] = manual_order_details[0]
     else:
         data['error'] = "Manual order not found."
@@ -912,6 +942,7 @@ def ordersCountForDashboard(request):
         match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
 
     if marketplace_id == "all":
+        # Count for Order collection
         pipeline = [
             {"$match": match_conditions},
             {
@@ -923,10 +954,28 @@ def ordersCountForDashboard(request):
         ]
         order_status_count = list(Order.objects.aggregate(*(pipeline)))
         total_order_count = order_status_count[0].get('count', 0) if order_status_count else 0
+
+        # Count for custom_order collection
+        custom_pipeline = [
+            {"$match": match_conditions},
+            {
+                "$group": {
+                    "_id": None,
+                    "count": {"$sum": 1}
+                }
+            }
+        ]
+        custom_order_status_count = list(custom_order.objects.aggregate(*(custom_pipeline)))
+        custom_order_count = custom_order_status_count[0].get('count', 0) if custom_order_status_count else 0
+
+        # Combine counts
+        total_order_count += custom_order_count
+
         data['total_order_count'] = {
             "value": total_order_count,
             "percentage": f"{100.00}%"
         }
+
         pipeline = [
             {
                 "$project": {
@@ -937,6 +986,7 @@ def ordersCountForDashboard(request):
         ]
         marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
         for ins in marketplace_list:
+            # Count for Order collection per marketplace
             pipeline = [
                 {"$match": {**match_conditions, "marketplace_id": ins['_id']}},
                 {
@@ -947,14 +997,30 @@ def ordersCountForDashboard(request):
                 }
             ]
             order_status_count = list(Order.objects.aggregate(*(pipeline)))
-            if order_status_count:
-                order_status_count = order_status_count[0].get('count', 0)
-                percentage = round((order_status_count / total_order_count) * 100, 2) if total_order_count else 0
-                data[ins['name']] = {
-                    "count": order_status_count,
-                    "percentage": f"{percentage}%"
+            order_count = order_status_count[0].get('count', 0) if order_status_count else 0
+            percentage = round((order_count / total_order_count) * 100, 2) if total_order_count else 0
+            data[ins['name']] = {
+                "count": order_count,
+                "percentage": f"{percentage}%"
+            }
+        custom_pipeline = [
+                {"$match": {**match_conditions}},
+                {
+                    "$group": {
+                        "_id": None,
+                        "count": {"$sum": 1}
+                    }
                 }
-    elif marketplace_id != "all":
+            ]
+        custom_order_status_count = list(custom_order.objects.aggregate(*(custom_pipeline)))
+        custom_order_count = custom_order_status_count[0].get('count', 0) if custom_order_status_count else 0
+        percentage = round((custom_order_count / total_order_count) * 100, 2) if total_order_count else 0
+        data['custom'] = {
+            "value": custom_order_count,
+            "percentage": f"{percentage}%"
+        }
+    elif marketplace_id != "all" and marketplace_id != "custom":
+        # Count for Order collection
         pipeline = [
             {"$match": {**match_conditions, "marketplace_id": ObjectId(marketplace_id)}},
             {
@@ -965,17 +1031,38 @@ def ordersCountForDashboard(request):
             }
         ]
         order_status_count = list(Order.objects.aggregate(*(pipeline)))
-        if order_status_count:
-            order_status_count = order_status_count[0].get('count', 0)
-            marketplace_name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
-            data[marketplace_name] = {
-                "value": order_status_count,
-                "percentage": f"{100.00}%"
-            }
-            data['total_order_count'] = {
-                "value": order_status_count,
-                "percentage": f"{100.00}%"
-            }
+        order_count = order_status_count[0].get('count', 0) if order_status_count else 0
+
+        marketplace_name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
+        data[marketplace_name] = {
+            "value": order_count,
+            "percentage": f"{100.00}%"
+        }
+        data['total_order_count'] = {
+            "value": order_count,
+            "percentage": f"{100.00}%"
+        }
+    elif marketplace_id == "custom":
+        custom_pipeline = [
+                {"$match": {**match_conditions}},
+                {
+                    "$group": {
+                        "_id": None,
+                        "count": {"$sum": 1}
+                    }
+                }
+            ]
+        custom_order_status_count = list(custom_order.objects.aggregate(*(custom_pipeline)))
+        custom_order_count = custom_order_status_count[0].get('count', 0) if custom_order_status_count else 0
+        data['custom'] = {
+            "value": custom_order_count,
+            "percentage": f"{100.00}%"
+        }
+        data['total_order_count'] = {
+            "value": custom_order_count,
+            "percentage": f"{100.00}%"
+        }
+
     return data
 
 
@@ -1007,7 +1094,6 @@ def totalSalesAmount(request):
 def salesAnalytics(request):
     data = dict()
     json_request = JSONParser().parse(request)
-    print("json_request",json_request)
     marketplace_id = json_request.get('marketplace_id')  # Optional marketplace filter
     date_range = json_request.get('date_range', 'all')  # 'week', 'month', 'year', or 'all'
     start_date = json_request.get('start_date')  # Optional custom start date
@@ -1033,18 +1119,33 @@ def salesAnalytics(request):
     match_conditions = {}
     if start_date:
         match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
-    if marketplace_id != None and marketplace_id != "all":
+    if marketplace_id != None and marketplace_id != "all" and marketplace_id != "custom":
         match_conditions["marketplace_id"] = ObjectId(marketplace_id)
 
-    # Pipeline for total sales amount
+    # Pipeline for total sales amount (Order collection)
     total_sales_pipeline = [
         {"$match": match_conditions},
         {"$group": {"_id": None, "total_sales": {"$sum": "$order_total"}}}
     ]
     total_sales_result = list(Order.objects.aggregate(*total_sales_pipeline))
-    data['total_sales'] = total_sales_result[0]['total_sales'] if total_sales_result else 0
+    total_sales = total_sales_result[0]['total_sales'] if total_sales_result else 0
 
-    # Pipeline for order count and value by order days
+    # Pipeline for total sales amount (custom_order collection)
+    custom_match_conditions = {}
+    if start_date:
+        custom_match_conditions["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
+
+    custom_total_sales_pipeline = [
+        {"$match": custom_match_conditions},
+        {"$group": {"_id": None, "total_sales": {"$sum": "$total_price"}}}
+    ]
+    custom_total_sales_result = list(custom_order.objects.aggregate(*custom_total_sales_pipeline))
+    custom_total_sales = custom_total_sales_result[0]['total_sales'] if custom_total_sales_result else 0
+
+    # Combine total sales from both collections
+    data['total_sales'] = total_sales + custom_total_sales
+
+    # Pipeline for order count and value by order days (Order collection)
     order_days_pipeline = [
         {"$match": match_conditions},
         {
@@ -1062,14 +1163,48 @@ def salesAnalytics(request):
     ]
     order_days_data = list(Order.objects.aggregate(*order_days_pipeline))
 
-    # Format order days data
-    formatted_order_days = [
+    # Pipeline for order count and value by order days (custom_order collection)
+    custom_order_days_pipeline = [
+        {"$match": custom_match_conditions},
         {
-            "date": f"{day['_id']['year']}-{day['_id']['month']:02d}-{day['_id']['day']:02d}",
+            "$group": {
+                "_id": {
+                    "year": {"$year": "$purchase_order_date"},
+                    "month": {"$month": "$purchase_order_date"},
+                    "day": {"$dayOfMonth": "$purchase_order_date"}
+                },
+                "order_count": {"$sum": 1},
+                "order_value": {"$sum": "$total_price"}
+            }
+        },
+        {"$sort": {"_id": 1}}
+    ]
+    custom_order_days_data = list(custom_order.objects.aggregate(*custom_order_days_pipeline))
+
+    # Combine and format order days data
+    combined_order_days = {}
+    for day in order_days_data:
+        date_key = f"{day['_id']['year']}-{day['_id']['month']:02d}-{day['_id']['day']:02d}"
+        combined_order_days[date_key] = {
             "order_count": day["order_count"],
-            "order_value": round(day["order_value"],2)
+            "order_value": round(day["order_value"], 2)
         }
-        for day in order_days_data
+
+    for day in custom_order_days_data:
+        date_key = f"{day['_id']['year']}-{day['_id']['month']:02d}-{day['_id']['day']:02d}"
+        if date_key in combined_order_days:
+            combined_order_days[date_key]["order_count"] += day["order_count"]
+            combined_order_days[date_key]["order_value"] += round(day["order_value"], 2)
+        else:
+            combined_order_days[date_key] = {
+                "order_count": day["order_count"],
+                "order_value": round(day["order_value"], 2)
+            }
+
+    # Sort combined data by date
+    formatted_order_days = [
+        {"date": date, "order_count": data["order_count"], "order_value": data["order_value"]}
+        for date, data in sorted(combined_order_days.items())
     ]
 
     data['order_days'] = formatted_order_days
@@ -1119,7 +1254,7 @@ def mostSellingProducts(request):
         }
     ])
 
-    if marketPlaceId and marketPlaceId != "all":
+    if marketPlaceId and marketPlaceId != "all" and marketPlaceId != "custom":
         match = {
             "$match": {
                 "product_ins.marketplace_id": ObjectId(marketPlaceId)
@@ -1162,6 +1297,68 @@ def mostSellingProducts(request):
     ]
     pipeline.extend(pipeline2)
     top_products = list(OrderItems.objects.aggregate(*pipeline))
+
+    # Add custom_order count and value
+    custom_match_conditions = {}
+    if start_date and end_date:
+        custom_match_conditions["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
+
+    custom_pipeline = [
+        {
+            "$match": custom_match_conditions
+        },
+        {
+            "$unwind": "$ordered_products"
+        },
+        {
+            "$group": {
+                "_id": {
+                    "product_id": "$ordered_products.product_id",
+                    "product_title": "$ordered_products.title",
+                    "sku": "$ordered_products.sku",
+                    "price": "$ordered_products.unit_price"
+                },
+                "total_quantity_sold": {"$sum": "$ordered_products.quantity"},
+                "total_revenue": {"$sum": "$ordered_products.quantity_price"}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "product_id": {"$toString": "$_id.product_id"},
+                "product_title": "$_id.product_title",
+                "sku": "$_id.sku",
+                "price": "$_id.price",
+                "sales_count": "$total_quantity_sold",
+                "revenue": {"$round": ["$total_revenue", 2]}
+            }
+        },
+        {
+            "$sort": {"sales_count": -1}
+        },
+        {
+            "$limit": 7
+        }
+    ]
+    custom_top_products = list(custom_order.objects.aggregate(*custom_pipeline))
+    for i in custom_top_products:
+        pipeline = [
+        {"$match": {"_id" : ObjectId(i['product_id'])}},
+        {
+            "$project": {
+                "_id": None,
+                "image_url": {"$ifNull": ["$image_url", ""]}
+            }
+        }
+        ]
+        product_image_obj = list(Product.objects.aggregate(*(pipeline)))
+        i['product_image'] = product_image_obj[0].get('image_url')
+    if marketPlaceId == "custom":
+        data['top_products'] = custom_top_products
+        return data
+    top_products.extend(custom_top_products)
+    top_products = sorted(top_products, key=lambda x: x['revenue'], reverse=True)[:7]
+
     data['top_products'] = top_products
     return data
 
@@ -1223,7 +1420,7 @@ def getSalesTrendPercentage(request):
                                 "$gte": current_start,
                                 "$lt": now
                             },
-                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id else {})
+                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id and marketplace_id != "custom" and marketplace_id != "all" else {})
                         }
                     },
                     {
@@ -1240,7 +1437,7 @@ def getSalesTrendPercentage(request):
                                 "$gte": previous_start,
                                 "$lt": previous_end
                             },
-                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id else {})
+                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id and marketplace_id != "custom" and marketplace_id != "all" else {})
                         }
                     },
                     {
@@ -1254,13 +1451,62 @@ def getSalesTrendPercentage(request):
         }
     ]
 
-    trend_data = list(Order.objects.aggregate(*match_pipeline))
+    custom_match_pipeline = [
+        {
+            "$facet": {
+                "current_range": [
+                    {
+                        "$match": {
+                            "purchase_order_date": {
+                                "$gte": current_start,
+                                "$lt": now
+                            }
+                        }
+                    },
+                    {
+                        "$group": {
+                            "_id": None,
+                            "sales_value": {"$sum": "$total_price"}
+                        }
+                    }
+                ],
+                "previous_range": [
+                    {
+                        "$match": {
+                            "purchase_order_date": {
+                                "$gte": previous_start,
+                                "$lt": previous_end
+                            }
+                        }
+                    },
+                    {
+                        "$group": {
+                            "_id": None,
+                            "sales_value": {"$sum": "$total_price"}
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+
+    if marketplace_id == "custom":
+        trend_data = list(custom_order.objects.aggregate(*custom_match_pipeline))
+    else:
+        trend_data = list(Order.objects.aggregate(*match_pipeline))
+        custom_trend_data = list(custom_order.objects.aggregate(*custom_match_pipeline))
+
+        # Combine custom_order data with Order data
+        if custom_trend_data:
+            for key in ["current_range", "previous_range"]:
+                for item in custom_trend_data[0][key]:
+                    trend_data[0][key].append({"_id": "custom", "sales_value": item["sales_value"]})
 
     if trend_data:
         current_range_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["current_range"]}
         previous_range_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["previous_range"]}
 
-        if not marketplace_id:  # Combine all marketplaces if marketplace_id is None
+        if marketplace_id == "all":  # Combine all marketplaces
             current_total = sum(current_range_data.values())
             previous_total = sum(previous_range_data.values())
             percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
@@ -1270,15 +1516,25 @@ def getSalesTrendPercentage(request):
                 "previous_range_sales": previous_total,
                 "trend_percentage": change_sign(round(percentage_change, 2))
             }]
-        else:  # Provide data for the specific marketplace
+        elif marketplace_id == "custom":  # Only custom_order data
+            current_total = current_range_data.get(None, 0)
+            previous_total = previous_range_data.get(None, 0)
+            percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
+            data['trend_percentage'] = [{
+                "id": "Custom Orders",
+                "current_range_sales": current_total,
+                "previous_range_sales": previous_total,
+                "trend_percentage": change_sign(round(percentage_change, 2))
+            }]
+        else:  # Specific marketplace
             trend_percentage = []
-            marketplace_name = DatabaseModel.get_document(Marketplace.objects,{"id" : marketplace_id},['name']).name
+            marketplace_name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
             for key in set(current_range_data.keys()).union(previous_range_data.keys()):
                 current_value = current_range_data.get(key, 0)
                 previous_value = previous_range_data.get(key, 0)
                 percentage_change = ((current_value - previous_value) / previous_value * 100) if previous_value != 0 else (100 if current_value > 0 else 0)
                 trend_percentage.append({
-                    "id": str(marketplace_name),
+                    "id": str(marketplace_name) if key != "custom" else "Custom Orders",
                     "current_range_sales": current_value,
                     "previous_range_sales": previous_value,
                     "trend_percentage": change_sign(round(percentage_change, 2))
@@ -1307,81 +1563,128 @@ def fetchSalesSummary(request):
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
         match["order_date"] = {"$gte": start_date, "$lte": end_date}
 
-    if marketplace_id != None and marketplace_id != "all" and marketplace_id != "":
+    if marketplace_id != None and marketplace_id != "all" and marketplace_id != "" and marketplace_id != "custom":
         match["marketplace_id"] = ObjectId(marketplace_id)
+    if marketplace_id == "all" or marketplace_id != "custom":
+        if match:
+            match_stage = {"$match": match}
+            total_sales_pipeline.append(match_stage)
+            pipeline.append(match_stage)
 
-    if match:
-        match_stage = {"$match": match}
-        total_sales_pipeline.append(match_stage)
-        pipeline.append(match_stage)
-
-    # Pipeline to calculate total units sold, total sold product count, and total sales
-    total_sales_pipeline.extend([
-        {
-            "$group": {
-                "_id": None,  # Grouping by None to get a single summary document
-                "total_sales": {"$sum": "$order_total"}
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "total_sales": {"$round": ["$total_sales", 2]}
-            }
-        }
-    ])
-
-    summary = list(Order.objects.aggregate(*total_sales_pipeline))
-    if summary:
-        data['total_sales'] = summary[0].get('total_sales', 0)
-    else:
-        data['total_sales'] = 0
-
-    pipeline.extend([
-        {
-            "$unwind": "$order_items"  # Unwind the order_items list to process each item individually
-        },
-        {
-            "$group": {
-                "_id": None,  # Grouping by None to get a single summary document
-                "ids": {"$addToSet": "$order_items"}  # Collect unique order_items
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "ids": 1
-            }
-        },
-    ])
-    summary1 = list(Order.objects.aggregate(*pipeline))
-    if summary1:
-        s_pipeline = [
-            {"$match": {
-                "_id": {"$in": summary1[0]['ids']}
-            }},
+        # Pipeline to calculate total units sold, total sold product count, and total sales
+        total_sales_pipeline.extend([
             {
                 "$group": {
-                    "_id": None,
-                    "total_units_sold": {"$sum": "$ProductDetails.QuantityOrdered"},
-                    "unique_product_ids": {"$addToSet": "$ProductDetails.product_id"},
+                    "_id": None,  # Grouping by None to get a single summary document
+                    "total_sales": {"$sum": "$order_total"}
                 }
             },
             {
                 "$project": {
                     "_id": 0,
-                    "total_units_sold": 1,
-                    "total_sold_product_count": {"$size": "$unique_product_ids"},
+                    "total_sales": {"$round": ["$total_sales", 2]}
                 }
             }
-        ]
-        summary2 = list(OrderItems.objects.aggregate(*s_pipeline))
-        if summary2:
-            data['total_units_sold'] = summary2[0].get('total_units_sold', 0)
-            data['total_sold_product_count'] = summary2[0].get('total_sold_product_count', 0)
+        ])
+
+        summary = list(Order.objects.aggregate(*total_sales_pipeline))
+        if summary:
+            data['total_sales'] = summary[0].get('total_sales', 0)
+        else:
+            data['total_sales'] = 0
+
+        pipeline.extend([
+            {
+                "$unwind": "$order_items"  # Unwind the order_items list to process each item individually
+            },
+            {
+                "$group": {
+                    "_id": None,  # Grouping by None to get a single summary document
+                    "ids": {"$addToSet": "$order_items"}  # Collect unique order_items
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "ids": 1
+                }
+            },
+        ])
+        summary1 = list(Order.objects.aggregate(*pipeline))
+        if summary1:
+            s_pipeline = [
+                {"$match": {
+                    "_id": {"$in": summary1[0]['ids']}
+                }},
+                {
+                    "$group": {
+                        "_id": None,
+                        "total_units_sold": {"$sum": "$ProductDetails.QuantityOrdered"},
+                        "unique_product_ids": {"$addToSet": "$ProductDetails.product_id"},
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 0,
+                        "total_units_sold": 1,
+                        "total_sold_product_count": {"$size": "$unique_product_ids"},
+                    }
+                }
+            ]
+            summary2 = list(OrderItems.objects.aggregate(*s_pipeline))
+            if summary2:
+                data['total_units_sold'] = summary2[0].get('total_units_sold', 0)
+                data['total_sold_product_count'] = summary2[0].get('total_sold_product_count', 0)
+        else:
+            data['total_units_sold'] = 0
+            data['total_sold_product_count'] = 0
+
+    # Add custom_order data
+    custom_match = {}
+    if start_date and end_date:
+        custom_match["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
+
+    custom_pipeline = [
+        {"$match": custom_match},
+        {"$unwind": "$ordered_products"},
+        {
+            "$group": {
+                "_id": None,
+                "total_custom_sales": {"$sum": "$ordered_products.quantity_price"},
+                "total_custom_units_sold": {"$sum": "$ordered_products.quantity"},
+                "unique_custom_product_ids": {"$addToSet": "$ordered_products.product_id"}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "total_custom_sales": {"$round": ["$total_custom_sales", 2]},
+                "total_custom_units_sold": 1,
+                "total_custom_sold_product_count": {"$size": "$unique_custom_product_ids"}
+            }
+        }
+    ]
+
+    custom_summary = list(custom_order.objects.aggregate(*custom_pipeline))
+    if custom_summary:
+        total_custom_sales = custom_summary[0].get('total_custom_sales', 0)
+        total_custom_units_sold = custom_summary[0].get('total_custom_units_sold', 0)
+        total_custom_sold_product_count = custom_summary[0].get('total_custom_sold_product_count', 0)
     else:
-        data['total_units_sold'] = 0
-        data['total_sold_product_count'] = 0
+        total_custom_sales = 0
+        total_custom_units_sold = 0
+        total_custom_sold_product_count = 0
+
+    if marketplace_id == "custom":
+        data['total_sales'] = total_custom_sales
+        data['total_units_sold'] = total_custom_units_sold
+        data['total_sold_product_count'] = total_custom_sold_product_count
+
+    else: 
+        # Combine totals
+        data['total_sales'] += total_custom_sales
+        data['total_units_sold'] += total_custom_units_sold
+        data['total_sold_product_count'] += total_custom_sold_product_count
 
     return data
 
@@ -1400,29 +1703,87 @@ def fetchTopSellingCategories(request):
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
         match_conditions["order_data.order_date"] = {"$gte": start_date, "$lte": end_date}
-    if marketplace_id != None and marketplace_id != "all":
+    if marketplace_id != None and marketplace_id != "all" and marketplace_id != "custom":
         match_conditions["order_data.marketplace_id"] = ObjectId(marketplace_id)
 
-    # Pipeline to fetch top selling categories based on order value
-    pipeline = [
-        {
-            "$lookup": {
-                "from": "order",
-                "localField": "_id",
-                "foreignField": "order_items",
-                "as": "order_data"
+    if marketplace_id != "custom":
+        # Pipeline to fetch top selling categories based on order value
+        pipeline = [
+            {
+                "$lookup": {
+                    "from": "order",
+                    "localField": "_id",
+                    "foreignField": "order_items",
+                    "as": "order_data"
+                }
+            },
+            {
+                "$unwind": "$order_data"
+            },
+            {
+                "$match": match_conditions
+            },
+            {
+                "$lookup": {
+                    "from": "product",
+                    "localField": "ProductDetails.product_id",
+                    "foreignField": "_id",
+                    "as": "product_ins"
+                }
+            },
+            {
+                "$unwind": "$product_ins"
+            },
+            {
+                "$lookup": {
+                    "from": "category",
+                    "localField": "product_ins.category",
+                    "foreignField": "name",
+                    "as": "category_ins"
+                }
+            },
+            {
+                "$unwind": "$category_ins"
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "category_id": "$category_ins._id",
+                        "category_name": "$category_ins.name"
+                    },
+                    "total_order_value": {"$sum": {"$multiply": ["$ProductDetails.QuantityOrdered", "$product_ins.price"]}}
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "category_id": {"$toString": "$_id.category_id"},
+                    "category_name": "$_id.category_name",
+                    "total_order_value": {"$round": ["$total_order_value", 2]}
+                }
+            },
+            {
+                "$sort": {"total_order_value": -1}
+            },
+            {
+                "$limit": limit
             }
-        },
-        {
-            "$unwind": "$order_data"
-        },
-        {
-            "$match": match_conditions
-        },
+        ]
+
+        top_categories = list(OrderItems.objects.aggregate(*pipeline))
+
+    # Add custom_order product value for categories
+    custom_match_conditions = {}
+    if start_date and end_date:
+        custom_match_conditions["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
+
+    custom_pipeline = [
+        {"$match": custom_match_conditions},
+        {"$unwind": "$ordered_products"},
         {
             "$lookup": {
                 "from": "product",
-                "localField": "ProductDetails.product_id",
+                "localField": "ordered_products.product_id",
                 "foreignField": "_id",
                 "as": "product_ins"
             }
@@ -1447,7 +1808,7 @@ def fetchTopSellingCategories(request):
                     "category_id": "$category_ins._id",
                     "category_name": "$category_ins.name"
                 },
-                "total_order_value": {"$sum": {"$multiply": ["$ProductDetails.QuantityOrdered", "$product_ins.price"]}}
+                "total_order_value": {"$sum": "$ordered_products.quantity_price"}
             }
         },
         {
@@ -1466,6 +1827,20 @@ def fetchTopSellingCategories(request):
         }
     ]
 
-    top_categories = list(OrderItems.objects.aggregate(*pipeline))
-    data['top_categories'] = top_categories
+    custom_top_categories = list(custom_order.objects.aggregate(*custom_pipeline))
+    if marketplace_id == "custom":
+        data['top_categories'] = custom_top_categories
+    else:
+        # Combine and sort categories by total_order_value
+        combined_categories = {}
+        for category in top_categories + custom_top_categories:
+            category_id = category["category_id"]
+            if category_id in combined_categories:
+                combined_categories[category_id]["total_order_value"] += category["total_order_value"]
+            else:
+                combined_categories[category_id] = category
+
+        sorted_categories = sorted(combined_categories.values(), key=lambda x: x["total_order_value"], reverse=True)[:limit]
+
+        data['top_categories'] = sorted_categories
     return data
