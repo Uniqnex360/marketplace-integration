@@ -297,6 +297,7 @@ class product_details(EmbeddedDocument):
 class custom_order(Document):
     # Order details
     order_id = StringField()  # Internal order ID
+    customer_order_id = StringField()  # ID from the customer's perspective for tracking
     ordered_products = ListField(EmbeddedDocumentField(product_details))  # List of product names
     total_quantity = IntField()
     total_price = FloatField()
@@ -324,6 +325,7 @@ class custom_order(Document):
     # Shipping details
     package_dimensions = StringField()  # e.g., "10x5x3 inches"
     weight = FloatField()  # Weight of package
+    weight_value = StringField()
     shipment_cost = FloatField()  # Cost of shipping
     shipment_speed = StringField()  # e.g., "Express", "Standard"
     shipment_mode = StringField()  # e.g., "Air", "Ground"
