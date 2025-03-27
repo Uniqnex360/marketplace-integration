@@ -716,20 +716,26 @@ def getProductListForOrdercreation(request):
 def createManualOrder(request):
     data = dict()
     json_request = JSONParser().parse(request)
-    print("json_request------------------->",json_request)
     product_detail = list()
     ordered_products = json_request.get('ordered_products')
     custom_product_obj = json_request.get('custom_product_obj')
 
     custom_product_obj['order_id'] = str(''.join([str(uuid.uuid4().int)[:13]]))
     
-    # purchase_order_date = json_request.get('purchase_order_date')
-    custom_product_obj['expected_delivery_date'] = datetime.strptime(json_request.get(custom_product_obj['expected_delivery_date']), '%Y-%m-%d') if json_request.get(custom_product_obj['expected_delivery_date']) else None
+    # Handle expected_delivery_date
+    custom_product_obj['expected_delivery_date'] = datetime.strptime(
+        json_request.get(custom_product_obj['expected_delivery_date']), '%Y-%m-%d'
+    ) if json_request.get(custom_product_obj['expected_delivery_date']) else None
+
+    # Handle purchase_order_date
     try:
-        custom_product_obj['purchase_order_date'] = datetime.strptime(json_request.get(custom_product_obj['purchase_order_date']), '%Y-%m-%d')
+        custom_product_obj['purchase_order_date'] = datetime.strptime(
+            json_request.get(custom_product_obj['purchase_order_date']), '%Y-%m-%d'
+        )
     except:
         pass
 
+    # Process ordered products
     for ins in ordered_products:
         product_detail_dict = product_details(
             product_id=ObjectId(ins.get('product_id')),
@@ -743,7 +749,20 @@ def createManualOrder(request):
 
     custom_product_obj['ordered_products'] = product_detail
 
-    manual_order = DatabaseModel.save_documents(custom_order,custom_product_obj)
+    # Calculate total_price with discount and tax
+    total_price = float(custom_product_obj.get('total_price', 0))
+    discount = float(custom_product_obj.get('discount', 0))  # Discount in percentage
+    tax = float(custom_product_obj.get('tax', 0))  # Tax in percentage
+
+    if discount > 0:
+        total_price -= (total_price * discount / 100)  # Subtract discount
+    if tax > 0:
+        total_price += (total_price * tax / 100)  # Add tax
+
+    custom_product_obj['total_price'] = round(total_price, 2)  # Round to 2 decimal places
+
+    # Save the manual order
+    manual_order = DatabaseModel.save_documents(custom_order, custom_product_obj)
     data['message'] = "Manual order created successfully."
     data['order_id'] = str(manual_order.id)
     return data
@@ -1847,4 +1866,102 @@ def fetchTopSellingCategories(request):
         sorted_categories = sorted(combined_categories.values(), key=lambda x: x["total_order_value"], reverse=True)[:limit]
 
         data['top_categories'] = sorted_categories
+    return data
+
+
+
+@csrf_exempt
+def createUser(request):
+    data = dict()
+    json_request = JSONParser().parse(request)
+    email = json_request.get("email")
+    old_user_obj = DatabaseModel.get_document(user.objects,{"email" : email},['id'])
+    if old_user_obj != None:
+        user_data = {
+            "username": json_request.get("username"),
+            "email": email,
+            "password": json_request.get("password"),  # Ensure to hash the password in production
+            "role_id": ObjectId(json_request.get("role_id")),
+            
+        }
+        new_user = DatabaseModel.save_documents(user, user_data)
+        data["message"] = "User created successfully."
+        data["user_id"] = str(new_user.id)
+    return data
+
+
+@csrf_exempt
+def updateUser(request):
+    data = dict()
+    json_request = JSONParser().parse(request)
+    user_id = json_request.get("user_id")
+    old_user_obj = DatabaseModel.get_document(user)
+
+    old_user_obj.username = json_request.get("username", old_user_obj.username)
+    old_user_obj.email = json_request.get("email", old_user_obj.email)
+    old_user_obj.role_id = json_request.get("role_id", old_user_obj.role_id)
+    old_user_obj.updated_at = datetime.now()
+
+    old_user_obj.save()
+    data["message"] = "User updated successfully."
+    return data
+
+
+@csrf_exempt
+def listUsers(request):
+    data = dict()
+    try:
+        json_request = JSONParser().parse(request)
+        limit = int(json_request.get("limit", 100))  # Default limit = 100
+        skip = int(json_request.get("skip", 0))  # Default skip = 0
+
+        pipeline = [
+            {
+                "$project": {
+                    "_id": 0,
+                    "id": {"$toString": "$_id"},
+                    "username": 1,
+                    "email": 1,
+                    "roles": 1,
+                    "created_at": 1,
+                    "updated_at": 1,
+                }
+            },
+            {"$skip": skip},
+            {"$limit": limit},
+        ]
+        users = list(user.objects.aggregate(*pipeline))
+        data["users"] = users
+    except Exception as e:
+        data["error"] = str(e)
+    return data
+
+
+def fetchUserDetails(request):
+    data = dict()
+    try:
+        user_id = request.GET.get("user_id")
+        user_obj = user.objects.get(id=ObjectId(user_id))
+        data["user"] = {
+            "id": str(user_obj.id),
+            "username": user_obj.user_objname,
+            "email": user_obj.email,
+            "roles": user_obj.roles,
+            "created_at": user_obj.created_at,
+            "updated_at": user_obj.updated_at,
+        }
+    except user.DoesNotExist:
+        data["error"] = "User not found."
+    except Exception as e:
+        data["error"] = str(e)
+    return data
+
+
+def fetchRoles(request):
+    data = dict()
+    try:
+        roles = list(role.objects.all().values("id", "name"))
+        data["roles"] = [{"id": str(role["id"]), "name": role["name"]} for role in roles]
+    except Exception as e:
+        data["error"] = str(e)
     return data
