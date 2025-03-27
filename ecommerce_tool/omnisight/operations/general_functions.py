@@ -817,38 +817,55 @@ def listManualOrders(request):
     data['manual_orders'] = manual_orders
     return data
 
-
+@csrf_exempt
 def updateManualOrder(request):
     data = dict()
-    try:
-        json_request = JSONParser().parse(request)
-        order_id = json_request.get('order_id')
-        manual_order = custom_order.objects.get(id=ObjectId(order_id))
+    json_request = JSONParser().parse(request)
+    order_id = json_request.get('order_id')
+    manual_order = custom_order.objects.get(id=ObjectId(order_id))
+    ordered_products = json_request.get('ordered_products',[])
+    custom_product_obj = json_request.get('custom_product_obj')
 
-        manual_order.product_title = json_request.get('product_title', manual_order.product_title)
-        manual_order.sku = json_request.get('sku', manual_order.sku)
-        manual_order.customer_name = json_request.get('customer_name', manual_order.customer_name)
-        manual_order.to_address = json_request.get('to_address', manual_order.to_address)
-        manual_order.quantity = int(json_request.get('quantity', manual_order.quantity))
-        manual_order.unit_price = float(json_request.get('unit_price', manual_order.unit_price))
-        manual_order.taxes = float(json_request.get('taxes', manual_order.taxes))
-        manual_order.phone_number = json_request.get('phone_number', manual_order.phone_number)
-        manual_order.purchase_order_date = json_request.get('purchase_order_date', manual_order.purchase_order_date)
-        manual_order.expected_delivery_date = json_request.get('expected_delivery_date', manual_order.expected_delivery_date)
-        manual_order.supplier_name = json_request.get('supplier_name', manual_order.supplier_name)
-        manual_order.mark_order_as_shipped = json_request.get('mark_order_as_shipped', manual_order.mark_order_as_shipped)
-        manual_order.mark_order_as_paid = json_request.get('mark_order_as_paid', manual_order.mark_order_as_paid)
-        manual_order.tags = json_request.get('tags', manual_order.tags)
-        manual_order.notes = json_request.get('notes', manual_order.notes)
+    # Update basic fields
+  
+    custom_product_obj['purchase_order_date'] = datetime.strptime(
+        custom_product_obj.get('purchase_order_date'), '%Y-%m-%d'
+    ) if custom_product_obj.get('purchase_order_date') else manual_order.purchase_order_date
+    custom_product_obj['expected_delivery_date'] = datetime.strptime(
+        custom_product_obj.get('expected_delivery_date'), '%Y-%m-%d'
+    ) if custom_product_obj.get('expected_delivery_date') else manual_order.expected_delivery_date
 
-        manual_order.total_price = (manual_order.unit_price * manual_order.quantity) + manual_order.taxes
-        manual_order.save()
+    # Update ordered products
+    product_detail = []
+    for ins in ordered_products:
+        product_detail_dict = product_details(
+            product_id=ObjectId(ins.get('product_id')),
+            title=ins.get('title'),
+            sku=ins.get('sku'),
+            unit_price=float(ins.get('unit_price', 0)),
+            quantity=int(ins.get('quantity', 0)),
+            quantity_price=float(ins.get('quantity_price', 0))
+        )
+        product_detail.append(product_detail_dict)
 
-        data['message'] = "Manual order updated successfully."
-    except custom_order.DoesNotExist:
-        data['error'] = "Manual order not found."
-    except Exception as e:
-        data['error'] = str(e)
+    custom_product_obj['ordered_products'] = product_detail
+
+    # Recalculate total_price with discount and tax
+    total_price = float(custom_product_obj.get('total_price', 0))
+    discount = float(custom_product_obj.get('discount', 0))  # Discount in percentage
+    tax = float(custom_product_obj.get('tax', 0))  # Tax in percentage
+
+    if discount > 0:
+        total_price -= (total_price * discount / 100)  # Subtract discount
+    if tax > 0:
+        total_price += (total_price * tax / 100)  # Add tax
+
+    custom_product_obj['total_price'] = round(total_price, 2)  # Round to 2 decimal places
+
+    # Save the updated manual order
+    DatabaseModel.update_documents(custom_order.objects,{"id" : order_id},custom_product_obj)
+
+    data['message'] = "Manual order updated successfully."
     return data
 
 
@@ -1380,7 +1397,7 @@ def mostSellingProducts(request):
         data['top_products'] = custom_top_products
         return data
     top_products.extend(custom_top_products)
-    top_products = sorted(top_products, key=lambda x: x['revenue'], reverse=True)[:7]
+    top_products = sorted(top_products, key=lambda x: x['sales_count'], reverse=True)[:7]
 
     data['top_products'] = top_products
     return data
@@ -1868,7 +1885,7 @@ def fetchTopSellingCategories(request):
         data['top_categories'] = sorted_categories
     return data
 
-
+#-----------------------------------USER CREATION--------------------------------
 
 @csrf_exempt
 def createUser(request):
@@ -1964,4 +1981,92 @@ def fetchRoles(request):
         data["roles"] = [{"id": str(role["id"]), "name": role["name"]} for role in roles]
     except Exception as e:
         data["error"] = str(e)
+    return data
+
+
+#-------------------------------------------INVENTRY MANAGEMENT--------------------
+
+def fetchInventryList(request):
+    data = dict()
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id')
+    skip = int(json_request.get('skip'))
+    limit = int(json_request.get('limit'))
+    search_query = json_request.get('search_query')   
+    # marketplace = json_request.get('marketplace')
+    # category_name = json_request.get('category_name')
+    # brand_id_list = json_request.get('brand_id_list')
+    sort_by = json_request.get('sort_by')
+    sort_by_value = json_request.get('sort_by_value')
+    pipeline = []
+    count_pipeline = []
+    match = {}
+    if marketplace_id != None and marketplace_id != "":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+    # if category_name != None and category_name != "" and category_name != []:
+    #     match['category'] = {"$in":category_name}
+    # if brand_id_list != None and brand_id_list != "" and brand_id_list != []:
+    #     match['brand_id'] = {"$in":[ObjectId(brand_id) for brand_id in brand_id_list]}
+    if search_query != None and search_query != "":
+        search_query = search_query.strip() 
+        match["$or"] = [
+            {"product_title": {"$regex": search_query, "$options": "i"}},
+            {"sku": {"$regex": search_query, "$options": "i"}},
+        ]
+    if match != {}:
+        match_pipeline = {
+            "$match" : match}
+        print(match_pipeline)
+        pipeline.append(match_pipeline)
+        count_pipeline.append(match_pipeline)
+    pipeline.extend([
+        {
+            "$lookup" : {
+                "from" : "marketplace",
+                "localField" : "marketplace_id",
+                "foreignField" : "_id",
+                "as" : "marketplace"
+            }
+        },
+        {
+            "$unwind" : "$marketplace"
+        },
+        {
+            "$project" : {
+                "_id" : 0,
+                "id" : {"$toString" : "$_id"},
+                "product_title" : 1,
+                "sku" : 1,
+                "price" : 1,
+                "quantity" : 1,
+                "image_url" : {"$ifNull" : ["$image_url",""]},  # If image_url is null, replace with empty string
+                "marketplace_name" : "$marketplace.name",
+            }
+        },
+        {
+            "$skip" : skip
+        },
+        {
+            "$limit" : limit+skip
+        }
+    ])
+    if sort_by != None and sort_by != "":
+        sort = {
+            "$sort" : {
+                sort_by : int(sort_by_value)
+            }
+        }
+        pipeline.append(sort)
+    inventry_list = list(Product.objects.aggregate(*(pipeline)))
+    # Get total product count
+    count_pipeline.extend([
+        {
+            "$count": "total_count"
+        }
+    ])
+    total_count_result = list(Product.objects.aggregate(*(count_pipeline)))
+    total_count = total_count_result[0]['total_count'] if total_count_result else 0
+
+    data['total_count'] = total_count
+    data['inventry_list'] = inventry_list
     return data
