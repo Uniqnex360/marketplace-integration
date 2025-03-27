@@ -302,7 +302,7 @@ class custom_order(Document):
     total_price = FloatField()
     shipment_type = StringField()  # e.g., "Standard", "Express"
     channel = StringField()  # e.g., "Amazon", "Shopify"
-    order_status = StringField(choices=["Open", "Pending", "Delivered", "Closed", "Cancelled"],default="Pending")
+    order_status = StringField(default="Pending")
 
     # Payment details
     payment_status = StringField(default="Pending")  # e.g., "Paid", "Pending"

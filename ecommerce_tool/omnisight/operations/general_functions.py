@@ -10,6 +10,11 @@ import json
 from rest_framework.parsers import JSONParser
 from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime, timedelta
+import openpyxl
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
+from io import BytesIO
+from django.http import HttpResponse
 
 
 
@@ -377,7 +382,7 @@ def fetchAllorders(request):
         else:
             sort = {
                 "$sort" : {
-                    "_id" : -1
+                    "id" : -1
                 }
             }
         pipeline.append(sort)
@@ -680,11 +685,6 @@ def createManualOrder(request):
 
     custom_product_obj['order_id'] = str(''.join([str(uuid.uuid4().int)[:13]]))
     
-    # Handle expected_delivery_date
-    custom_product_obj['expected_delivery_date'] = datetime.strptime(
-        json_request.get(custom_product_obj['expected_delivery_date']), '%Y-%m-%d'
-    ) if json_request.get(custom_product_obj['expected_delivery_date']) else None
-
     # Handle purchase_order_date
     try:
         custom_product_obj['purchase_order_date'] = datetime.strptime(
@@ -692,6 +692,13 @@ def createManualOrder(request):
         )
     except:
         pass
+    
+    expected_delivery_date = custom_product_obj.get('expected_delivery_date')
+    if expected_delivery_date:
+        custom_product_obj['expected_delivery_date'] = datetime.strptime(expected_delivery_date, '%Y-%m-%d')
+    else:
+        custom_product_obj['expected_delivery_date'] = None
+  
 
     # Process ordered products
     for ins in ordered_products:
@@ -2028,3 +2035,110 @@ def fetchInventryList(request):
     data['total_count'] = total_count
     data['inventry_list'] = inventry_list
     return data
+
+
+
+@csrf_exempt
+def exportOrderReport(request):
+
+    # Fetch orders from the database
+    orders = list(Order.objects.all())
+
+    # Create a new Excel workbook
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Order Report"
+
+    # Define headers and sub-headers
+    headers = [
+        ("Order Details", ["Purchase Order ID", "Customer Order ID", "Seller Order ID", "Order Date", "Order Status"]),
+        ("Customer Details", ["Customer Email ID"]),
+        ("Shipping Details", ["Shipping Address", "Ship Service Level", "Shipment Service Level Category"]),
+        ("Order Items", ["Number of Items Shipped", "Number of Items Unshipped"]),
+        ("Payment Details", ["Payment Method", "Order Total", "Currency"]),
+        ("Marketplace Details", ["Marketplace", "Marketplace ID"]),
+    ]
+
+    # Apply header styles
+    yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+    blue_fill = PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid")
+    bold_font = Font(bold=True)
+
+    # Write headers and sub-headers
+    row = 1
+    col = 1
+    for header, sub_headers in headers:
+        sheet.merge_cells(start_row=row, start_column=col, end_row=row, end_column=col + len(sub_headers) - 1)
+        cell = sheet.cell(row=row, column=col)
+        cell.value = header
+        cell.fill = yellow_fill
+        cell.font = bold_font
+
+        for sub_col, sub_header in enumerate(sub_headers, start=col):
+            sub_cell = sheet.cell(row=row + 1, column=sub_col)
+            sub_cell.value = sub_header
+            sub_cell.fill = blue_fill
+            sub_cell.font = bold_font
+
+        col += len(sub_headers)
+
+    # Write order data
+    row = 3
+    for order in orders:
+        col = 1
+        sheet.cell(row=row, column=col, value=order.purchase_order_id)
+        sheet.cell(row=row, column=col + 1, value=order.customer_order_id)
+        sheet.cell(row=row, column=col + 2, value=order.seller_order_id)
+        sheet.cell(row=row, column=col + 3, value=order.order_date.strftime('%Y-%m-%d') if order.order_date else None)
+        sheet.cell(row=row, column=col + 4, value=order.order_status)
+        col += 5
+
+        sheet.cell(row=row, column=col, value=order.customer_email_id)
+        col += 1
+
+        if order.shipping_information:
+            shipping_info = order.shipping_information
+            postal_address = shipping_info.get('postalAddress', {})
+            shipping_details = f"Name: {postal_address.get('name', '')}, " \
+                       f"Address1: {postal_address.get('address1', '')}, " \
+                       f"Address2: {postal_address.get('address2', '')}, " \
+                       f"City: {postal_address.get('city', '')}, " \
+                       f"State: {postal_address.get('state', '')}, " \
+                       f"PostalCode: {postal_address.get('postalCode', '')}, " \
+                       f"Country: {postal_address.get('country', '')}, " \
+                       f"Phone: {shipping_info.get('phone', '')}, " \
+                       f"MethodCode: {shipping_info.get('methodCode', '')}, " \
+                       f"EstimatedShipDate: {shipping_info.get('estimatedShipDate', '')}, " \
+                       f"EstimatedDeliveryDate: {shipping_info.get('estimatedDeliveryDate', '')}"
+            sheet.cell(row=row, column=col, value=shipping_details)
+        else:
+            sheet.cell(row=row, column=col, value=None)
+        sheet.cell(row=row, column=col + 1, value=order.ship_service_level)
+        sheet.cell(row=row, column=col + 2, value=order.shipment_service_level_category)
+        col += 3
+
+        sheet.cell(row=row, column=col, value=order.number_of_items_shipped)
+        sheet.cell(row=row, column=col + 1, value=order.number_of_items_unshipped)
+        col += 2
+
+        sheet.cell(row=row, column=col, value=order.payment_method)
+        sheet.cell(row=row, column=col + 1, value=order.order_total)
+        sheet.cell(row=row, column=col + 2, value=order.currency)
+        col += 3
+
+        sheet.cell(row=row, column=col, value=order.marketplace_id.name if order.marketplace else None)
+        row += 1
+
+    # Adjust column widths
+    for col in range(1, sheet.max_column + 1):
+        sheet.column_dimensions[get_column_letter(col)].width = 20
+
+    # Save the workbook to a BytesIO stream
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+
+    # Create a response with the Excel file
+    response = HttpResponse(output, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response["Content-Disposition"] = 'attachment; filename="Order_Report.xlsx"'
+    return response
