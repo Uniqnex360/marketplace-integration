@@ -255,13 +255,27 @@ def getOrdersBasedOnProduct(request):
     pipeline = [
         {
             "$match": {
-                "_id": ObjectId(product_id)  # Ensure product_id is a valid ObjectId
+                "ProductDetails.product_id": ObjectId(product_id)  # Ensure product_id is a valid ObjectId
+            }
+        },
+        {
+            "$lookup": {
+                "from": "order",
+                "localField": "_id",
+                "foreignField": "order_items",
+                "as": "order_ins"
+            }
+        },
+        {
+            "$unwind": {
+                "path": "$order_ins",
+                "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
             }
         },
         {
             "$lookup": {
                 "from": "marketplace",
-                "localField": "marketplace_id",
+                "localField": "order_ins.marketplace_id",
                 "foreignField": "_id",
                 "as": "marketplace_ins"
             }
@@ -269,62 +283,6 @@ def getOrdersBasedOnProduct(request):
         {
             "$unwind": {
                 "path": "$marketplace_ins",
-            }
-        },
-        {
-            "$lookup": {
-                "from": "order",
-                "let": {
-                    "marketplace_id": "$marketplace_id",
-                    "product_title": "$product_title",
-                    "marketplace_name": "$marketplace_ins.name"
-                },
-                "pipeline": [
-                    {
-                        "$match": {
-                            "$expr": {
-                                "$eq": ["$marketplace_id", "$$marketplace_id"]
-                            }
-                        }
-                    },
-                    {
-                        "$addFields": {
-                            "filtered_order": {
-                                "$filter": {
-                                    "input": "$order_details",
-                                    "as": "item",
-                                    "cond": {
-                                        "$or": [
-                                            {
-                                                "$and": [
-                                                    {"$eq": ["$$marketplace_name", "Amazon"]},
-                                                    {"$eq": ["$$item.Title", "$$product_title"]}
-                                                ]
-                                            },
-                                            {
-                                                "$and": [
-                                                    {"$ne": ["$$marketplace_name", "Amazon"]},
-                                                    {"$eq": ["$$item.item.productName", "$$product_title"]}
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    {
-                        "$match": {
-                            "filtered_order": {"$ne": []}  # Ensure at least one matching order exists
-                        }
-                    }
-                ],
-                "as": "order_ins"
-            }
-        },
-        {
-            "$unwind": {
-                "path": "$order_ins",
                 "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
             }
         },
@@ -360,7 +318,7 @@ def getOrdersBasedOnProduct(request):
         }
     ]
 
-    orders = list(Product.objects.aggregate(*pipeline))
+    orders = list(OrderItems.objects.aggregate(*pipeline))
     if len(orders) == 1 and orders[0]['id'] == None:
         orders =[]
 
