@@ -364,6 +364,7 @@ def fetchAllorders(request):
                 # "taxes": {"$ifNull": ["$taxes", 0.0]},
                 "purchase_order_date": {"$ifNull": ["$purchase_order_date", None]},
                 "expected_delivery_date": {"$ifNull": ["$expected_delivery_date", None]},
+                "order_status" : "$order_status"
             }
         },
         {
@@ -684,7 +685,8 @@ def createManualOrder(request):
     custom_product_obj = json_request.get('custom_product_obj')
 
     custom_product_obj['order_id'] = str(''.join([str(uuid.uuid4().int)[:13]]))
-    
+     
+    custom_product_obj['customer_order_id'] = datetime.now().strftime('%Y%m%d') + str(uuid.uuid4().int)[:5]
     # Handle purchase_order_date
     try:
         custom_product_obj['purchase_order_date'] = datetime.strptime(
@@ -891,6 +893,8 @@ def fetchManualOrderDetails(request):
                 "expected_delivery_date": {"$ifNull": ["$expected_delivery_date", None]},
                 "created_at": {"$ifNull": ["$created_at", None]},
                 "updated_at": {"$ifNull": ["$updated_at", None]},
+                "customer_order_id" : {"$ifNull" : ["$customer_order_id",""]},
+                "weight_value" : {"$ifNull" : ['$weight_value',""]},
                 "ordered_products": {
                     "$map": {
                         "input": "$ordered_products",
