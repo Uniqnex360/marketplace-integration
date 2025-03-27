@@ -17,7 +17,7 @@ Including another URLconf
 from django.urls import path
 from omnisight.operations.common_operations import checkEmailExistOrNot, signupUser,loginUser, forgotPassword, changePassword
 from omnisight.operations.walmart_operations import updateOrdersItemsDetails, fetchAllorders1, syncRecentWalmartOrders
-from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary, salesAnalytics, mostSellingProducts, fetchTopSellingCategories
+from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary, salesAnalytics, mostSellingProducts, fetchTopSellingCategories, updateManualOrder, fetchInventryList
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders
 
@@ -59,6 +59,7 @@ urlpatterns = [
     path("createManualOrder/",createManualOrder,name="createManualOrder"),
     path("listManualOrders/",listManualOrders,name="listManualOrders"),
     path("fetchManualOrderDetails/",fetchManualOrderDetails,name="fetchManualOrderDetails"),
+    path('updateManualOrder/',updateManualOrder,name="updateManualOrder"),
 
 
     #AMAZON URLS
@@ -68,7 +69,10 @@ urlpatterns = [
 
     #Walmart
     path('updateOrdersItemsDetails/',updateOrdersItemsDetails,name='updateOrdersItemsDetails'),
-    path("syncRecentWalmartOrders/",syncRecentWalmartOrders,name="syncRecentWalmartOrders")
+    path("syncRecentWalmartOrders/",syncRecentWalmartOrders,name="syncRecentWalmartOrders"),
+
+    #Inventry
+    path("fetchInventryList/",fetchInventryList,name="fetchInventryList"),
 
 
 ]
