@@ -133,7 +133,7 @@ def checkAuthentication(request):
 
     if request.method == "POST":
         if not request.body:
-            return JsonResponse({"error": "Empty request body"}, status=400)
+            return False
 
         try:
             data = json.loads(request.body.decode("utf-8"))  # Manually parse JSON
@@ -141,7 +141,7 @@ def checkAuthentication(request):
             user_id = data.get("user_id")
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON: {e}")
-            return JsonResponse({"error": "Invalid JSON format"}, status=400)
+            return False
 
     elif request.method == "GET":
         user_id = request.GET.get("user_id", None)
@@ -152,9 +152,9 @@ def checkAuthentication(request):
                 "name__in": path,
                 "allowed_roles__in": [user_role]
             })
-            return JsonResponse({"authenticated": bool(has_permission)})
+            return bool(has_permission)
 
-    return JsonResponse({"error": "Authentication failed"}, status=403)
+    return False
 
 
 

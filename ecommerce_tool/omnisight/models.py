@@ -301,6 +301,7 @@ class custom_order(Document):
     ordered_products = ListField(EmbeddedDocumentField(product_details))  # List of product names
     total_quantity = IntField()
     total_price = FloatField()
+    currency = StringField()
     shipment_type = StringField()  # e.g., "Standard", "Express"
     channel = StringField()  # e.g., "Amazon", "Shopify"
     order_status = StringField(default="Pending")
@@ -346,6 +347,7 @@ class custom_order(Document):
     # Optional timestamps
     created_at = DateTimeField(default=datetime.now())
     updated_at = DateTimeField(default=datetime.now())
+    user_id = ReferenceField(user)
 
 
 
