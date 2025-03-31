@@ -707,7 +707,7 @@ def createManualOrder(request):
     product_detail = list()
     ordered_products = json_request.get('ordered_products')
     custom_product_obj = json_request.get('custom_product_obj')
-    user_id = json_request.get('custom_product_obj')
+    user_id = json_request.get('user_id')
     if user_id:
         custom_product_obj['user_id'] = ObjectId(user_id)
     
