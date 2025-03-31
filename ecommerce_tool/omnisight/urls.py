@@ -17,7 +17,7 @@ Including another URLconf
 from django.urls import path
 from omnisight.operations.common_operations import checkEmailExistOrNot, signupUser,loginUser, forgotPassword, changePassword
 from omnisight.operations.walmart_operations import updateOrdersItemsDetails, fetchAllorders1, syncRecentWalmartOrders
-from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary, salesAnalytics, mostSellingProducts, fetchTopSellingCategories, updateManualOrder, fetchInventryList, exportOrderReport
+from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary, salesAnalytics, mostSellingProducts, fetchTopSellingCategories, updateManualOrder, fetchInventryList, exportOrderReport, createUser, updateUser, listUsers,fetchUserDetails, fetchRoles
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders
 
@@ -73,8 +73,16 @@ urlpatterns = [
 
     #Inventry
     path("fetchInventryList/",fetchInventryList,name="fetchInventryList"),
-    path('exportOrderReport/',exportOrderReport,name="exportOrderReport",)
+    path('exportOrderReport/',exportOrderReport,name="exportOrderReport"),
 
+
+    #USER creation and Details
+
+    path("createUser/",createUser,name="createUser"),
+    path("updateUser/",updateUser,name="updateUser"),
+    path("listUsers/",listUsers,name="listUsers"),
+    path("fetchUserDetails/",fetchUserDetails,name="fetchUserDetails"),
+    path("fetchRoles/",fetchRoles,name="fetchRoles"),
 ]
 
 

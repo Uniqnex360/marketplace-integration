@@ -1934,7 +1934,8 @@ def createUser(request):
     old_user_obj = DatabaseModel.get_document(user.objects,{"email" : email},['id'])
     if old_user_obj != None:
         user_data = {
-            "username": json_request.get("username"),
+            "first_name": json_request.get("first_name"),
+            "last_name" : json_request.get('last_name'),
             "email": email,
             "password": json_request.get("password"),  # Ensure to hash the password in production
             "role_id": ObjectId(json_request.get("role_id")),
@@ -1950,78 +1951,111 @@ def createUser(request):
 def updateUser(request):
     data = dict()
     json_request = JSONParser().parse(request)
-    user_id = json_request.get("user_id")
-    old_user_obj = DatabaseModel.get_document(user)
-
-    old_user_obj.username = json_request.get("username", old_user_obj.username)
-    old_user_obj.email = json_request.get("email", old_user_obj.email)
-    old_user_obj.role_id = json_request.get("role_id", old_user_obj.role_id)
-    old_user_obj.updated_at = datetime.now()
-
-    old_user_obj.save()
-    data["message"] = "User updated successfully."
+    target_user_id = json_request.get("target_user_id")
+    update_obj = json_request.get('update_obj')
+    old_user_obj = DatabaseModel.get_document(user.objects,{"id" : target_user_id})
+    data["message"] = "User Not Updated."
+    if old_user_obj:
+        DatabaseModel.update_documents(user.objects,{"id" : target_user_id},update_obj)
+        data["message"] = "User updated successfully."
     return data
 
 
 @csrf_exempt
 def listUsers(request):
     data = dict()
-    try:
-        json_request = JSONParser().parse(request)
-        limit = int(json_request.get("limit", 100))  # Default limit = 100
-        skip = int(json_request.get("skip", 0))  # Default skip = 0
+    limit = int(request.GET.get("limit", 100))  # Default limit = 100
+    skip = int(request.GET.get("skip", 0))  # Default skip = 0
 
-        pipeline = [
-            {
-                "$project": {
-                    "_id": 0,
-                    "id": {"$toString": "$_id"},
-                    "username": 1,
-                    "email": 1,
-                    "roles": 1,
-                    "created_at": 1,
-                    "updated_at": 1,
-                }
-            },
-            {"$skip": skip},
-            {"$limit": limit},
-        ]
-        users = list(user.objects.aggregate(*pipeline))
-        data["users"] = users
-    except Exception as e:
-        data["error"] = str(e)
+    pipeline = [
+         {
+            "$lookup": {
+                "from": "role",
+                "localField": "role_id",
+                "foreignField": "_id",
+                "as": "role_ins"
+            }
+        },
+        {
+            "$unwind": "$role_ins"
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "username": 1,
+                "email": 1,
+                "role_name": "$role_ins.name",
+                "created_at": 1
+            }
+        },
+        {"$skip": skip},
+        {"$limit": limit},
+        {
+            "$sort" : {
+                "id" : -1
+            }
+        }
+    ]
+    users = list(user.objects.aggregate(*pipeline))
+    data["users"] = users
     return data
 
 
 def fetchUserDetails(request):
     data = dict()
-    try:
-        user_id = request.GET.get("user_id")
-        user_obj = user.objects.get(id=ObjectId(user_id))
-        data["user"] = {
-            "id": str(user_obj.id),
-            "username": user_obj.user_objname,
-            "email": user_obj.email,
-            "roles": user_obj.roles,
-            "created_at": user_obj.created_at,
-            "updated_at": user_obj.updated_at,
+    target_user_id = request.GET.get("target_user_id")
+    data['user_obj'] = {}
+    pipeline = [
+    {
+        "$match" : {
+            "_id" : ObjectId(target_user_id)
         }
-    except user.DoesNotExist:
-        data["error"] = "User not found."
-    except Exception as e:
-        data["error"] = str(e)
+    },
+    {
+        "$lookup": {
+            "from": "role",
+            "localField": "role_id",
+            "foreignField": "_id",
+            "as": "role_ins"
+        }
+    },
+    {
+        "$unwind": "$role_ins"
+    },
+    {
+        "$project": {
+            "_id": 0,
+            "id": {"$toString": "$_id"},
+            "first_name": 1,
+            "last_name": 1,
+            "email" : 1,
+            "mobile_number" : 1,
+            "profile_image" : 1,
+            "role_name": "$role_ins.name",
+        }
+    },
+    ]
+    user_obj = list(user.objects.aggregate(*pipeline))
+    if user_obj != []:
+        data['user_obj'] = user_obj[0]
+   
     return data
 
 
 def fetchRoles(request):
-    data = dict()
-    try:
-        roles = list(role.objects.all().values("id", "name"))
-        data["roles"] = [{"id": str(role["id"]), "name": role["name"]} for role in roles]
-    except Exception as e:
-        data["error"] = str(e)
-    return data
-
+    pipeline = [
+        {
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "name": 1,
+            }
+        }
+    ]
+       
+    role_list = list(role.objects.aggregate(*pipeline))
+    return role_list
 
 #-------------------------------------------INVENTRY MANAGEMENT--------------------
 
@@ -2112,9 +2146,7 @@ def fetchInventryList(request):
 
 
 
-@csrf_exempt
 def exportOrderReport(request):
-
     # Fetch orders from the database
     orders = list(Order.objects.all())
 
@@ -2123,84 +2155,109 @@ def exportOrderReport(request):
     sheet = workbook.active
     sheet.title = "Order Report"
 
-    # Define headers and sub-headers
-    headers = [
-        ("Order Details", ["Purchase Order ID", "Customer Order ID", "Seller Order ID", "Order Date", "Order Status"]),
-        ("Customer Details", ["Customer Email ID"]),
-        ("Shipping Details", ["Shipping Address", "Ship Service Level", "Shipment Service Level Category"]),
-        ("Order Items", ["Number of Items Shipped", "Number of Items Unshipped"]),
-        ("Payment Details", ["Payment Method", "Order Total", "Currency"]),
-        ("Marketplace Details", ["Marketplace", "Marketplace ID"]),
+    # Determine the maximum number of products in any order
+    max_products = max(len(order.order_items) for order in orders) if orders else 1
+
+    # Define base headers
+    order_headers = [
+        "Purchase Order Id", "Customer Order Id", "Order Date", "Marketplace Name", "Earliest Ship Date",
+        "Fulfilment Channel", "Order Status", "Ship Service Level", "Customer Email Id",
+        "Has Regulated Items", "Is Replacement Order", "Shipping Information"
     ]
+
+    # Dynamically generate product headers
+    product_headers = []
+    for i in range(1, max_products + 1):
+        product_headers.extend([
+            f"Product {i} Name", f"Product {i} SKU", f"Product {i} Quantity Ordered",
+            f"Product {i} Quantity Shipped", f"Product {i} Unit Price"
+        ])
+
+    # Fixed fields at the end
+    fixed_headers = ["Discount", "Tax", "Total Order", "Currency"]
+
+    # Combine all headers
+    headers = order_headers + product_headers + fixed_headers
 
     # Apply header styles
     yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
     blue_fill = PatternFill(start_color="ADD8E6", end_color="ADD8E6", fill_type="solid")
     bold_font = Font(bold=True)
 
-    # Write headers and sub-headers
-    row = 1
-    col = 1
-    for header, sub_headers in headers:
-        sheet.merge_cells(start_row=row, start_column=col, end_row=row, end_column=col + len(sub_headers) - 1)
-        cell = sheet.cell(row=row, column=col)
-        cell.value = header
-        cell.fill = yellow_fill
+    # Write headers
+    for col_index, header in enumerate(headers, start=1):
+        cell = sheet.cell(row=1, column=col_index, value=header)
+        cell.fill = blue_fill
         cell.font = bold_font
 
-        for sub_col, sub_header in enumerate(sub_headers, start=col):
-            sub_cell = sheet.cell(row=row + 1, column=sub_col)
-            sub_cell.value = sub_header
-            sub_cell.fill = blue_fill
-            sub_cell.font = bold_font
-
-        col += len(sub_headers)
-
     # Write order data
-    row = 3
+    row = 2
     for order in orders:
-        col = 1
-        sheet.cell(row=row, column=col, value=order.purchase_order_id)
-        sheet.cell(row=row, column=col + 1, value=order.customer_order_id)
-        sheet.cell(row=row, column=col + 2, value=order.seller_order_id)
-        sheet.cell(row=row, column=col + 3, value=order.order_date.strftime('%Y-%m-%d') if order.order_date else None)
-        sheet.cell(row=row, column=col + 4, value=order.order_status)
-        col += 5
+        base_col = 1
 
-        sheet.cell(row=row, column=col, value=order.customer_email_id)
-        col += 1
-
+        # Process Shipping Information
         if order.shipping_information:
             shipping_info = order.shipping_information
             postal_address = shipping_info.get('postalAddress', {})
             shipping_details = f"Name: {postal_address.get('name', '')}, " \
-                       f"Address1: {postal_address.get('address1', '')}, " \
-                       f"Address2: {postal_address.get('address2', '')}, " \
-                       f"City: {postal_address.get('city', '')}, " \
-                       f"State: {postal_address.get('state', '')}, " \
-                       f"PostalCode: {postal_address.get('postalCode', '')}, " \
-                       f"Country: {postal_address.get('country', '')}, " \
-                       f"Phone: {shipping_info.get('phone', '')}, " \
-                       f"MethodCode: {shipping_info.get('methodCode', '')}, " \
-                       f"EstimatedShipDate: {shipping_info.get('estimatedShipDate', '')}, " \
-                       f"EstimatedDeliveryDate: {shipping_info.get('estimatedDeliveryDate', '')}"
-            sheet.cell(row=row, column=col, value=shipping_details)
+                               f"Address1: {postal_address.get('address1', '')}, " \
+                               f"Address2: {postal_address.get('address2', '')}, " \
+                               f"City: {postal_address.get('city', '')}, " \
+                               f"State: {postal_address.get('state', '')}, " \
+                               f"PostalCode: {postal_address.get('postalCode', '')}, " \
+                               f"Country: {postal_address.get('country', '')}, " \
+                               f"Phone: {shipping_info.get('phone', '')}, " \
+                               f"MethodCode: {shipping_info.get('methodCode', '')}, " \
+                               f"EstimatedShipDate: {shipping_info.get('estimatedShipDate', '')}, " \
+                               f"EstimatedDeliveryDate: {shipping_info.get('estimatedDeliveryDate', '')}"
         else:
-            sheet.cell(row=row, column=col, value=None)
-        sheet.cell(row=row, column=col + 1, value=order.ship_service_level)
-        sheet.cell(row=row, column=col + 2, value=order.shipment_service_level_category)
-        col += 3
+            shipping_details = None
 
-        sheet.cell(row=row, column=col, value=order.number_of_items_shipped)
-        sheet.cell(row=row, column=col + 1, value=order.number_of_items_unshipped)
-        col += 2
+        # Order details
+        order_data = [
+            order.purchase_order_id, order.customer_order_id,
+            order.order_date.strftime('%Y-%m-%d') if order.order_date else None,
+            order.marketplace_id.name if order.marketplace_id else None,
+            order.earliest_ship_date, order.fulfillment_channel,
+            order.order_status, order.ship_service_level,
+            order.customer_email_id, order.has_regulated_items,
+            order.is_replacement_order, shipping_details
+        ]
 
-        sheet.cell(row=row, column=col, value=order.payment_method)
-        sheet.cell(row=row, column=col + 1, value=order.order_total)
-        sheet.cell(row=row, column=col + 2, value=order.currency)
-        col += 3
+        # Write order details
+        for col_index, value in enumerate(order_data, start=base_col):
+            sheet.cell(row=row, column=col_index, value=value)
 
-        sheet.cell(row=row, column=col, value=order.marketplace_id.name if order.marketplace else None)
+        # Move to product details section
+        col = base_col + len(order_data)
+
+        # Iterate over ordered items and populate product columns dynamically
+        for product_index, product in enumerate(order.order_items[:max_products]):
+            product_details = [
+                product.ProductDetails.Title, product.ProductDetails.SKU,
+                product.ProductDetails.QuantityOrdered, product.ProductDetails.QuantityShipped,
+                product.Pricing['ItemPrice']['Amount'] if product.Pricing else None
+            ]
+
+            # Write product details
+            for col_index, value in enumerate(product_details, start=col + product_index * 5):
+                sheet.cell(row=row, column=col_index, value=value)
+
+        # Move to fixed fields section
+        col = base_col + len(order_data) + (max_products * 5)
+
+        # Fixed Fields: Discount, Tax, Total Order, Currency
+        fixed_details = [
+            order.discount if hasattr(order, 'discount') else None,
+            order.tax if hasattr(order, 'tax') else None,
+            order.order_total, order.currency
+        ]
+
+        # Write fixed details
+        for col_index, value in enumerate(fixed_details, start=col):
+            sheet.cell(row=row, column=col_index, value=value)
+
+        # Move to the next row for the next order
         row += 1
 
     # Adjust column widths
