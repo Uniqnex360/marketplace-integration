@@ -63,55 +63,75 @@ def fetchAllProducts(request):
     return data
 
 
-def fetchProductDetails(request):
-    data = dict()
-    user_id = request.GET.get('user_id')
-    sku = request.GET.get('sku')
+def fetchProductDetails(request=None):
+    ACCESS_TOKEN = oauthFunction()#getAccesstoken(user_id)
+    marketplace_id = DatabaseModel.get_document(Marketplace.objects,{"name" : "Walmart"},['id']).id
 
-    ACCESS_TOKEN = getAccesstoken(user_id)
-
-    # Walmart API URL for product details
-    PRODUCT_DETAILS_URL = f"https://marketplace.walmartapis.com/v3/items/{sku}?include=images,attributes,fulfillment,variants,productType"
-
-    # Headers for authentication
-    headers = {
-        "WM_SEC.ACCESS_TOKEN": ACCESS_TOKEN,
-        "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),  # Unique request ID
-        "WM_SVC.NAME": "Walmart Marketplace",
-        "Accept": "application/json"
+    pipeline = [
+    {"$match": {
+                "marketplace_id" : marketplace_id
+                }
+    },
+    {
+        "$project": {
+            "_id": 1,
+            "sku" : {"$ifNull" : ["$sku", ""]}
+        }
     }
-
-    print(f"Fetching details for SKU: {sku}...")
-
-    STOCK_URL = f"https://marketplace.walmartapis.com/v3/inventory/?sku={sku}"
     
-    # Send GET request
-    response = requests.get(PRODUCT_DETAILS_URL, headers=headers)
-    # Headers for authentication
-    headers1 = {
-        "WM_SEC.ACCESS_TOKEN": ACCESS_TOKEN,
-        "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),  # Unique request ID
-        "WM_SVC.NAME": "Walmart Marketplace",
-        "Accept": "application/json"
-    }
-    response1 = requests.get(STOCK_URL, headers=headers1)
+    ]
+    product_list = list(Product.objects.aggregate(*pipeline))
+    for product_ins in product_list:
+        sku= product_ins['sku']
+        update_obj = {}
+        if sku != "":
+            # Walmart API URL for product details
+            PRODUCT_DETAILS_URL = f"https://marketplace.walmartapis.com/v3/items/{sku}?include=images,attributes,fulfillment,variants,productType"
 
-    if response.status_code == 200:
-        data['product_details'] = response.json()
-        print("✅ Product details fetched successfully")
-    else:
-        print(f"❌ Failed to Fetch Product Details. Status Code: {response.status_code}")
-        print("Response:", response.text)
+            # Headers for authentication
+            headers = {
+                "WM_SEC.ACCESS_TOKEN": ACCESS_TOKEN,
+                "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),  # Unique request ID
+                "WM_SVC.NAME": "Walmart Marketplace",
+                "Accept": "application/json"
+            }
 
-    if response1.status_code == 200:
-        data['stock_details'] = response1.json()
-        print("✅Stock Details fetched successfully")
-    else:
-        print(f"❌ Failed to Fetch stock Details. Status Code: {response1.status_code}")
-        print("Response:", response1.text)
+            print(f"Fetching details for SKU: {sku}...")
 
-    return data
+            STOCK_URL = f"https://marketplace.walmartapis.com/v3/inventory/?sku={sku}"
+            
+            # Send GET request
+            response = requests.get(PRODUCT_DETAILS_URL, headers=headers)
+            # Headers for authentication
+            headers1 = {
+                "WM_SEC.ACCESS_TOKEN": ACCESS_TOKEN,
+                "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),  # Unique request ID
+                "WM_SVC.NAME": "Walmart Marketplace",
+                "Accept": "application/json"
+            }
+            response1 = requests.get(STOCK_URL, headers=headers1)
 
+            if response.status_code == 200:
+                print("✅ Product details fetched successfully",sku)
+                update_obj['price'] = response1.json()['ItemResponse'][0]['price']['amount']
+            else:
+                print("❌ Failed to Fetch Products price",sku)
+
+            if response1.status_code == 200:
+                print("✅Stock Details fetched successfully",sku)
+                update_obj['quantity'] = response1.json()['quantity']['amount']
+            else:
+                print("❌ Failed to Fetch Products inventry",sku)
+
+            if update_obj != {}:
+                DatabaseModel.update_documents(Product.objects,{"id" : product_ins['_id']},update_obj)
+            
+
+    return True
+
+
+# sku="CH-5219795-2PK"
+# fetchProductDetails()
 
 def saveProductCategory(marketplace_id,name,level,parent_id):
 
