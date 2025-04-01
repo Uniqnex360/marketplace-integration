@@ -313,7 +313,9 @@ class custom_order(Document):
     invoice = StringField()  # Invoice URL or identifier
     transaction_id = StringField()
     tax = FloatField(default=0.0)
+    tax_amount = FloatField(default=0.0)
     discount = FloatField(default=0.0)
+    discount_amount = FloatField(default=0.0)
 
     # Address and contact information
     shipping_address = StringField()

@@ -383,7 +383,7 @@ def fetchAllorders(request):
                 "customer_name": {"$ifNull": ["$customer_name", ""]},
                 "shipping_address": {"$ifNull": ["$shipping_address", ""]},
                 "total_quantity": {"$ifNull": ["$total_quantity", 0]},
-                "total_price": {"$ifNull": [{"$round": ["$total_price", 0.0]}, 0.0]},
+                "total_price": {"$ifNull": [{"$round": ["$total_price", 2]}, 0.0]},
                 # "taxes": {"$ifNull": ["$taxes", 0.0]},
                 "purchase_order_date": {"$ifNull": ["$purchase_order_date", None]},
                 "expected_delivery_date": {"$ifNull": ["$expected_delivery_date", None]},
@@ -751,9 +751,11 @@ def createManualOrder(request):
 
 
     if discount > 0:
-        total_price -= (total_price * discount / 100)  # Subtract discount
+        custom_product_obj['discount_amount'] = (total_price * discount / 100)  # Subtract discount
+        total_price -= custom_product_obj['discount_amount']
     if tax > 0:
-        total_price += (total_price * tax / 100)  # Add tax
+        custom_product_obj['tax_amount'] = (total_price * tax / 100)  # Add tax
+        total_price += custom_product_obj['tax_amount']
 
     custom_product_obj['total_price'] = round(total_price + shipment_cost, 2)  # Round to 2 decimal places
 
@@ -858,9 +860,11 @@ def updateManualOrder(request):
     shipment_cost = float(custom_product_obj.get('shipment_cost', 0))
 
     if discount > 0:
-        total_price -= (total_price * discount / 100)  # Subtract discount
+        custom_product_obj['discount_amount'] = (total_price * discount / 100)  # Subtract discount
+        total_price -= custom_product_obj['discount_amount']
     if tax > 0:
-        total_price += (total_price * tax / 100)  # Add tax
+        custom_product_obj['tax_amount'] = (total_price * tax / 100)  # Add tax
+        total_price += custom_product_obj['tax_amount']
 
     custom_product_obj['total_price'] = round(total_price + shipment_cost, 2)  # Round to 2 decimal places
 
@@ -905,6 +909,8 @@ def fetchManualOrderDetails(request):
                 "invoice": {"$ifNull": ["$invoice", ""]},
                 "transaction_id": {"$ifNull": ["$transaction_id", ""]},
                 "tax": {"$ifNull": ["$tax", 0.0]},
+                "tax_amount": {"$ifNull": [{"$round":["$tax_amount",2]}, 0.0]},
+                "discount_amount": {"$ifNull": [{"$round":["$discount_amount",2]}, 0.0]},
                 "discount": {"$ifNull": ["$discount", 0.0]},
                 "supplier_name": {"$ifNull": ["$supplier_name", ""]},
                 "mail": {"$ifNull": ["$mail", ""]},
@@ -1435,8 +1441,9 @@ def mostSellingProducts(request):
     if marketPlaceId == "custom":
         data['top_products'] = custom_top_products
         return data
-    top_products.extend(custom_top_products)
-    top_products = sorted(top_products, key=lambda x: x['sales_count'], reverse=True)[:7]
+    if marketPlaceId == "all":
+        top_products.extend(custom_top_products)
+        top_products = sorted(top_products, key=lambda x: x['sales_count'], reverse=True)[:7]
 
     data['top_products'] = top_products
     return data
@@ -1589,21 +1596,25 @@ def getSalesTrendPercentage(request):
             current_total = sum(current_range_data.values())
             previous_total = sum(previous_range_data.values())
             percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
+            current_percentage = (current_total / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
             data['trend_percentage'] = [{
                 "id": "All Channels",
                 "current_range_sales": current_total,
                 "previous_range_sales": previous_total,
-                "trend_percentage": change_sign(round(percentage_change, 2))
+                "trend_percentage": round(percentage_change, 2),
+                "current_percentage" : round(current_percentage,2)
             }]
         elif marketplace_id == "custom":  # Only custom_order data
             current_total = current_range_data.get(None, 0)
             previous_total = previous_range_data.get(None, 0)
             percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
+            current_percentage = (current_total / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
             data['trend_percentage'] = [{
                 "id": "Custom Orders",
                 "current_range_sales": current_total,
                 "previous_range_sales": previous_total,
-                "trend_percentage": change_sign(round(percentage_change, 2))
+                "trend_percentage": (round(percentage_change, 2)),
+                "current_percentage" : round(current_percentage,2)
             }]
         else:  # Specific marketplace
             trend_percentage = []
@@ -1612,11 +1623,13 @@ def getSalesTrendPercentage(request):
                 current_value = current_range_data.get(key, 0)
                 previous_value = previous_range_data.get(key, 0)
                 percentage_change = ((current_value - previous_value) / previous_value * 100) if previous_value != 0 else (100 if current_value > 0 else 0)
+                current_percentage = (current_value / previous_value * 100) if previous_value != 0 else (100 if current_value > 0 else 0)
                 trend_percentage.append({
                     "id": str(marketplace_name),
                     "current_range_sales": current_value,
                     "previous_range_sales": previous_value,
-                    "trend_percentage": change_sign(round(percentage_change, 2))
+                    "trend_percentage": (round(percentage_change, 2)),
+                    "current_percentage" : round(current_percentage,2)
                 })
             data['trend_percentage'] = trend_percentage
     else:
