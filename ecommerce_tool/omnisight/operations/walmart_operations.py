@@ -112,14 +112,20 @@ def fetchProductDetails(request=None):
             response1 = requests.get(STOCK_URL, headers=headers1)
 
             if response.status_code == 200:
-                print("✅ Product details fetched successfully",sku)
-                update_obj['price'] = response1.json()['ItemResponse'][0]['price']['amount']
+                try:
+                    print("✅ Product details fetched successfully",sku)
+                    update_obj['price'] = response.json()['ItemResponse'][0]['price']['amount']
+                except:
+                     print("❌ Product details doesn't contains price",sku)                   
             else:
                 print("❌ Failed to Fetch Products price",sku)
 
             if response1.status_code == 200:
-                print("✅Stock Details fetched successfully",sku)
-                update_obj['quantity'] = response1.json()['quantity']['amount']
+                try:
+                    print("✅Stock Details fetched successfully",sku)
+                    update_obj['quantity'] = response1.json()['quantity']['amount']
+                except:
+                    print("❌ Product details doesn't contains Inventry",sku) 
             else:
                 print("❌ Failed to Fetch Products inventry",sku)
 

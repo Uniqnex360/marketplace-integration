@@ -101,6 +101,7 @@ class Product(Document):
 
     category = StringField()  # e.g., "Electronics > Computers > Laptops"
     attributes = DictField()  # Additional attributes (e.g., color, size, weight)
+    old_attributes = DictField()
     features = ListField(StringField())  # List of product features
     brand_name = StringField()  # Brand name
     brand_id = ReferenceField(Brand)  # Reference to the brand

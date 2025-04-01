@@ -599,3 +599,33 @@ def syncRecentAmazonOrders():
                 order.save()
            
     return orders
+
+
+
+def ProcessAmazonProductAttributes():
+    marketplace_id = DatabaseModel.get_document(Marketplace.objects,{"name" : "Amazon"},['id']).id
+    pipeline = [
+        {
+            "$match" : {
+                "marketplace_id" : marketplace_id
+            }
+        },
+        {
+            "$project" : {
+                "_id" : 1,
+                "attributes" : {"$ifNull" : ["$attributes",{}]},  # If asin is null, replace with empty string
+
+            }
+        },
+        # {
+        #     "$limit" : 1
+        # }
+    ]
+    product_list = list(Product.objects.aggregate(*(pipeline)))
+    for product_ins in product_list:
+        for key,value in product_ins['attributes'].items():
+            if key == "container":
+                print("11111111111111",value,len(value))
+
+
+ProcessAmazonProductAttributes()
