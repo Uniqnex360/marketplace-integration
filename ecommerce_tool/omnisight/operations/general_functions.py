@@ -1772,7 +1772,7 @@ def fetchSalesSummary(request):
         data['total_units_sold'] = total_custom_units_sold
         data['total_sold_product_count'] = total_custom_sold_product_count
 
-    if marketplace_id == "all": 
+    if marketplace_id == "": 
         # Combine totals
         data['total_sales'] += total_custom_sales
         data['total_units_sold'] += total_custom_units_sold
