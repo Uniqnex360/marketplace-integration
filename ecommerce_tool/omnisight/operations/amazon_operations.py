@@ -603,29 +603,35 @@ def syncRecentAmazonOrders():
 
 
 def ProcessAmazonProductAttributes():
-    marketplace_id = DatabaseModel.get_document(Marketplace.objects,{"name" : "Amazon"},['id']).id
+    marketplace_id = DatabaseModel.get_document(Marketplace.objects, {"name": "Amazon"}, ['id']).id
     pipeline = [
         {
-            "$match" : {
-                "marketplace_id" : marketplace_id
+            "$match": {
+                "marketplace_id": marketplace_id
             }
         },
         {
-            "$project" : {
-                "_id" : 1,
-                "attributes" : {"$ifNull" : ["$attributes",{}]},  # If asin is null, replace with empty string
-
+            "$project": {
+                "_id": 1,
+                "attributes": {"$ifNull": ["$attributes", {}]},  # If attributes is null, replace with empty dict
             }
         },
-        # {
-        #     "$limit" : 1
-        # }
     ]
     product_list = list(Product.objects.aggregate(*(pipeline)))
     for product_ins in product_list:
-        for key,value in product_ins['attributes'].items():
-            if key == "container":
-                print("11111111111111",value,len(value))
+        new_dict = {}
+        for key, value in product_ins['attributes'].items():
+            if isinstance(value, list) and len(value) == 1:  # Check if the field contains a single-item list
+                single_value = value[0]
+                filtered_value = {k: v for k, v in single_value.items() if k not in ["language_tag", "marketplace_id"]}
+                new_dict[key] = filtered_value
+            elif isinstance(value, list):  # Handle multi-item lists if needed
+                new_dict[key] = [
+                    {k: v for k, v in item.items() if k not in ["language_tag", "marketplace_id"]}
+                    for item in value
+                ]
+        print(f"Processed attributes for product {product_ins['_id']}: {len(new_dict)}")
+        DatabaseModel.update_documents(Product.objects,{"id" : product_ins['_id']},{"attributes" : new_dict,"old_attributes" : product_ins['attributes']})
 
 
-ProcessAmazonProductAttributes()
+# ProcessAmazonProductAttributes()
