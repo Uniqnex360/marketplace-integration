@@ -1772,7 +1772,7 @@ def fetchSalesSummary(request):
         data['total_units_sold'] = total_custom_units_sold
         data['total_sold_product_count'] = total_custom_sold_product_count
 
-    else: 
+    if marketplace_id == "all": 
         # Combine totals
         data['total_sales'] += total_custom_sales
         data['total_units_sold'] += total_custom_units_sold
@@ -1952,6 +1952,7 @@ def createUser(request):
             "email": email,
             "password": json_request.get("password"),  # Ensure to hash the password in production
             "role_id": ObjectId(json_request.get("role_id")),
+            "profile_image" : json_request.get("profile_image", "")
             
         }
         new_user = DatabaseModel.save_documents(user, user_data)
@@ -2083,7 +2084,7 @@ def fetchRoles(request):
     return role_list
 
 #-------------------------------------------INVENTRY MANAGEMENT--------------------
-
+@csrf_exempt
 def fetchInventryList(request):
     data = dict()
     json_request = JSONParser().parse(request)
@@ -2099,7 +2100,7 @@ def fetchInventryList(request):
     pipeline = []
     count_pipeline = []
     match = {}
-    if marketplace_id != None and marketplace_id != "":
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all":
         match['marketplace_id'] = ObjectId(marketplace_id)
     # if category_name != None and category_name != "" and category_name != []:
     #     match['category'] = {"$in":category_name}

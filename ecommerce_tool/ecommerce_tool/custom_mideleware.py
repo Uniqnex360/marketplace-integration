@@ -137,7 +137,6 @@ def checkAuthentication(request):
 
         try:
             data = json.loads(request.body.decode("utf-8"))  # Manually parse JSON
-            print("Parsed Data:", data)
             user_id = data.get("user_id")
         except json.JSONDecodeError as e:
             print(f"Error parsing JSON: {e}")
