@@ -1932,7 +1932,7 @@ def createUser(request):
     json_request = JSONParser().parse(request)
     email = json_request.get("email")
     old_user_obj = DatabaseModel.get_document(user.objects,{"email" : email},['id'])
-    if old_user_obj != None:
+    if old_user_obj == None:
         user_data = {
             "first_name": json_request.get("first_name"),
             "last_name" : json_request.get('last_name'),
@@ -1944,6 +1944,9 @@ def createUser(request):
         new_user = DatabaseModel.save_documents(user, user_data)
         data["message"] = "User created successfully."
         data["user_id"] = str(new_user.id)
+    else:
+        data["message"] = "User Already Present."
+        data["user_id"] = str(old_user_obj.id)
     return data
 
 
@@ -1955,6 +1958,10 @@ def updateUser(request):
     update_obj = json_request.get('update_obj')
     old_user_obj = DatabaseModel.get_document(user.objects,{"id" : target_user_id})
     data["message"] = "User Not Updated."
+    try:
+        update_obj['role_id'] = ObjectId(update_obj['role_id'])
+    except:
+        pass
     if old_user_obj:
         DatabaseModel.update_documents(user.objects,{"id" : target_user_id},update_obj)
         data["message"] = "User updated successfully."
@@ -1977,18 +1984,23 @@ def listUsers(request):
             }
         },
         {
-            "$unwind": "$role_ins"
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "id": {"$toString": "$_id"},
-                "username": 1,
-                "email": 1,
-                "role_name": "$role_ins.name",
-                "created_at": 1
+            "$unwind": {
+                "path": "$role_ins",
+                "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
             }
         },
+        {
+        "$project": {
+            "_id": 0,
+            "id": {"$toString": "$_id"},
+            "first_name": 1,
+            "last_name": 1,
+            "email" : 1,
+            "role_name": "$role_ins.name",
+            "creation_date" :1,
+            "role_id" : {"$toString" : "$role_id"}
+        }
+    },
         {"$skip": skip},
         {"$limit": limit},
         {
