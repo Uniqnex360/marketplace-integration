@@ -828,13 +828,13 @@ def updateManualOrder(request):
     try:
         purchase_order_date = custom_product_obj.get('purchase_order_date')
         if purchase_order_date:
-            custom_product_obj['purchase_order_date'] = datetime.strptime(purchase_order_date, '%Y-%m-%dT%H:%M:%S')
+            custom_product_obj['purchase_order_date'] = datetime.strptime(purchase_order_date, '%Y-%m-%d')
     except:
         pass
 
     expected_delivery_date = custom_product_obj.get('expected_delivery_date')
     if expected_delivery_date:
-        custom_product_obj['expected_delivery_date'] = datetime.strptime(expected_delivery_date, '%Y-%m-%dT%H:%M:%S')
+        custom_product_obj['expected_delivery_date'] = datetime.strptime(expected_delivery_date, '%Y-%m-%d')
     else:
         custom_product_obj['expected_delivery_date'] = None
 
