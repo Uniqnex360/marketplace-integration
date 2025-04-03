@@ -390,12 +390,6 @@ def fetchAllorders(request):
                 "order_status" : "$order_status",
                 "currency" : {"$ifNull" : ["$currency","USD"]}
             }
-        },
-        {
-            "$skip": skip
-        },
-        {
-            "$limit": limit + skip
         }
         ]
         if sort_by != None and sort_by != "":
@@ -411,6 +405,14 @@ def fetchAllorders(request):
                 }
             }
         pipeline.append(sort)
+        pipeline.extend([
+            {
+            "$skip": skip
+        },
+        {
+            "$limit": limit + skip
+        }
+        ])
 
         manual_orders = list(custom_order.objects.aggregate(*pipeline))
         count_pipeline = [
@@ -472,12 +474,6 @@ def fetchAllorders(request):
                     "quantity" : {"$size" : "$order_items"}
 
                 }
-            },
-            {
-                "$skip": skip
-            },
-            {
-                "$limit": limit + skip
             }
         ])
         if sort_by != None and sort_by != "":
@@ -487,6 +483,14 @@ def fetchAllorders(request):
                 }
             }
             pipeline.append(sort)
+        pipeline.extend([
+            {
+            "$skip": skip
+        },
+        {
+            "$limit": limit + skip
+        }
+        ])
         orders = list(Order.objects.aggregate(*(pipeline)))
         count_pipeline.extend([
             {
