@@ -390,12 +390,6 @@ def fetchAllorders(request):
                 "order_status" : "$order_status",
                 "currency" : {"$ifNull" : ["$currency","USD"]}
             }
-        },
-        {
-            "$skip": skip
-        },
-        {
-            "$limit": limit + skip
         }
         ]
         if sort_by != None and sort_by != "":
@@ -411,6 +405,14 @@ def fetchAllorders(request):
                 }
             }
         pipeline.append(sort)
+        pipeline.extend([
+            {
+            "$skip": skip
+        },
+        {
+            "$limit": limit + skip
+        }
+        ])
 
         manual_orders = list(custom_order.objects.aggregate(*pipeline))
         count_pipeline = [
@@ -472,12 +474,6 @@ def fetchAllorders(request):
                     "quantity" : {"$size" : "$order_items"}
 
                 }
-            },
-            {
-                "$skip": skip
-            },
-            {
-                "$limit": limit + skip
             }
         ])
         if sort_by != None and sort_by != "":
@@ -487,6 +483,14 @@ def fetchAllorders(request):
                 }
             }
             pipeline.append(sort)
+        pipeline.extend([
+            {
+            "$skip": skip
+        },
+        {
+            "$limit": limit + skip
+        }
+        ])
         orders = list(Order.objects.aggregate(*(pipeline)))
         count_pipeline.extend([
             {
@@ -2299,3 +2303,166 @@ def exportOrderReport(request):
     response = HttpResponse(output, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     response["Content-Disposition"] = 'attachment; filename="Order_Report.xlsx"'
     return response
+
+
+
+@csrf_exempt
+def fetchSalesSummary(request):
+    data = {}
+    total_sales_pipeline = []
+    pipeline = []
+    match = {}
+
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id')
+    start_date = json_request.get('start_date')  # Optional custom start date
+    end_date = json_request.get('end_date')  # Optional custom end date
+
+    # Add date range filter if provided
+    if start_date and end_date:
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        match["order_date"] = {"$gte": start_date, "$lte": end_date}
+
+    if marketplace_id != None and marketplace_id != "all" and marketplace_id != "" and marketplace_id != "custom":
+        match["marketplace_id"] = ObjectId(marketplace_id)
+    if marketplace_id == "all" or marketplace_id != "custom":
+        if match:
+            match_stage = {"$match": match}
+            total_sales_pipeline.append(match_stage)
+            pipeline.append(match_stage)
+
+        # Pipeline to calculate total units sold, total sold product count, and total sales
+        total_sales_pipeline.extend([
+            {
+                "$group": {
+                    "_id": None,  # Grouping by None to get a single summary document
+                    "total_sales": {"$sum": "$order_total"},
+                    "total_cogs": {"$sum": "$cogs"},  # Assuming 'cogs' field exists
+                    "total_refunds": {"$sum": "$refunds"}  # Assuming 'refunds' field exists
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "total_sales": {"$round": ["$total_sales", 2]},
+                    "total_cogs": {"$round": ["$total_cogs", 2]},
+                    "total_refunds": {"$round": ["$total_refunds", 2]}
+                }
+            }
+        ])
+
+        summary = list(Order.objects.aggregate(*total_sales_pipeline))
+        if summary:
+            data['total_sales'] = summary[0].get('total_sales', 0)
+            data['total_cogs'] = summary[0].get('total_cogs', 0)
+            data['total_refunds'] = summary[0].get('total_refunds', 0)
+            data['margin'] = ((data['total_sales'] - data['total_cogs']) / data['total_sales']) * 100 if data['total_sales'] else 0
+        else:
+            data['total_sales'] = 0
+            data['total_cogs'] = 0
+            data['total_refunds'] = 0
+            data['margin'] = 0
+
+        pipeline.extend([
+            {
+                "$unwind": "$order_items"  # Unwind the order_items list to process each item individually
+            },
+            {
+                "$group": {
+                    "_id": None,  # Grouping by None to get a single summary document
+                    "ids": {"$addToSet": "$order_items"}  # Collect unique order_items
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "ids": 1
+                }
+            },
+        ])
+        summary1 = list(Order.objects.aggregate(*pipeline))
+        if summary1:
+            s_pipeline = [
+                {"$match": {
+                    "_id": {"$in": summary1[0]['ids']}
+                }},
+                {
+                    "$group": {
+                        "_id": None,
+                        "total_units_sold": {"$sum": "$ProductDetails.QuantityOrdered"},
+                        "unique_product_ids": {"$addToSet": "$ProductDetails.product_id"},
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 0,
+                        "total_units_sold": 1,
+                        "total_sold_product_count": {"$size": "$unique_product_ids"},
+                    }
+                }
+            ]
+            summary2 = list(OrderItems.objects.aggregate(*s_pipeline))
+            if summary2:
+                data['total_units_sold'] = summary2[0].get('total_units_sold', 0)
+                data['total_sold_product_count'] = summary2[0].get('total_sold_product_count', 0)
+        else:
+            data['total_units_sold'] = 0
+            data['total_sold_product_count'] = 0
+
+    # Add custom_order data
+    custom_match = {}
+    if start_date and end_date:
+        custom_match["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
+
+    custom_pipeline = [
+        {"$match": custom_match},
+        {"$unwind": "$ordered_products"},
+        {
+            "$group": {
+                "_id": None,
+                "total_custom_sales": {"$sum": "$ordered_products.quantity_price"},
+                "total_custom_cogs": {"$sum": "$ordered_products.cogs"},  # Assuming 'cogs' field exists
+                "total_custom_units_sold": {"$sum": "$ordered_products.quantity"},
+                "unique_custom_product_ids": {"$addToSet": "$ordered_products.product_id"}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "total_custom_sales": {"$round": ["$total_custom_sales", 2]},
+                "total_custom_cogs": {"$round": ["$total_custom_cogs", 2]},
+                "total_custom_units_sold": 1,
+                "total_custom_sold_product_count": {"$size": "$unique_custom_product_ids"}
+            }
+        }
+    ]
+
+    custom_summary = list(custom_order.objects.aggregate(*custom_pipeline))
+    if custom_summary:
+        total_custom_sales = custom_summary[0].get('total_custom_sales', 0)
+        total_custom_cogs = custom_summary[0].get('total_custom_cogs', 0)
+        total_custom_units_sold = custom_summary[0].get('total_custom_units_sold', 0)
+        total_custom_sold_product_count = custom_summary[0].get('total_custom_sold_product_count', 0)
+    else:
+        total_custom_sales = 0
+        total_custom_cogs = 0
+        total_custom_units_sold = 0
+        total_custom_sold_product_count = 0
+
+    if marketplace_id == "custom":
+        data['total_sales'] = total_custom_sales
+        data['total_cogs'] = total_custom_cogs
+        data['total_units_sold'] = total_custom_units_sold
+        data['total_sold_product_count'] = total_custom_sold_product_count
+        data['margin'] = ((total_custom_sales - total_custom_cogs) / total_custom_sales) * 100 if total_custom_sales else 0
+
+    if marketplace_id == "": 
+        # Combine totals
+        data['total_sales'] += total_custom_sales
+        data['total_cogs'] += total_custom_cogs
+        data['total_units_sold'] += total_custom_units_sold
+        data['total_sold_product_count'] += total_custom_sold_product_count
+        data['margin'] = ((data['total_sales'] - data['total_cogs']) / data['total_sales']) * 100 if data['total_sales'] else 0
+
+    return data

@@ -21,6 +21,8 @@ from omnisight.operations.general_functions import getMarketplaceList, getProduc
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders
 
+from omnisight.operations.helium_dashboard import get_latest_orders,get_metrics_by_date_range,compare_revenue_with_past
+
 urlpatterns = [
     
     #General Urls
@@ -83,6 +85,11 @@ urlpatterns = [
     path("listUsers/",listUsers,name="listUsers"),
     path("fetchUserDetails/",fetchUserDetails,name="fetchUserDetails"),
     path("fetchRoles/",fetchRoles,name="fetchRoles"),
+
+    #Helium 10 Dashboard
+    path("get_latest_orders/",get_latest_orders,name="get_latest_orders"),
+    path("get_metrics_by_date_range/",get_metrics_by_date_range,name="get_metrics_by_date_range"),
+    path("compare_revenue_with_past/",compare_revenue_with_past,name="compare_revenue_with_past"),
 ]
 
 
