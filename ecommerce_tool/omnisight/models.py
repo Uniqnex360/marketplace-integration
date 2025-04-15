@@ -2,6 +2,8 @@ from mongoengine import Document, StringField, FloatField, IntField, BooleanFiel
 from mongoengine.errors import ValidationError
 from datetime import datetime
 import re
+from ecommerce_tool.crud import DatabaseModel
+
 
 
 class Marketplace(Document):
@@ -111,6 +113,7 @@ class Product(Document):
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
     created_at = DateTimeField(default=datetime.now())  # Timestamp when the product was added
     updated_at = DateTimeField(default=datetime.now())  # Timestamp when the product was last updated
+    cogs = FloatField(default=0.0)  # Cost of Goods Sold
 
 
 class ignore_api_functions(Document):

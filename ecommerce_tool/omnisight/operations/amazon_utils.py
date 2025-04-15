@@ -7,6 +7,7 @@ from ecommerce_tool.crud import DatabaseModel
 from omnisight.models import access_token, Marketplace
 from datetime import datetime, timedelta
 from bson import ObjectId
+import json
 
 
 def get_access_token():
@@ -320,3 +321,36 @@ def getAccesstoken(user_id):
 
 # # Example usage
 # # update_product_title("AVE106-16", "COVERGIRL Exhibitionist Lipstick Metallic, Rendezvous 535, 0.123 Ounce11")
+
+
+# def get_order(order_id, access_token, region):
+#     base_url = f"https://sellingpartnerapi-{region}.amazon.com/orders/v0/orders/{order_id}"
+#     headers = {
+#         "x-amz-access-token": access_token,
+#         "Content-Type": "application/json",
+#     }
+    
+#     response = requests.get(base_url, headers=headers)
+    
+#     if response.status_code == 200:
+#         order_data = response.json()
+#         return order_data
+#     else:
+#         print(f"Error {response.status_code}: {response.text}")
+#         return None
+
+# ORDER_ID = "114-5600414-0798653"  # Replace with your actual order ID
+# ACCESS_TOKEN = get_access_token()  # Replace with your valid SP-API access token
+# REGION = "na"  # Change based on your region (na, eu, fe)
+
+# order_details = get_order(ORDER_ID, ACCESS_TOKEN, REGION)
+# if order_details:
+#     print(json.dumps(order_details, indent=4))
+#     tracking_info = order_details.get("payload", {}).get("FulfillmentShipments", [])
+#     if tracking_info:
+#         print("\n✅ Tracking Information:")
+#         for shipment in tracking_info:
+#             print(f"Tracking ID: {shipment.get('TrackingNumber', 'N/A')}")
+#             print(f"Carrier: {shipment.get('CarrierCode', 'N/A')}")
+#     else:
+#         print("\n❌ No tracking information found.")
