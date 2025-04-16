@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 from omnisight.models import OrderItems,Order
 from datetime import datetime, timedelta
 from mongoengine.queryset.visitor import Q
+from dateutil.relativedelta import relativedelta
+
 
 
 
@@ -246,6 +248,248 @@ def get_metrics_by_date_range(request):
     return metrics
 
 
+def LatestOrdersTodayAPIView(request):
+    # Get today's date range (00:00 to 23:59)
+    today = datetime.utcnow().date()
+    start_of_day = datetime.combine(today, datetime.min.time())
+    end_of_day = datetime.combine(today, datetime.max.time())
+
+    pipeline = [
+        {
+            "$match": {
+                "order_date": {
+                    "$gte": start_of_day,
+                    "$lte": end_of_day
+                }
+            }
+        },
+        {
+            "$lookup": {
+                "from": "order_items",  # Assuming your product COGS is here
+                "localField": "order_items",
+                "foreignField": "_id",
+                "as": "order_items_ins"
+            }
+        },
+        {
+        "$unwind": {
+            "path": "$order_items_ins",
+            "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
+        }
+        },
+        {
+            "$lookup": {
+                "from": "product",  # Assuming your product COGS is here
+                "localField": "order_items_ins.ProductDetails.product_id",
+                "foreignField": "_id",
+                "as": "product_ins"
+            }
+        },
+        {
+        "$unwind": {
+            "path": "$product_ins",
+            "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
+        }
+        },
+        {
+            "$project": {
+                "_id"  : 0,
+                "platform": "$marketplace_name",
+                "order_id": "$purchase_order_id",
+                "order_date": 1,
+                "hour": {"$hour": "$order_date"},
+                "product_title": "$order_items_ins.ProductDetails.Title",
+                "sku": "$order_items_ins.ProductDetails.SKU",
+                "quantity": "$order_items_ins.ProductDetails.QuantityOrdered",
+                "product_image" : "$product_ins.image_url",
+                "order_total": 1,
+                "order_status": 1,
+                "time": {
+                    "$dateToString": {
+                        "format": "%H:%M",
+                        "date": "$order_date"
+                    }
+                },
+            }
+        },
+        {
+            "$facet": {
+                "orders": [
+                    { "$sort": { "order_date": -1 } }
+                ],
+                "hourly_count": [
+                    {
+                        "$group": {
+                            "_id": "$hour",
+                            "order_count": { "$sum": 1 }
+                        }
+                    },
+                    { "$sort": { "_id": 1 } }
+                ]
+            }
+        }
+    ]
+
+    results = list(Order.objects.aggregate(pipeline))
+    data = dict()
+    if results:
+        results = results[0]
+        data = {
+            "orders": results["orders"],
+            "hourly_order_count": results["hourly_count"]
+        }
+    return data
+
+
+def get_date_range(preset):
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if preset == "Today":
+        return today, today + timedelta(days=1)
+    elif preset == "Yesterday":
+        return today - timedelta(days=1), today
+    elif preset == "This Week":
+        start = today - timedelta(days=today.weekday())
+        return start, start + timedelta(days=7)
+    elif preset == "Last Week":
+        start = today - timedelta(days=today.weekday() + 7)
+        return start, start + timedelta(days=7)
+    elif preset == "Last 7 days":
+        return today - timedelta(days=6), today + timedelta(days=1)
+    elif preset == "Last 14 days":
+        return today - timedelta(days=13), today + timedelta(days=1)
+    elif preset == "Last 30 days":
+        return today - timedelta(days=29), today + timedelta(days=1)
+    elif preset == "Last 60 days":
+        return today - timedelta(days=59), today + timedelta(days=1)
+    elif preset == "Last 90 days":
+        return today - timedelta(days=89), today + timedelta(days=1)
+    elif preset == "This Month":
+        start = today.replace(day=1)
+        return start, (start + relativedelta(months=1))
+    elif preset == "Last Month":
+        start = (today.replace(day=1) - relativedelta(months=1))
+        return start, today.replace(day=1)
+    elif preset == "This Quarter":
+        quarter = (today.month - 1) // 3
+        start = today.replace(month=quarter * 3 + 1, day=1)
+        return start, start + relativedelta(months=3)
+    elif preset == "Last Quarter":
+        quarter = ((today.month - 1) // 3) - 1
+        start = today.replace(month=quarter * 3 + 1, day=1)
+        return start, start + relativedelta(months=3)
+    elif preset == "This Year":
+        return today.replace(month=1, day=1), today.replace(year=today.year + 1, month=1, day=1)
+    elif preset == "Last Year":
+        return today.replace(year=today.year - 1, month=1, day=1), today.replace(month=1, day=1)
+    return today, today + timedelta(days=1)
+
+
+def RevenueWidgetAPIView(request):
+    preset = request.GET.get("preset", "Today")
+    start_date, end_date = get_date_range(preset)
+
+    group_format = {
+        "Today": { "hour": { "$hour": "$order_date" } },
+        "Yesterday": { "hour": { "$hour": "$order_date" } }
+    }
+
+    time_group = group_format.get(preset, { "date": { "$dateToString": { "format": "%Y-%m-%d", "date": "$order_date" } } })
+
+    pipeline = [
+        {
+            "$match": {
+                "order_date": { "$gte": start_date, "$lt": end_date }
+            }
+        },
+        { "$unwind": "$order_items" },
+        {
+            "$project": {
+                "order_date": 1,
+                "hour": { "$hour": "$order_date" },
+                "product_id": "$order_items.ProductDetails.SKU",
+                "quantity": "$order_items.ProductDetails.QuantityOrdered",
+                "price": "$order_total",
+                "cogs": "$order_items.ProductDetails.COGS",  # Assuming this is present
+                "refund": "$order_items.ProductDetails.RefundAmount",
+                "refunded": "$order_items.ProductDetails.RefundedQuantity"
+            }
+        },
+        {
+            "$group": {
+                "_id": time_group,
+                "gross_revenue": { "$sum": "$price" },
+                "total_cogs": { "$sum": { "$multiply": ["$quantity", "$cogs"] } },
+                "refund_amount": { "$sum": "$refund" },
+                "refund_qty": { "$sum": "$refunded" },
+                "orders": { "$sum": 1 },
+                "units_sold": { "$sum": "$quantity" }
+            }
+        },
+        {
+            "$addFields": {
+                "net_profit": { "$subtract": ["$gross_revenue", "$total_cogs"] },
+                "profit_margin": {
+                    "$cond": [
+                        { "$gt": ["$gross_revenue", 0] },
+                        { "$multiply": [
+                            { "$divide": [
+                                { "$subtract": ["$gross_revenue", "$total_cogs"] },
+                                "$gross_revenue"
+                            ] },
+                            100
+                        ] },
+                        0
+                    ]
+                }
+            }
+        },
+        { "$sort": { "_id": 1 } }
+    ]
+
+    results = list(Order.objects.aggregate(pipeline))
+
+    # Total values
+    total = {
+        "gross_revenue": 0,
+        "net_profit": 0,
+        "profit_margin": 0,
+        "orders": 0,
+        "units_sold": 0,
+        "refund_amount": 0,
+        "refund_quantity": 0
+    }
+
+    graph_data = []
+
+    for item in results:
+        total["gross_revenue"] += item.get("gross_revenue", 0)
+        total["net_profit"] += item.get("net_profit", 0)
+        total["orders"] += item.get("orders", 0)
+        total["units_sold"] += item.get("units_sold", 0)
+        total["refund_amount"] += item.get("refund_amount", 0)
+        total["refund_quantity"] += item.get("refund_qty", 0)
+
+        graph_data.append({
+            "time": item["_id"].get("hour") if "hour" in item["_id"] else item["_id"].get("date"),
+            "gross_revenue": item.get("gross_revenue", 0),
+            "net_profit": item.get("net_profit", 0),
+            "profit_margin": round(item.get("profit_margin", 0), 2),
+            "orders": item.get("orders", 0),
+            "units_sold": item.get("units_sold", 0),
+            "refund_amount": item.get("refund_amount", 0),
+            "refund_quantity": item.get("refund_qty", 0),
+        })
+
+    # Calculate final profit margin
+    total["profit_margin"] = round((total["net_profit"] / total["gross_revenue"]) * 100, 2) if total["gross_revenue"] else 0
+    data = dict()
+    data = {
+        "total": total,
+        "graph": graph_data
+    }
+
+    return data
 
 
 
