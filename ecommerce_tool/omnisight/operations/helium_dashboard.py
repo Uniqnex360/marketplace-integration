@@ -4,6 +4,7 @@ from omnisight.models import OrderItems,Order
 from datetime import datetime, timedelta
 from mongoengine.queryset.visitor import Q
 from dateutil.relativedelta import relativedelta
+from django.views.decorators.csrf import csrf_exempt
 
 
 
@@ -126,8 +127,9 @@ def get_metrics_by_date_range(request):
         refund = 0
         margin = 0
         net_profit = 0
-        total_orders  = 0
         total_units = 0
+        total_orders = 0
+
         pipeline = [
             {
             "$match": {
@@ -155,6 +157,22 @@ def get_metrics_by_date_range(request):
         ]
 
         result = list(Order.objects.aggregate(*pipeline))
+        pipeline = [
+            {
+            "$match": {
+                "order_date": {"$gte": date_range["start"], "$lte": date_range["end"]},
+                "order_status": {"$in": ['Shipped', 'Delivered']}
+            }
+            },
+            {
+            "$project": {
+                "_id" : 1
+            }
+            }
+        ]
+
+        result1 = list(Order.objects.aggregate(*pipeline))
+        total_orders = len(result1)
         if result != []:
             order_items = result[0]["order_items"]
             
@@ -219,7 +237,6 @@ def get_metrics_by_date_range(request):
                     refund += items['refund']
                     margin += items['margin']
                     net_profit += items['net_profit']
-                    total_orders  += items['total_orders']
                     total_units += items['total_units']
 
 
@@ -492,6 +509,106 @@ def RevenueWidgetAPIView(request):
     return data
 
 
+
+
+
+def get_top_products(request):
+    metric = request.GET.get("sortBy", "units_sold")  # 'price', 'refund', etc.
+    preset = request.GET.get("preset", "Today")  # today, yesterday, last_7_days
+    start_date, end_date = get_date_range(preset)
+
+    # Decide which field to sort by
+    sort_field = {
+        "units_sold": "total_units",
+        "price": "total_price",
+        "refund": "refund_qty"
+    }.get(metric, "total_units")
+
+    pipeline = [
+        {
+            "$match": {
+                "order_date": {"$gte": start_date, "$lt": end_date}
+            }
+        },
+        {
+            "$lookup": {
+                "from": "order_items",
+                "localField": "order_items",
+                "foreignField": "_id",
+                "as": "order_items_ins"
+            }
+        },
+        {
+        "$unwind": {
+            "path": "$order_items_ins",
+            "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
+        }
+        },
+        {
+            "$group": {
+                "_id": "$order_items_ins.ProductDetails.product_id",
+                "product": {"$first":"$order_items_ins.ProductDetails.Title"},
+                "total_units": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
+                "total_price": {
+                    "$sum": {
+                        "$multiply": [
+                            "$Pricing.ItemPrice.Amount",
+                            "$order_items_ins.ProductDetails.QuantityOrdered"
+                        ]
+                    }
+                },
+                "refund_qty": {"$sum": "$order_items_ins.ProductDetails.QuantityShipped"},  # Replace with real refund logic
+                "chart": {
+                    "$push": {
+                        "k": {
+                            "$dateToString": {
+                                "format": "%Y-%m-%d %H:00:00",
+                                "date": {
+                                    "$ifNull": ["$created_at", datetime(1970, 1, 1)]
+                                }
+                            }
+                        },
+                        "v": "$order_items_ins.ProductDetails.QuantityOrdered"
+                    }
+                }
+
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "product": 1,
+                "total_units": 1,
+                "total_price": 1,
+                "refund_qty": 1,
+                "chart": {
+                    "$arrayToObject": {
+                        "$filter": {
+                            "input": "$chart",
+                            "as": "item",
+                            "cond": {
+                                "$and": [
+                                    {"$ne": ["$$item.k", None]},
+                                    {"$ne": ["$$item.v", None]},
+                                    {"$eq": [{"$type": "$$item.k"}, "string"]}
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "$sort": {sort_field: -1}
+        },
+        {
+            "$limit": 5
+        }
+    ]
+
+    result = list(Order.objects.aggregate(pipeline))
+    data = {"results": {"items": result}}
+    return data
 
 def get_latest_orders(request):
     limit = request.GET.get('limit')
