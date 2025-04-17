@@ -21,7 +21,7 @@ from omnisight.operations.general_functions import getMarketplaceList, getProduc
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders
 
-from omnisight.operations.helium_dashboard import get_latest_orders,get_metrics_by_date_range,compare_revenue_with_past, LatestOrdersTodayAPIView, RevenueWidgetAPIView
+from omnisight.operations.helium_dashboard import get_latest_orders,get_metrics_by_date_range,compare_revenue_with_past, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products
 
 urlpatterns = [
     
@@ -92,6 +92,7 @@ urlpatterns = [
     path("compare_revenue_with_past/",compare_revenue_with_past,name="compare_revenue_with_past"),
     path("LatestOrdersTodayAPIView/",LatestOrdersTodayAPIView,name="LatestOrdersTodayAPIView"),
     path("RevenueWidgetAPIView/",RevenueWidgetAPIView,name="RevenueWidgetAPIView"),
+    path("get_top_products/",get_top_products,name="get_top_products"),
 ]
 
 
