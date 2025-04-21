@@ -1,12 +1,14 @@
 from mongoengine import Q
-from datetime import datetime, timedelta
 from omnisight.models import OrderItems,Order
-from datetime import datetime, timedelta
 from mongoengine.queryset.visitor import Q
 from dateutil.relativedelta import relativedelta
 from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime
 from bson.son import SON
+from datetime import datetime, timedelta
+from django.http import JsonResponse
+from collections import defaultdict
+import pytz
 
 
 
@@ -547,6 +549,70 @@ def get_date_range(preset):
 def RevenueWidgetAPIView(request):
     preset = request.GET.get("preset", "Today")
     start_date, end_date = get_date_range(preset)
+    gross_revenue = 0
+    total_cogs = 0
+    refund = 0
+    margin = 0
+    net_profit = 0
+    total_units = 0
+    total_orders = 0
+
+    result = grossRevenue(start_date, end_date)
+    total_orders = len(result)
+    if result != []:
+        for ins in result:
+            gross_revenue += ins['order_total']
+            other_price = 0
+            temp_other_price = 0 
+            for j in ins['order_items']:                  
+                pipeline = [
+                    {
+                        "$match": {
+                            "_id": j
+                        }
+                    },
+                    {
+                        "$lookup": {
+                            "from": "product",
+                            "localField": "ProductDetails.product_id",
+                            "foreignField": "_id",
+                            "as": "product_ins"
+                        }
+                    },
+                    {
+                    "$unwind": {
+                        "path": "$product_ins",
+                        "preserveNullAndEmptyArrays": True
+                    }
+                    },
+                    {
+                        "$project": {
+                            "_id" : 0,
+                            "price": "$Pricing.ItemPrice.Amount",
+                            "cogs": {"$ifNull":["$product_ins.cogs",0.0]}
+                        }
+                    }
+                ]
+                result = list(OrderItems.objects.aggregate(*pipeline))
+                temp_other_price += result[0]['price']
+                total_cogs += result[0]['cogs']
+                total_units += 1
+        other_price += ins['order_total'] - temp_other_price
+
+        net_profit = gross_revenue - (other_price + total_cogs)
+        margin = (net_profit / gross_revenue) * 100
+
+    # Total values
+    total = {
+        "gross_revenue": round(gross_revenue, 2),
+        "net_profit": round(net_profit, 2),
+        "profit_margin": round(margin, 2),
+        "orders": round(total_orders, 2),
+        "units_sold": round(total_units, 2),
+        "refund_amount": round(refund, 2),
+        "refund_quantity": 0
+        
+    }
 
     group_format = {
         "Today": { "hour": { "$hour": "$order_date" } },
@@ -608,26 +674,16 @@ def RevenueWidgetAPIView(request):
 
     results = list(Order.objects.aggregate(pipeline))
 
-    # Total values
-    total = {
-        "gross_revenue": 0,
-        "net_profit": 0,
-        "profit_margin": 0,
-        "orders": 0,
-        "units_sold": 0,
-        "refund_amount": 0,
-        "refund_quantity": 0
-    }
 
     graph_data = []
 
     for item in results:
-        total["gross_revenue"] += item.get("gross_revenue", 0)
-        total["net_profit"] += item.get("net_profit", 0)
-        total["orders"] += item.get("orders", 0)
-        total["units_sold"] += item.get("units_sold", 0)
-        total["refund_amount"] += item.get("refund_amount", 0)
-        total["refund_quantity"] += item.get("refund_qty", 0)
+        # total["gross_revenue"] += item.get("gross_revenue", 0)
+        # total["net_profit"] += item.get("net_profit", 0)
+        # total["orders"] += item.get("orders", 0)
+        # total["units_sold"] += item.get("units_sold", 0)
+        # total["refund_amount"] += item.get("refund_amount", 0)
+        # total["refund_quantity"] += item.get("refund_qty", 0)
 
         graph_data.append({
             "time": item["_id"].get("hour") if "hour" in item["_id"] else item["_id"].get("date"),
@@ -647,7 +703,6 @@ def RevenueWidgetAPIView(request):
         "total": total,
         "graph": graph_data
     }
-
     return data
 
 
@@ -787,141 +842,131 @@ def get_top_products(request):
     return data
 
 
-from datetime import datetime, timedelta
-from django.http import JsonResponse
+
+def calculate_metrics(start_date, end_date):
+    gross_revenue = 0
+    total_cogs = 0
+    refund = 0
+    net_profit = 0
+    margin = 0
+    total_units = 0
+    sku_set = set()
+ 
+    result = grossRevenue(start_date, end_date)
+    
+    other_price = 0
+    if result:
+        for order in result:
+            gross_revenue += order['order_total']
+            order_total = order['order_total']
+            temp_price = 0
+            
+            for item_id in order['order_items']:
+                item_pipeline = [
+                    { "$match": { "_id": item_id } },
+                    {
+                        "$lookup": {
+                            "from": "product",
+                            "localField": "ProductDetails.product_id",
+                            "foreignField": "_id",
+                            "as": "product_ins"
+                        }
+                    },
+                    { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "price": "$Pricing.ItemPrice.Amount",
+                            "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
+                            "sku": "$ProductDetails.sku"
+                        }
+                    }
+                ]
+                item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                if item_result:
+                    item_data = item_result[0]
+                    temp_price += item_data['price']
+                    total_cogs += item_data['cogs']
+                    total_units += 1
+                    if item_data.get('sku'):
+                        sku_set.add(item_data['sku'])
+            other_price += order_total - temp_price
+            net_profit = gross_revenue - (other_price + total_cogs)
+        margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+ 
+    return {
+        "grossRevenue": round(gross_revenue, 2),
+        "expenses": round(other_price, 2),
+        "netProfit": round(net_profit, 2),
+        "roi": round((net_profit / other_price) * 100, 2) if other_price > 0 else 0,
+        "unitsSold": total_units,
+        "refunds": refund,  
+        "skuCount": len(sku_set),
+        "sessions": 0,
+        "pageViews": 0,
+        "unitSessionPercentage": 0,
+        "margin": round(margin, 2)
+    }
+ 
+ 
 def getPeriodWiseData(request):
-    current_date = datetime.utcnow()
+    target_date = datetime.today()
+    
+    def to_utc_format(dt):
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
  
-    def build_pipeline(start_date, end_date):
-        return [
-            {"$match": {"order_date": {"$gte": start_date, "$lte": end_date}}},
-            
-            # Lookup to join order_items collection
-            {"$lookup": {
-                "from": "order_items",  # Assuming your order items collection is named 'order_items'
-                "localField": "order_items",  # Reference field in the Orders collection
-                "foreignField": "_id",  # Reference field in the order_items collection (OrderId matches Order _id)
-                "as": "order_items"  # The new field to hold the array of matched order_items
-            }},
-            
-            # Unwind the order_items array so that we can work with individual items
-            {"$unwind": "$order_items"},
-            
-            # Add fields for gross revenue and expenses based on the order_items details
-            {"$addFields": {
-                "gross_revenue": {"$toDouble": "$order_items.Pricing.ItemPrice.Amount"},
-                "expenses": {"$toDouble": "$order_items.Pricing.ItemTax.Amount"}
-            }},
-            
-            # Calculate net profit
-            {"$addFields": {
-                "net_profit": {"$subtract": ["$gross_revenue", "$expenses"]}
-            }},
-            
-            # Group to get totals
-            {"$group": {
-                "_id": None,
-                "total_gross_revenue": {"$sum": "$gross_revenue"},
-                "total_expenses": {"$sum": "$expenses"},
-                "total_net_profit": {"$sum": "$net_profit"},
-                "total_units_sold": {"$sum": "$number_of_items_shipped"},
-                "total_refunds": {"$sum": {"$cond": [{"$eq": ["$order_status", "Refunded"]}, 1, 0]}},
-                "total_sku_count": {"$sum": 1},
-                "total_sessions": {"$sum": 0},
-                "total_page_views": {"$sum": 0},
-            }}
-        ]
+    def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
+        current_metrics = calculate_metrics(current_start, current_end)
+        previous_metrics = calculate_metrics(prev_start, prev_end)
  
-    def get_period_data(start, end):
-        result = list(Order.objects.aggregate(build_pipeline(start, end)))
-        print(result)
-        if not result:
-            return {
-                "grossRevenue": 0, "expenses": 0, "netProfit": 0, "unitsSold": 0,
-                "refunds": 0, "skuCount": 0, "sessions": 0, "pageViews": 0,
-                "unitSessionPercentage": 0, "margin": 0, "roi": 0
-            }
- 
-        r = result[0]
-        gross = r.get("total_gross_revenue", 0)
-        expenses = r.get("total_expenses", 0)
-        profit = r.get("total_net_profit", 0)
-        sessions = r.get("total_sessions", 0)
- 
-        # Calculate percentages and avoid division by zero
-        margin = round((profit / gross * 100) if gross else 0, 2)  # Margin as percentage
-        roi = round((profit / expenses * 100) if expenses else 0, 2)  # ROI as percentage
- 
-        return {
-            "grossRevenue": gross,
-            "expenses": expenses,
-            "netProfit": profit,
-            "unitsSold": r.get("total_units_sold", 0),
-            "refunds": r.get("total_refunds", 0),
-            "skuCount": r.get("total_sku_count", 0),
-            "sessions": sessions,
-            "pageViews": r.get("total_page_views", 0),
-            "unitSessionPercentage": round((r["total_units_sold"] / sessions * 100) if sessions else 0, 2),
-            "margin": margin,
-            "roi": roi
-        }
- 
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to):
-        current = get_period_data(cur_from, cur_to)
-        previous = get_period_data(prev_from, prev_to)
- 
-        def with_delta(metric):
-            return {
-                "current": current[metric],
-                "previous": previous[metric],
-                "delta": round(current[metric] - previous[metric], 2)
-            }
- 
-        return {
+        output = {
             "label": label,
             "period": {
-                "current": {"from": cur_from.isoformat() + "Z", "to": cur_to.isoformat() + "Z"},
-                "previous": {"from": prev_from.isoformat() + "Z", "to": prev_to.isoformat() + "Z"}
-            },
-            "grossRevenue": with_delta("grossRevenue"),
-            "expenses": with_delta("expenses"),
-            "netProfit": with_delta("netProfit"),
-            "roi": with_delta("roi"),
-            "unitsSold": with_delta("unitsSold"),
-            "refunds": with_delta("refunds"),
-            "skuCount": with_delta("skuCount"),
-            "sessions": with_delta("sessions"),
-            "pageViews": with_delta("pageViews"),
-            "unitSessionPercentage": with_delta("unitSessionPercentage"),
-            "margin": with_delta("margin")
+                "current": {
+                    "from": to_utc_format(current_start),
+                    "to": to_utc_format(current_end)
+                },
+                "previous": {
+                    "from": to_utc_format(prev_start),
+                    "to": to_utc_format(prev_end)
+                }
+            }
         }
  
-    # Date ranges
-    today = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    yesterday = today - timedelta(days=1)
-    last_7_start = today - timedelta(days=7)
-    last_7_prev = today - timedelta(days=14)
-    last_30_start = today - timedelta(days=30)
-    last_30_prev = today - timedelta(days=60)
-    month_start = today.replace(day=1)
-    prev_month_end = month_start - timedelta(days=1)
-    prev_month_start = prev_month_end.replace(day=1)
-    year_start = today.replace(month=1, day=1)
-    prev_year_start = year_start.replace(year=year_start.year - 1)
-    prev_year_end = year_start - timedelta(days=1)
+        for key in current_metrics:
+            output[key] = {
+                "current": current_metrics[key],
+                "previous": previous_metrics[key],
+                "delta": round(current_metrics[key] - previous_metrics[key], 2)
+            }
+ 
+        return output
+ 
+    # Yesterday
+    y_current_start = datetime(target_date.year, target_date.month, target_date.day)
+    y_current_end = y_current_start + timedelta(hours=23, minutes=59, seconds=59)
+    y_previous_start = y_current_start - timedelta(days=1)
+    y_previous_end = y_previous_start + timedelta(hours=23, minutes=59, seconds=59)
+ 
+    # Last 7 Days
+    l7_current_start = target_date - timedelta(days=6)
+    l7_current_end = y_current_end
+    l7_previous_start = l7_current_start - timedelta(days=7)
+    l7_previous_end = l7_current_start - timedelta(seconds=1)
+ 
+    # Last 30 Days
+    l30_current_start = target_date - timedelta(days=29)
+    l30_current_end = y_current_end
+    l30_previous_start = l30_current_start - timedelta(days=30)
+    l30_previous_end = l30_current_start - timedelta(seconds=1)
  
     response_data = {
-        "yesterday": create_period_response("Yesterday", yesterday, yesterday, yesterday - timedelta(days=1), yesterday - timedelta(days=1)),
-        "last7Days": create_period_response("Last 7 Days", last_7_start, today - timedelta(seconds=1), last_7_prev, last_7_start - timedelta(seconds=1)),
-        "last30Days": create_period_response("Last 30 Days", last_30_start, today - timedelta(seconds=1), last_30_prev, last_30_start - timedelta(seconds=1)),
-        "monthToDate": create_period_response("Month to Date", month_start, today, prev_month_start, prev_month_end),
-        "yearToDate": create_period_response("Year to Date", year_start, today, prev_year_start, prev_year_end)
+        "yesterday": format_period_metrics("Yesterday", y_current_start, y_current_end, y_previous_start, y_previous_end),
+        "last7Days": format_period_metrics("Last 7 Days", l7_current_start, l7_current_end, l7_previous_start, l7_previous_end),
+        "last30Days": format_period_metrics("Last 30 Days", l30_current_start, l30_current_end, l30_previous_start, l30_previous_end),
     }
  
     return JsonResponse(response_data, safe=False)
-
-
-
 
 def getPeriodWiseDataCustom(request):
     from_date_str = request.GET.get('from_date')  
@@ -1058,9 +1103,6 @@ def getPeriodWiseDataCustom(request):
     return JsonResponse(response_data, safe=False)
 
 
-from datetime import datetime, timedelta
-from django.http import JsonResponse
-from dateutil.relativedelta import relativedelta
 
 def revenue_widget(request):
     # Get range from query param
@@ -1333,12 +1375,6 @@ def get_product_revenue_details(request):
         }
 
 
-from datetime import datetime, timedelta
-from django.http import JsonResponse
-from dateutil.relativedelta import relativedelta
-from mongoengine.queryset.visitor import Q
-from collections import defaultdict
-import pytz
 
 def calculate_date_range(preset):
     now = datetime.now(pytz.UTC)
