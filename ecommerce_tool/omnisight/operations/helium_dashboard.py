@@ -619,6 +619,7 @@ def LatestOrdersTodayAPIView(request):
         # `order.order_items` is already a list of OrderItems documents
         for item in order.order_items:
             sku        = item.ProductDetails.SKU
+            asin = item.ProductDetails.ASIN if item.ProductDetails.ASIN is not None else ""
             qty        = item.ProductDetails.QuantityOrdered
             unit_price = item.Pricing.ItemPrice.Amount
             title      = item.ProductDetails.Title
@@ -631,6 +632,7 @@ def LatestOrdersTodayAPIView(request):
 
             orders_out.append({
                 "sellerSku":      sku,
+                "asin":           asin,
                 "title":          title,
                 "quantityOrdered": qty,
                 "imageUrl":       img_url,
@@ -887,11 +889,21 @@ def get_top_products(request):
         "refund": "$order_items_ins.ProductDetails.QuantityShipped"
     }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
 
+    # Match criteria based on metric
+    if metric == "refund":
+       match = {
+                "order_date": {"$gte": start_date, "$lt": end_date},
+                "order_status": "Refunded"
+            }
+    else:
+        match = {
+            "order_date": {"$gte": start_date, "$lt": end_date},
+            "order_status": {"$in": ['Shipped', 'Delivered']}
+        }
+
     pipeline = [
         {
-            "$match": {
-                "order_date": {"$gte": start_date, "$lt": end_date}
-            }
+            "$match": match
         },
         {
             "$lookup": {
