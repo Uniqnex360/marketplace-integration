@@ -34,6 +34,32 @@ def grossRevenue(start_date, end_date):
     return result
 
 
+def refundOrder(start_date, end_date):
+    pipeline = [
+            {
+            "$match": {
+                "order_date": {"$gte": start_date, "$lte": end_date},
+                "order_status": 'Refunded'
+            }
+            },
+            {
+            "$project": {
+                "_id": 0,
+                "order_items": 1,
+                "order_total" :1
+            }
+            },
+            {
+                "$sort" : {
+                    "_id" : -1
+                }
+            }
+        ]
+
+    result = list(Order.objects.aggregate(*pipeline))
+    return result
+
+
 def get_metrics_by_date_range(request):
     target_date_str = request.GET.get('target_date')
     # Parse target date and previous day
@@ -87,6 +113,10 @@ def get_metrics_by_date_range(request):
         total_orders = 0
 
         result = grossRevenue(date_range["start"], date_range["end"])
+        refund_ins = refundOrder(date_range["start"], date_range["end"])
+        if refund_ins != []:
+            for ins in refund_ins:
+                refund += len(ins['order_items'])
         total_orders = len(result)
         if result != []:
             for ins in result:
@@ -146,8 +176,7 @@ def get_metrics_by_date_range(request):
         "margin": round(metrics["targeted"]["margin"] - metrics["previous"]["margin"],2),
         "net_profit": round(metrics["targeted"]["net_profit"] - metrics["previous"]["net_profit"],2),
         "total_orders": round(metrics["targeted"]["total_orders"] - metrics["previous"]["total_orders"],2),
-        "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"],2)
-
+        "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"],2),
     }
     metrics["difference"] = difference
     return metrics
@@ -409,98 +438,218 @@ def get_metrics_by_date_range(request):
 #     return metrics
 
 
+
+from datetime import datetime, timedelta
+from django.http import JsonResponse
+
 def LatestOrdersTodayAPIView(request):
-    # Get today's date range (00:00 to 23:59)
     today = datetime.utcnow().date()
     start_of_day = datetime.combine(today, datetime.min.time())
     end_of_day = datetime.combine(today, datetime.max.time())
 
-    pipeline = [
+    # 1️⃣ Hourly aggregation: Use order-level date for bucket, sum quantities from items
+    hourly_pipeline = [
         {
             "$match": {
-                "order_date": {
-                    "$gte": start_of_day,
-                    "$lte": end_of_day
+                "order_date": { "$gte": start_of_day, "$lte": end_of_day },
+                "order_status": { "$in": ["Shipped", "Delivered"] }
+            }
+        },
+        {
+            "$lookup": {
+                "from": "order_items",
+                "localField": "order_items",
+                "foreignField": "_id",
+                "as": "items"
+            }
+        },
+        {
+            "$addFields": {
+                "bucket": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%d %H:00:00",
+                        "date": "$order_date",
+                        "timezone": "UTC"
+                    }
+                },
+                "unitsCount": {
+                    "$sum": {
+                        "$map": {
+                            "input": "$items",
+                            "as": "it",
+                            "in": "$$it.ProductDetails.QuantityOrdered"
+                        }
+                    }
                 }
             }
         },
         {
-            "$lookup": {
-                "from": "order_items",  # Assuming your product COGS is here
-                "localField": "order_items",
-                "foreignField": "_id",
-                "as": "order_items_ins"
+            "$group": {
+                "_id": "$bucket",
+                "unitsCount": { "$sum": "$unitsCount" },
+                "ordersCount": { "$sum": 1 }
             }
-        },
-        {
-        "$unwind": {
-            "path": "$order_items_ins",
-            "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
-        }
-        },
-        {
-            "$lookup": {
-                "from": "product",  # Assuming your product COGS is here
-                "localField": "order_items_ins.ProductDetails.product_id",
-                "foreignField": "_id",
-                "as": "product_ins"
-            }
-        },
-        {
-        "$unwind": {
-            "path": "$product_ins",
-            "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
-        }
         },
         {
             "$project": {
-                "_id"  : 0,
-                "platform": "$marketplace_name",
-                "order_id": "$purchase_order_id",
-                "order_date": 1,
-                "hour": {"$hour": "$order_date"},
-                "product_title": "$order_items_ins.ProductDetails.Title",
-                "sku": "$order_items_ins.ProductDetails.SKU",
-                "quantity": "$order_items_ins.ProductDetails.QuantityOrdered",
-                "product_image" : "$product_ins.image_url",
-                "order_total": 1,
-                "order_status": 1,
-                "time": {
-                    "$dateToString": {
-                        "format": "%H:%M",
-                        "date": "$order_date"
-                    }
-                },
+                "_id": 0,
+                "k": "$_id",
+                "v": {
+                    "unitsCount": "$unitsCount",
+                    "ordersCount": "$ordersCount"
+                }
             }
         },
         {
-            "$facet": {
-                "orders": [
-                    { "$sort": { "order_date": -1 } }
-                ],
-                "hourly_count": [
-                    {
-                        "$group": {
-                            "_id": "$hour",
-                            "order_count": { "$sum": 1 }
-                        }
-                    },
-                    { "$sort": { "_id": 1 } }
-                ]
-            }
+            "$sort": { "k": 1 }
         }
     ]
 
-    results = list(Order.objects.aggregate(pipeline))
-    data = dict()
-    if results:
-        results = results[0]
-        data = {
-            "orders": results["orders"],
-            "hourly_order_count": results["hourly_count"]
+    raw = list(Order.objects.aggregate(*hourly_pipeline))
+    chart_dict = {r["k"]: r["v"] for r in raw}
+
+    # Fill missing hours
+    filled = {}
+    bucket_time = start_of_day.replace(minute=0, second=0, microsecond=0)
+    for i in range(25):
+        key = bucket_time.strftime("%Y-%m-%d %H:00:00")
+        filled[key] = chart_dict.get(key, {"unitsCount": 0, "ordersCount": 0})
+        bucket_time += timedelta(hours=1)
+
+    # 2️⃣ Detailed order info
+    detail_pipeline = [
+        {
+            "$match": {
+                "order_date": { "$gte": start_of_day, "$lte": end_of_day },
+                "order_status": { "$in": ["Shipped", "Delivered"] }
+            }
+        },
+        {
+            "$lookup": {
+                "from": "order_items",
+                "localField": "order_items",
+                "foreignField": "_id",
+                "as": "items"
+            }
+        },
+        { "$unwind": "$items" },
+        {
+            "$lookup": {
+                "from": "product",
+                "localField": "items.ProductDetails.product_id",
+                "foreignField": "_id",
+                "as": "product"
+            }
+        },
+        { "$unwind": { "path": "$product", "preserveNullAndEmptyArrays": True } },
+        {
+            "$addFields": {
+                "sellerSku": "$items.ProductDetails.SKU",
+                "unitPrice": "$items.Pricing.ItemPrice.Amount",
+                "quantityOrdered": "$items.ProductDetails.QuantityOrdered",
+                "title": "$items.ProductDetails.Title",
+                "imageUrl": "$product.image_url",
+                "purchaseDate": "$order_date",
+                "orderId": "$purchase_order_id"
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "sellerSku": 1,
+                "title": 1,
+                "quantityOrdered": 1,
+                "imageUrl": 1,
+                "price": { "$multiply": ["$unitPrice", "$quantityOrdered"] },
+                "purchaseDate": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%d %H:%M:%S",
+                        "date": "$purchaseDate",
+                        "timezone": "UTC"
+                    }
+                }
+            }
+        },
+        {
+            "$sort": { "purchaseDate": -1 }
         }
+    ]
+
+    orders = list(Order.objects.aggregate(*detail_pipeline))
+    data = dict()
+    data = {
+        "orders": orders,
+        "hourly_order_count": filled
+    }
     return data
 
+from collections import OrderedDict, defaultdict
+
+def LatestOrdersTodayAPIView(request):
+    # 1️⃣ Compute UTC bounds for “today”
+    today = datetime.utcnow().date()
+    start_of_day = datetime.combine(today, datetime.min.time())
+    end_of_day   = datetime.combine(today, datetime.max.time())
+
+    # 2️⃣ Fetch all Shippped/Delivered orders for today
+    qs = Order.objects.filter(
+        order_date__gte=start_of_day,
+        order_date__lte=end_of_day,
+        order_status__in=["Shipped","Delivered"]
+    )
+
+    # 3️⃣ Pre‑fill a 24‑slot OrderedDict for every hour
+    chart = OrderedDict()
+    bucket = start_of_day.replace(minute=0, second=0, microsecond=0)
+    for _ in range(24):
+        key = bucket.strftime("%Y-%m-%d %H:00:00")
+        chart[key] = {"ordersCount": 0, "unitsCount": 0}
+        bucket += timedelta(hours=1)
+
+    # 4️⃣ Build the detail array + populate chart
+    orders_out = []
+    for order in qs:
+        # hour bucket for this order
+        bk = order.order_date.replace(minute=0, second=0, microsecond=0)\
+                              .strftime("%Y-%m-%d %H:00:00")
+        if bk in chart:
+            chart[bk]["ordersCount"] += 1
+
+        # iterate each OrderItems instance referenced on this order
+        # `order.order_items` is already a list of OrderItems documents
+        for item in order.order_items:
+            sku        = item.ProductDetails.SKU
+            qty        = item.ProductDetails.QuantityOrdered
+            unit_price = item.Pricing.ItemPrice.Amount
+            title      = item.ProductDetails.Title
+            # lazy‑load the Product doc for image_url
+            prod_ref   = item.ProductDetails.product_id
+            img_url    = prod_ref.image_url if prod_ref else None
+
+            total_price = round(unit_price * qty, 2)
+            purchase_dt = order.order_date.strftime("%Y-%m-%d %H:%M:%S")
+
+            orders_out.append({
+                "sellerSku":      sku,
+                "title":          title,
+                "quantityOrdered": qty,
+                "imageUrl":       img_url,
+                "price":          total_price,
+                "purchaseDate":   purchase_dt
+            })
+
+            # add to units count
+            if bk in chart:
+                chart[bk]["unitsCount"] += qty
+
+    # 5️⃣ sort orders by most recent purchaseDate
+    orders_out.sort(key=lambda o: o["purchaseDate"], reverse=True)
+    data = dict()
+    data = {
+        "orders": orders_out,
+        "hourly_order_count": chart
+    }
+    return data
 
 def get_date_range(preset):
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -558,6 +707,12 @@ def RevenueWidgetAPIView(request):
     total_orders = 0
 
     result = grossRevenue(start_date, end_date)
+    refund_ins = refundOrder(start_date, end_date)
+    refund_quantity_ins = 0
+    if refund_ins != []:
+        for ins in refund_ins:
+            refund += ins['order_total']
+            refund_quantity_ins += len(ins['order_items'])
     total_orders = len(result)
     if result != []:
         for ins in result:
@@ -610,7 +765,7 @@ def RevenueWidgetAPIView(request):
         "orders": round(total_orders, 2),
         "units_sold": round(total_units, 2),
         "refund_amount": round(refund, 2),
-        "refund_quantity": 0
+        "refund_quantity": refund_quantity_ins
         
     }
 
@@ -878,7 +1033,7 @@ def calculate_metrics(start_date, end_date):
                             "_id": 0,
                             "price": "$Pricing.ItemPrice.Amount",
                             "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
-                            "sku": "$ProductDetails.sku"
+                            "sku": "$product_ins.sku"
                         }
                     }
                 ]
@@ -897,9 +1052,9 @@ def calculate_metrics(start_date, end_date):
  
     return {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round(other_price, 2),
+        "expenses": round(other_price + total_cogs, 2),
         "netProfit": round(net_profit, 2),
-        "roi": round((net_profit / other_price) * 100, 2) if other_price > 0 else 0,
+        "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price + total_cogs > 0 else 0,
         "unitsSold": total_units,
         "refunds": refund,  
         "skuCount": len(sku_set),
@@ -911,7 +1066,7 @@ def calculate_metrics(start_date, end_date):
  
  
 def getPeriodWiseData(request):
-    target_date = datetime.today()
+    target_date = datetime.today() - timedelta(days=1)
     
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
