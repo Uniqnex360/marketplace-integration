@@ -890,8 +890,9 @@ def calculate_metrics(start_date, end_date):
                     total_units += 1
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
-            other_price += order_total - temp_price
-            net_profit = gross_revenue - (other_price + total_cogs)
+            # other_price += (order_total - temp_price) + total_cogs
+        other_price += order_total - temp_price
+        net_profit = gross_revenue - (other_price + total_cogs)
         margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
  
     return {
@@ -960,12 +961,18 @@ def getPeriodWiseData(request):
     l30_previous_start = l30_current_start - timedelta(days=30)
     l30_previous_end = l30_current_start - timedelta(seconds=1)
  
+    ytd_current_start = datetime(target_date.year, 1, 1)
+    ytd_current_end = y_current_end
+    last_year = target_date.year - 1
+    ytd_previous_start = datetime(last_year, 1, 1)
+    ytd_previous_end = datetime(last_year, target_date.month, target_date.day, 23, 59, 59)
+ 
     response_data = {
         "yesterday": format_period_metrics("Yesterday", y_current_start, y_current_end, y_previous_start, y_previous_end),
         "last7Days": format_period_metrics("Last 7 Days", l7_current_start, l7_current_end, l7_previous_start, l7_previous_end),
         "last30Days": format_period_metrics("Last 30 Days", l30_current_start, l30_current_end, l30_previous_start, l30_previous_end),
+        "yearToDate": format_period_metrics("Year to Date", ytd_current_start, ytd_current_end, ytd_previous_start, ytd_previous_end),
     }
- 
     return JsonResponse(response_data, safe=False)
 
 def getPeriodWiseDataCustom(request):
