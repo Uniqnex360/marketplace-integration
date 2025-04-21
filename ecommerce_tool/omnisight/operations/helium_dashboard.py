@@ -11,6 +11,27 @@ from bson.son import SON
 
 
 
+def grossRevenue(start_date, end_date):
+    pipeline = [
+            {
+            "$match": {
+                "order_date": {"$gte": start_date, "$lte": end_date},
+                "order_status": {"$in": ['Shipped', 'Delivered']}
+            }
+            },
+            {
+            "$project": {
+                "_id": 0,
+                "order_items": 1,
+                "order_total" :1
+            }
+            }
+        ]
+
+    result = list(Order.objects.aggregate(*pipeline))
+    return result
+
+
 def get_metrics_by_date_range(request):
     target_date_str = request.GET.get('target_date')
     # Parse target date and previous day
@@ -45,80 +66,11 @@ def get_metrics_by_date_range(request):
 
     for key, date_range in last_8_days_filter.items():
         gross_revenue = 0
-        pipeline = [
-            {
-            "$match": {
-                "order_date": {"$gte": date_range["start"], "$lte": date_range["end"]},
-                "order_status": {"$in": ['Shipped', 'Delivered']}
-            }
-            },
-            {
-            "$group": {
-                "_id": None,
-                "order_items": {"$push": "$order_items"}
-            }
-            },
-            {
-            "$project": {
-                "order_items": {
-                "$reduce": {
-                    "input": "$order_items",
-                    "initialValue": [],
-                    "in": {"$concatArrays": ["$$value", "$$this"]}
-                }
-                }
-            }
-            }
-        ]
-
-        result = list(Order.objects.aggregate(*pipeline))
-        if result != []:
-            order_items = result[0]["order_items"]
-            
-            for ins in order_items:
-                pipeline = [
-                    {
-                        "$match": {
-                            "_id": ins
-                        }
-                    },
-                    {
-                        "$lookup": {
-                            "from": "product",  # Assuming your product COGS is here
-                            "localField": "ProductDetails.product_id",
-                            "foreignField": "_id",
-                            "as": "product_ins"
-                        }
-                    },
-                    {
-                    "$unwind": {
-                        "path": "$product_ins",
-                        "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
-                    }
-                    },
-                    {
-                        "$project": {
-                            "_id" : 0, 
-                            "price": "$Pricing.ItemPrice.Amount",
-                            "qty": "$ProductDetails.QuantityOrdered",
-                        }
-                    },
-                    {
-                        "$group": {
-                            "_id": None,
-                            "gross_revenue": {"$sum": {"$multiply": ["$price", "$qty"]}},
-                        }
-                    },
-                    {
-                        "$project": {
-                            "_id": 0,
-                            "gross_revenue": 1,
-                        }
-                    }
-                ]
-                result = list(OrderItems.objects.aggregate(*pipeline))
-                for items in result:
-                    gross_revenue += items['gross_revenue']
+        result = grossRevenue(date_range["start"], date_range["end"])
+        if result != []:            
+            for ins in result:
+                gross_revenue += ins['order_total']
+                
         graph_data[key] = {
             "gross_revenue": round(gross_revenue, 2),
         }
@@ -132,118 +84,50 @@ def get_metrics_by_date_range(request):
         total_units = 0
         total_orders = 0
 
-        pipeline = [
-            {
-            "$match": {
-                "order_date": {"$gte": date_range["start"], "$lte": date_range["end"]},
-                "order_status": {"$in": ['Shipped', 'Delivered']}
-            }
-            },
-            {
-            "$group": {
-                "_id": None,
-                "order_items": {"$push": "$order_items"}
-            }
-            },
-            {
-            "$project": {
-                "order_items": {
-                "$reduce": {
-                    "input": "$order_items",
-                    "initialValue": [],
-                    "in": {"$concatArrays": ["$$value", "$$this"]}
-                }
-                }
-            }
-            }
-        ]
-
-        result = list(Order.objects.aggregate(*pipeline))
-        pipeline = [
-            {
-            "$match": {
-                "order_date": {"$gte": date_range["start"], "$lte": date_range["end"]},
-                "order_status": {"$in": ['Shipped', 'Delivered']}
-            }
-            },
-            {
-            "$project": {
-                "_id" : 1
-            }
-            }
-        ]
-
-        result1 = list(Order.objects.aggregate(*pipeline))
-        total_orders = len(result1)
+        result = grossRevenue(date_range["start"], date_range["end"])
+        total_orders = len(result)
         if result != []:
-            order_items = result[0]["order_items"]
-            
-            for ins in order_items:
-                pipeline = [
-                    {
-                        "$match": {
-                            "_id": ins
+            for ins in result:
+                gross_revenue += ins['order_total']
+                other_price = 0
+                temp_other_price = 0 
+                for j in ins['order_items']:                  
+                    pipeline = [
+                        {
+                            "$match": {
+                                "_id": j
+                            }
+                        },
+                        {
+                            "$lookup": {
+                                "from": "product",
+                                "localField": "ProductDetails.product_id",
+                                "foreignField": "_id",
+                                "as": "product_ins"
+                            }
+                        },
+                        {
+                        "$unwind": {
+                            "path": "$product_ins",
+                            "preserveNullAndEmptyArrays": True
                         }
-                    },
-                    {
-                        "$lookup": {
-                            "from": "product",  # Assuming your product COGS is here
-                            "localField": "ProductDetails.product_id",
-                            "foreignField": "_id",
-                            "as": "product_ins"
+                        },
+                        {
+                            "$project": {
+                                "_id" : 0,
+                                "price": "$Pricing.ItemPrice.Amount",
+                                "cogs": {"$ifNull":["$product_ins.cogs",0.0]}
+                            }
                         }
-                    },
-                    {
-                    "$unwind": {
-                        "path": "$product_ins",
-                        "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
-                    }
-                    },
-                    {
-                        "$project": {
-                            "_id" : 0,
-                            "order_total": 1,
-                            "refund": "$refund_total",  
-                            "price": "$Pricing.ItemPrice.Amount",
-                            "qty": "$ProductDetails.QuantityOrdered",
-                            "cogs": "$product_ins.cogs"
-                        }
-                    },
-                    {
-                        "$group": {
-                            "_id": None,
-                            "gross_revenue": {"$sum": {"$multiply": ["$price", "$qty"]}},
-                            "total_cogs": {"$sum": {"$multiply": ["$cogs", "$qty"]}},
-                            "refund": {"$sum": "$refund"},
-                            "total_orders": {"$sum": 1},
-                            "total_units": {"$sum": "$qty"}
-                        }
-                    },
-                    {
-                        "$project": {
-                            "_id": 0,
-                            "gross_revenue": 1,
-                            "total_cogs": 1,
-                            "refund": 1,
-                            "margin": {"$subtract": ["$gross_revenue", "$total_cogs"]},
-                            "net_profit": {"$subtract": [{"$subtract": ["$gross_revenue", "$total_cogs"]}, "$refund"]},
-                            "total_orders": 1,
-                            "total_units": 1
-                        }
-                    }
-                ]
-                result = list(OrderItems.objects.aggregate(*pipeline))
-                for items in result:
-                    gross_revenue += items['gross_revenue']
-                    total_cogs += items['total_cogs']
-                    refund += items['refund']
-                    margin += items['margin']
-                    net_profit += items['net_profit']
-                    total_units += items['total_units']
+                    ]
+                    result = list(OrderItems.objects.aggregate(*pipeline))
+                    temp_other_price += result[0]['price']
+                    total_cogs += result[0]['cogs']
+                    total_units += 1
+            other_price += ins['order_total'] - temp_other_price
 
-
-
-
+            net_profit = gross_revenue - (other_price + total_cogs)
+            margin = (net_profit / gross_revenue) * 100
         metrics[key] = {
             "gross_revenue": round(gross_revenue, 2),
             "total_cogs": round(total_cogs, 2),
@@ -265,6 +149,262 @@ def get_metrics_by_date_range(request):
     }
     metrics["difference"] = difference
     return metrics
+
+
+# def get_metrics_by_date_range(request):
+#     target_date_str = request.GET.get('target_date')
+#     # Parse target date and previous day
+#     target_date = datetime.strptime(target_date_str, "%d/%m/%Y")
+#     previous_date = target_date - timedelta(days=1)
+#     eight_days_ago = target_date - timedelta(days=8)
+
+#     # Define the date filters
+#     date_filters = {
+#         "targeted": {
+#             "start": datetime(target_date.year, target_date.month, target_date.day),
+#             "end": datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
+#         },
+#         "previous": {
+#             "start": datetime(previous_date.year, previous_date.month, previous_date.day),
+#             "end": datetime(previous_date.year, previous_date.month, previous_date.day, 23, 59, 59)
+#         }
+#     }
+
+#     # Define the last 8 days filter as a dictionary with each day's range
+#     last_8_days_filter = {}
+#     for i in range(1,9):
+#         day = eight_days_ago + timedelta(days=i)
+#         day_key = day.strftime("%B %d").lower()
+#         last_8_days_filter[day_key] = {
+#             "start": datetime(day.year, day.month, day.day),
+#             "end": datetime(day.year, day.month, day.day, 23, 59, 59)
+#         }
+
+#     metrics = {}
+#     graph_data = {}
+
+#     for key, date_range in last_8_days_filter.items():
+#         gross_revenue = 0
+#         pipeline = [
+#             {
+#             "$match": {
+#                 "order_date": {"$gte": date_range["start"], "$lte": date_range["end"]},
+#                 "order_status": {"$in": ['Shipped', 'Delivered']}
+#             }
+#             },
+#             {
+#             "$group": {
+#                 "_id": None,
+#                 "order_items": {"$push": "$order_items"}
+#             }
+#             },
+#             {
+#             "$project": {
+#                 "order_items": {
+#                 "$reduce": {
+#                     "input": "$order_items",
+#                     "initialValue": [],
+#                     "in": {"$concatArrays": ["$$value", "$$this"]}
+#                 }
+#                 }
+#             }
+#             }
+#         ]
+
+#         result = list(Order.objects.aggregate(*pipeline))
+#         if result != []:
+#             order_items = result[0]["order_items"]
+            
+#             for ins in order_items:
+#                 pipeline = [
+#                     {
+#                         "$match": {
+#                             "_id": ins
+#                         }
+#                     },
+#                     {
+#                         "$lookup": {
+#                             "from": "product",  # Assuming your product COGS is here
+#                             "localField": "ProductDetails.product_id",
+#                             "foreignField": "_id",
+#                             "as": "product_ins"
+#                         }
+#                     },
+#                     {
+#                     "$unwind": {
+#                         "path": "$product_ins",
+#                         "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
+#                     }
+#                     },
+#                     {
+#                         "$project": {
+#                             "_id" : 0, 
+#                             "price": "$Pricing.ItemPrice.Amount",
+#                             "qty": "$ProductDetails.QuantityOrdered",
+#                         }
+#                     },
+#                     {
+#                         "$group": {
+#                             "_id": None,
+#                             "gross_revenue": {"$sum": {"$multiply": ["$price", "$qty"]}},
+#                         }
+#                     },
+#                     {
+#                         "$project": {
+#                             "_id": 0,
+#                             "gross_revenue": 1,
+#                         }
+#                     }
+#                 ]
+#                 result = list(OrderItems.objects.aggregate(*pipeline))
+#                 for items in result:
+#                     gross_revenue += items['gross_revenue']
+#         graph_data[key] = {
+#             "gross_revenue": round(gross_revenue, 2),
+#         }
+#     metrics["graph_data"] = graph_data
+#     for key, date_range in date_filters.items():
+#         gross_revenue = 0
+#         total_cogs = 0
+#         refund = 0
+#         margin = 0
+#         net_profit = 0
+#         total_units = 0
+#         total_orders = 0
+
+#         pipeline = [
+#             {
+#             "$match": {
+#                 "order_date": {"$gte": date_range["start"], "$lte": date_range["end"]},
+#                 "order_status": {"$in": ['Shipped', 'Delivered']}
+#             }
+#             },
+#             {
+#             "$group": {
+#                 "_id": None,
+#                 "order_items": {"$push": "$order_items"}
+#             }
+#             },
+#             {
+#             "$project": {
+#                 "order_items": {
+#                 "$reduce": {
+#                     "input": "$order_items",
+#                     "initialValue": [],
+#                     "in": {"$concatArrays": ["$$value", "$$this"]}
+#                 }
+#                 }
+#             }
+#             }
+#         ]
+
+#         result = list(Order.objects.aggregate(*pipeline))
+#         pipeline = [
+#             {
+#             "$match": {
+#                 "order_date": {"$gte": date_range["start"], "$lte": date_range["end"]},
+#                 "order_status": {"$in": ['Shipped', 'Delivered']}
+#             }
+#             },
+#             {
+#             "$project": {
+#                 "_id" : 1
+#             }
+#             }
+#         ]
+
+#         result1 = list(Order.objects.aggregate(*pipeline))
+#         total_orders = len(result1)
+#         if result != []:
+#             order_items = result[0]["order_items"]
+            
+#             for ins in order_items:
+#                 pipeline = [
+#                     {
+#                         "$match": {
+#                             "_id": ins
+#                         }
+#                     },
+#                     {
+#                         "$lookup": {
+#                             "from": "product",  # Assuming your product COGS is here
+#                             "localField": "ProductDetails.product_id",
+#                             "foreignField": "_id",
+#                             "as": "product_ins"
+#                         }
+#                     },
+#                     {
+#                     "$unwind": {
+#                         "path": "$product_ins",
+#                         "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
+#                     }
+#                     },
+#                     {
+#                         "$project": {
+#                             "_id" : 0,
+#                             "order_total": 1,
+#                             "refund": "$refund_total",  
+#                             "price": "$Pricing.ItemPrice.Amount",
+#                             "qty": "$ProductDetails.QuantityOrdered",
+#                             "cogs": "$product_ins.cogs"
+#                         }
+#                     },
+#                     {
+#                         "$group": {
+#                             "_id": None,
+#                             "gross_revenue": {"$sum": {"$multiply": ["$price", "$qty"]}},
+#                             "total_cogs": {"$sum": {"$multiply": ["$cogs", "$qty"]}},
+#                             "refund": {"$sum": "$refund"},
+#                             "total_orders": {"$sum": 1},
+#                             "total_units": {"$sum": "$qty"}
+#                         }
+#                     },
+#                     {
+#                         "$project": {
+#                             "_id": 0,
+#                             "gross_revenue": 1,
+#                             "total_cogs": 1,
+#                             "refund": 1,
+#                             "margin": {"$subtract": ["$gross_revenue", "$total_cogs"]},
+#                             "net_profit": {"$subtract": [{"$subtract": ["$gross_revenue", "$total_cogs"]}, "$refund"]},
+#                             "total_orders": 1,
+#                             "total_units": 1
+#                         }
+#                     }
+#                 ]
+#                 result = list(OrderItems.objects.aggregate(*pipeline))
+#                 for items in result:
+#                     gross_revenue += items['gross_revenue']
+#                     total_cogs += items['total_cogs']
+#                     refund += items['refund']
+#                     margin += items['margin']
+#                     net_profit += items['net_profit']
+#                     total_units += items['total_units']
+
+
+
+
+#         metrics[key] = {
+#             "gross_revenue": round(gross_revenue, 2),
+#             "total_cogs": round(total_cogs, 2),
+#             "refund": round(refund, 2),
+#             "margin": round(margin, 2),
+#             "net_profit": round(net_profit, 2),
+#             "total_orders": round(total_orders, 2),
+#             "total_units": round(total_units, 2)
+#         }
+#     difference = {
+#         "gross_revenue": round(metrics["targeted"]["gross_revenue"] - metrics["previous"]["gross_revenue"],2),
+#         "total_cogs": round(metrics["targeted"]["total_cogs"] - metrics["previous"]["total_cogs"],2),
+#         "refund": round(metrics["targeted"]["refund"] - metrics["previous"]["refund"],2),
+#         "margin": round(metrics["targeted"]["margin"] - metrics["previous"]["margin"],2),
+#         "net_profit": round(metrics["targeted"]["net_profit"] - metrics["previous"]["net_profit"],2),
+#         "total_orders": round(metrics["targeted"]["total_orders"] - metrics["previous"]["total_orders"],2),
+#         "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"],2)
+
+#     }
+#     metrics["difference"] = difference
+#     return metrics
 
 
 def LatestOrdersTodayAPIView(request):
@@ -917,6 +1057,129 @@ def getPeriodWiseDataCustom(request):
  
     return JsonResponse(response_data, safe=False)
 
+
+from datetime import datetime, timedelta
+from django.http import JsonResponse
+from dateutil.relativedelta import relativedelta
+
+def revenue_widget(request):
+    # Get range from query param
+    date_range = request.GET.get("range", "Today")
+
+    # Define date range
+    now = datetime.utcnow()
+    start_date = end_date = now
+
+    if date_range == "Today":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif date_range == "Yesterday":
+        start_date = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = start_date + timedelta(days=1)
+    elif date_range == "Last 7 Days":
+        start_date = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+    elif date_range == "Last 30 Days":
+        start_date = (now - timedelta(days=29)).replace(hour=0, minute=0, second=0, microsecond=0)
+    elif date_range == "This Month":
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif date_range == "Last Month":
+        last_month = now.replace(day=1) - timedelta(days=1)
+        start_date = last_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end_date = last_month.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    # Main filters
+    date_filter = {"order_date": {"$gte": start_date}}
+    if end_date:
+        date_filter["order_date"]["$lte"] = end_date
+
+    # Aggregate Gross Revenue
+    gross_pipeline = [
+        {"$match": date_filter},
+        {"$group": {"_id": None, "total": {"$sum": "$Pricing.totalAmount"}}}
+    ]
+    gross_result = list(Order.objects.aggregate(*gross_pipeline))
+    gross_revenue = gross_result[0]["total"] if gross_result else 0
+
+    # Refund Amount
+    refund_pipeline = [
+        {"$match": date_filter},
+        {"$group": {"_id": None, "total": {"$sum": "$Refund.refundAmount"}}}
+    ]
+    refund_result = list(Order.objects.aggregate(*refund_pipeline))
+    refund_amount = refund_result[0]["total"] if refund_result else 0
+
+    # COGS (Cost of Goods Sold)
+    cogs_pipeline = [
+        {"$match": date_filter},
+        {"$unwind": "$OrderItems"},
+        {"$project": {
+            "cost": {
+                "$multiply": [
+                    "$OrderItems.ProductDetails.cogs",
+                    "$OrderItems.Quantity"
+                ]
+            }
+        }},
+        {"$group": {"_id": None, "total": {"$sum": "$cost"}}}
+    ]
+    cogs_result = list(Order.objects.aggregate(*cogs_pipeline))
+    cogs = cogs_result[0]["total"] if cogs_result else 0
+
+    # Units Sold
+    units_pipeline = [
+        {"$match": date_filter},
+        {"$unwind": "$OrderItems"},
+        {"$group": {"_id": None, "total": {"$sum": "$OrderItems.Quantity"}}}
+    ]
+    units_result = list(Order.objects.aggregate(*units_pipeline))
+    units_sold = units_result[0]["total"] if units_result else 0
+
+    # Orders count
+    total_orders = Order.objects.filter(**date_filter).count()
+
+    # Profit & Margin
+    net_profit = gross_revenue - cogs - refund_amount
+    profit_margin = (net_profit / gross_revenue * 100) if gross_revenue else 0
+
+    # Chart breakdown based on range
+    if date_range in ["Today", "Yesterday"]:
+        # Hourly breakdown
+        group_format = "%H"
+        label_field = "hour"
+        add_fields = {"hour": {"$hour": "$orderDate"}}
+    else:
+        # Daily breakdown
+        group_format = "%Y-%m-%d"
+        label_field = "date"
+        add_fields = {"date": {"$dateToString": {"format": group_format, "date": "$orderDate"}}}
+
+    chart_pipeline = [
+        {"$match": date_filter},
+        {"$addFields": add_fields},
+        {"$group": {
+            "_id": f"${label_field}",
+            "grossRevenue": {"$sum": "$Pricing.totalAmount"},
+            "refundAmount": {"$sum": "$Refund.refundAmount"},
+            "orderCount": {"$sum": 1}
+        }},
+        {"$sort": {"_id": 1}}
+    ]
+    chart_result = list(Order.objects.aggregate(*chart_pipeline))
+
+    # Final response
+    response = {
+        "grossRevenue": round(gross_revenue, 2),
+        "refundAmount": round(refund_amount, 2),
+        "cogs": round(cogs, 2),
+        "netProfit": round(net_profit, 2),
+        "profitMargin": round(profit_margin, 2),
+        "orders": total_orders,
+        "unitsSold": units_sold,
+        "chartData": chart_result
+    }
+    return JsonResponse(response)
+
+
+
 def get_latest_orders(request):
     limit = request.GET.get('limit')
     # Define the aggregation pipeline
@@ -1068,3 +1331,194 @@ def get_product_revenue_details(request):
             'net_profit': 0,
             'profit_margin': 0
         }
+
+
+from datetime import datetime, timedelta
+from django.http import JsonResponse
+from dateutil.relativedelta import relativedelta
+from mongoengine.queryset.visitor import Q
+from collections import defaultdict
+import pytz
+
+def calculate_date_range(preset):
+    now = datetime.now(pytz.UTC)
+    if preset == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = now
+        prev_start = start - timedelta(days=1)
+        prev_end = start
+        interval = "hour"
+    elif preset == "last_7_days":
+        end = now
+        start = now - timedelta(days=7)
+        prev_end = start
+        prev_start = prev_end - timedelta(days=7)
+        interval = "day"
+    elif preset == "this_month":
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = now
+        prev_end = start
+        prev_start = (start - relativedelta(months=1)).replace(day=1)
+        interval = "day"
+    else:
+        # Default to last 30 days
+        end = now
+        start = now - timedelta(days=30)
+        prev_end = start
+        prev_start = prev_end - timedelta(days=30)
+        interval = "day"
+    return start, end, prev_start, prev_end, interval
+
+def group_by_interval(dt, interval):
+    if interval == "day":
+        return dt.strftime('%Y-%m-%d')
+    elif interval == "week":
+        return dt.strftime('%Y-W%U')
+    elif interval == "month":
+        return dt.strftime('%Y-%m')
+    return dt.strftime('%Y-%m-%d')
+
+def aggregate_financials(start_date, end_date, interval):
+    data = defaultdict(lambda: {
+        "gross": 0.0,
+        "net": 0.0,
+        "units": 0,
+        "orders": 0,
+        "refund_amount": 0.0,
+        "refund_quantity": 0
+    })
+
+    queryset = OrderItems.objects(
+        Q(OrderStatus__StatusDate__gte=start_date) &
+        Q(OrderStatus__StatusDate__lte=end_date)
+    )
+
+    seen_orders = set()
+    for item in queryset:
+        order_time = item.OrderStatus.StatusDate
+        bucket = group_by_interval(order_time, interval)
+        price = item.Pricing.ItemPrice.Amount
+        quantity = item.ProductDetails.QuantityOrdered
+        sku = item.ProductDetails.SKU
+        order_id = item.OrderId
+        status = item.OrderStatus.Status
+
+        gross = price * quantity
+        cogs = item.ProductDetails.product_id.cogs if item.ProductDetails.product_id else 0.0
+        net = (price - cogs) * quantity
+
+        if order_id not in seen_orders:
+            data[bucket]["orders"] += 1
+            seen_orders.add(order_id)
+
+        data[bucket]["gross"] += gross
+        data[bucket]["net"] += net
+        data[bucket]["units"] += quantity
+
+        if status in ["Returned", "Canceled"]:
+            data[bucket]["refund_amount"] += gross
+            data[bucket]["refund_quantity"] += quantity
+
+    return data
+
+def merge_metric(data, metric):
+    result = []
+    for key in sorted(data.keys()):
+        result.append({
+            "date": key,
+            "value": round(data[key][metric], 2)
+        })
+    return result
+
+def get_current_previous_values(data, metric):
+    values = [v[metric] for v in data.values()]
+    return round(sum(values), 2)
+
+def revenue_widget_api(request):
+    preset = request.GET.get("preset", "last_7_days")
+    start, end, prev_start, prev_end, interval = calculate_date_range(preset)
+
+    current_data = aggregate_financials(start, end, interval)
+    previous_data = aggregate_financials(prev_start, prev_end, interval)
+
+    response = {
+        "metrics": {
+            "grossRevenue": {
+                "currentValue": get_current_previous_values(current_data, "gross"),
+                "previousValue": get_current_previous_values(previous_data, "gross"),
+                "currentChart": merge_metric(current_data, "gross"),
+                "previousChart": merge_metric(previous_data, "gross"),
+            },
+            "netProfit": {
+                "currentValue": get_current_previous_values(current_data, "net"),
+                "previousValue": get_current_previous_values(previous_data, "net"),
+                "currentChart": merge_metric(current_data, "net"),
+                "previousChart": merge_metric(previous_data, "net"),
+            },
+            "margin": {
+                "currentValue": round(
+                    (get_current_previous_values(current_data, "net") /
+                     get_current_previous_values(current_data, "gross")) * 100
+                    if get_current_previous_values(current_data, "gross") else 0.0, 2
+                ),
+                "previousValue": round(
+                    (get_current_previous_values(previous_data, "net") /
+                     get_current_previous_values(previous_data, "gross")) * 100
+                    if get_current_previous_values(previous_data, "gross") else 0.0, 2
+                ),
+                "currentChart": [],
+                "previousChart": [],
+            },
+            "orders": {
+                "currentValue": get_current_previous_values(current_data, "orders"),
+                "previousValue": get_current_previous_values(previous_data, "orders"),
+                "currentChart": merge_metric(current_data, "orders"),
+                "previousChart": merge_metric(previous_data, "orders"),
+            },
+            "units": {
+                "currentValue": get_current_previous_values(current_data, "units"),
+                "previousValue": get_current_previous_values(previous_data, "units"),
+                "currentChart": merge_metric(current_data, "units"),
+                "previousChart": merge_metric(previous_data, "units"),
+            },
+            "refundAmount": {
+                "currentValue": get_current_previous_values(current_data, "refund_amount"),
+                "previousValue": get_current_previous_values(previous_data, "refund_amount"),
+                "currentChart": merge_metric(current_data, "refund_amount"),
+                "previousChart": merge_metric(previous_data, "refund_amount"),
+            },
+            "refundQuantity": {
+                "currentValue": get_current_previous_values(current_data, "refund_quantity"),
+                "previousValue": get_current_previous_values(previous_data, "refund_quantity"),
+                "currentChart": merge_metric(current_data, "refund_quantity"),
+                "previousChart": merge_metric(previous_data, "refund_quantity"),
+            },
+            "ppcSpend": {
+                "currentValue": 0.0,
+                "previousValue": 0.0,
+                "currentChart": [],
+                "previousChart": [],
+            },
+        },
+        "netProfitCalculation": {
+            "grossRevenue": get_current_previous_values(current_data, "gross"),
+            "productCOGS": round(
+                get_current_previous_values(current_data, "gross") -
+                get_current_previous_values(current_data, "net"), 2
+            ),
+            "netProfit": get_current_previous_values(current_data, "net"),
+        },
+        "dateRange": {
+            "preset": preset,
+            "current": {
+                "start": start.isoformat(),
+                "end": end.isoformat()
+            },
+            "previous": {
+                "start": prev_start.isoformat(),
+                "end": prev_end.isoformat()
+            },
+            "granularity": interval
+        }
+    }
+    return JsonResponse(response)
