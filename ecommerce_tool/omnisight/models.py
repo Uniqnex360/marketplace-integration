@@ -114,6 +114,7 @@ class Product(Document):
     created_at = DateTimeField(default=datetime.now())  # Timestamp when the product was added
     updated_at = DateTimeField(default=datetime.now())  # Timestamp when the product was last updated
     cogs = FloatField(default=0.0)  # Cost of Goods Sold
+    shipping_cost = FloatField(default=0.0)  # Shipping cost
 
 
 class ignore_api_functions(Document):
