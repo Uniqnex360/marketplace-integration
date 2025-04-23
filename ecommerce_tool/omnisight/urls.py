@@ -21,10 +21,9 @@ from omnisight.operations.general_functions import getMarketplaceList, getProduc
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders
 
-from omnisight.operations.helium_dashboard import get_latest_orders,get_metrics_by_date_range,compare_revenue_with_past, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, revenue_widget, revenue_widget_api
+from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom
 
 urlpatterns = [
-    path('revenue_widget_api/',revenue_widget_api,name="revenue_widget_api"),
     #General Urls
     path('checkEmailExistOrNot/', checkEmailExistOrNot, name='checkEmailExistOrNot'),
     path('signupUser/', signupUser, name='signupUser'),
@@ -87,15 +86,12 @@ urlpatterns = [
     path("fetchRoles/",fetchRoles,name="fetchRoles"),
 
     #Helium 10 Dashboard
-    path("get_latest_orders/",get_latest_orders,name="get_latest_orders"),
     path("get_metrics_by_date_range/",get_metrics_by_date_range,name="get_metrics_by_date_range"),
-    path("compare_revenue_with_past/",compare_revenue_with_past,name="compare_revenue_with_past"),
     path("LatestOrdersTodayAPIView/",LatestOrdersTodayAPIView,name="LatestOrdersTodayAPIView"),
     path("RevenueWidgetAPIView/",RevenueWidgetAPIView,name="RevenueWidgetAPIView"),
     path("get_top_products/",get_top_products,name="get_top_products"),
     path("getPeriodWiseData/",getPeriodWiseData,name="getPeriodWiseData"),
     path("getPeriodWiseDataCustom/",getPeriodWiseDataCustom,name="getPeriodWiseDataCustom"),
-    path("revenue_widget/",revenue_widget,name="revenue_widget"),
 ]
 
 
