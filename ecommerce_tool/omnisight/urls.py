@@ -21,7 +21,7 @@ from omnisight.operations.general_functions import getMarketplaceList, getProduc
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders
 
-from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom
+from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV
 
 urlpatterns = [
     #General Urls
@@ -90,8 +90,23 @@ urlpatterns = [
     path("LatestOrdersTodayAPIView/",LatestOrdersTodayAPIView,name="LatestOrdersTodayAPIView"),
     path("RevenueWidgetAPIView/",RevenueWidgetAPIView,name="RevenueWidgetAPIView"),
     path("get_top_products/",get_top_products,name="get_top_products"),
+    
+
+    #Selva APIS
     path("getPeriodWiseData/",getPeriodWiseData,name="getPeriodWiseData"),
+    path("getPeriodWiseDataXl/",getPeriodWiseDataXl,name="getPeriodWiseDataXl"),
+    path("exportPeriodWiseCSV/",exportPeriodWiseCSV,name="exportPeriodWiseCSV"),
+
     path("getPeriodWiseDataCustom/",getPeriodWiseDataCustom,name="getPeriodWiseDataCustom"),
+
+    path("allMarketplaceData/",allMarketplaceData,name="allMarketplaceData"),
+    path("allMarketplaceDataxl/",allMarketplaceDataxl,name="allMarketplaceDataxl"),
+    path("downloadMarketplaceDataCSV/",downloadMarketplaceDataCSV,name="downloadMarketplaceDataCSV"),
+
+    path("getProductPerformanceSummary/",getProductPerformanceSummary,name="getProductPerformanceSummary"),
+    path("downloadProductPerformanceSummary/",downloadProductPerformanceSummary,name="downloadProductPerformanceSummary"),
+    path("downloadProductPerformanceCSV/",downloadProductPerformanceCSV,name="downloadProductPerformanceCSV"),
+
 ]
 
 

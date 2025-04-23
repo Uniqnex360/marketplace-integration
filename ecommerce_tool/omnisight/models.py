@@ -361,3 +361,24 @@ class custom_order(Document):
 class authenticated_api(Document):
     name = StringField()
     allowed_roles = ListField(ReferenceField(role))
+
+
+
+class CityDetails(Document):
+    city = StringField(max_length=100)
+    city_ascii = StringField(max_length=100)
+    state_id = StringField(max_length=10)
+    state_name = StringField(max_length=100)
+    county_fips = StringField(max_length=20)
+    county_name = StringField(max_length=100)
+    lat = FloatField()
+    lng = FloatField()
+    population = IntField()
+    density = FloatField()
+    source = StringField(max_length=100)
+    military = BooleanField()
+    incorporated = BooleanField()
+    timezone = StringField(max_length=100)
+    ranking = IntField()
+    zips = StringField()  
+    uid = IntField(unique=True)
