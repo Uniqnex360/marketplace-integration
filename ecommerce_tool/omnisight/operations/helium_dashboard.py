@@ -14,6 +14,7 @@ from io import StringIO
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font
 import io
+from pytz import timezone
 
 
 
@@ -86,9 +87,9 @@ def get_metrics_by_date_range(request):
 
     # Define the last 8 days filter as a dictionary with each day's range
     last_8_days_filter = {}
-    for i in range(1,9):
+    for i in range(1, 9):
         day = eight_days_ago + timedelta(days=i)
-        day_key = day.strftime("%B %d").lower()
+        day_key = day.strftime("%B %d, %Y").lower()
         last_8_days_filter[day_key] = {
             "start": datetime(day.year, day.month, day.day),
             "end": datetime(day.year, day.month, day.day, 23, 59, 59)
@@ -330,22 +331,26 @@ def LatestOrdersTodayAPIView(request):
 
 
 def LatestOrdersTodayAPIView(request):
-    # 1️⃣ Compute UTC bounds for “today”
-    now = datetime.utcnow()
+    # 1️⃣ Compute bounds for "today" based on the user's local timezone
+    user_timezone = request.GET.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
+    local_tz = timezone(user_timezone)
+
+    now = datetime.now(local_tz)
+    # For a 24-hour period ending now
     start_of_day = now - timedelta(hours=24)
     end_of_day = now
 
-    # 2️⃣ Fetch all Shippped/Delivered orders for today
+    # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
     qs = Order.objects.filter(
         order_date__gte=start_of_day,
         order_date__lte=end_of_day,
-        order_status__in=["Shipped","Delivered"]
+        order_status__in=["Shipped", "Delivered"]
     )
 
-    # 3️⃣ Pre‑fill a 24‑slot OrderedDict for every hour
+    # 3️⃣ Pre-fill a 24-slot OrderedDict for every hour in the time range
     chart = OrderedDict()
     bucket = start_of_day.replace(minute=0, second=0, microsecond=0)
-    for _ in range(24):
+    for _ in range(25):  # 25 to include the current hour
         key = bucket.strftime("%Y-%m-%d %H:00:00")
         chart[key] = {"ordersCount": 0, "unitsCount": 0}
         bucket += timedelta(hours=1)
@@ -353,47 +358,52 @@ def LatestOrdersTodayAPIView(request):
     # 4️⃣ Build the detail array + populate chart
     orders_out = []
     for order in qs:
+        # Convert order_date to user's timezone for consistent bucketing
+        order_local_time = order.order_date.astimezone(local_tz)
+        
         # hour bucket for this order
-        bk = order.order_date.replace(minute=0, second=0, microsecond=0)\
-                              .strftime("%Y-%m-%d %H:00:00")
+        bk = order_local_time.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:00:00")
+        
+        # Only process if the bucket exists in our chart
         if bk in chart:
             chart[bk]["ordersCount"] += 1
+            
+            # iterate each OrderItems instance referenced on this order
+            for item in order.order_items:
+                sku = item.ProductDetails.SKU
+                asin = item.ProductDetails.ASIN if hasattr(item.ProductDetails, 'ASIN') and item.ProductDetails.ASIN is not None else ""
+                qty = item.ProductDetails.QuantityOrdered
+                unit_price = item.Pricing.ItemPrice.Amount
+                title = item.ProductDetails.Title
+                # lazy-load the Product doc for image_url
+                prod_ref = item.ProductDetails.product_id
+                img_url = prod_ref.image_url if prod_ref else None
 
-        # iterate each OrderItems instance referenced on this order
-        # `order.order_items` is already a list of OrderItems documents
-        for item in order.order_items:
-            sku        = item.ProductDetails.SKU
-            asin = item.ProductDetails.ASIN if item.ProductDetails.ASIN is not None else ""
-            qty        = item.ProductDetails.QuantityOrdered
-            unit_price = item.Pricing.ItemPrice.Amount
-            title      = item.ProductDetails.Title
-            # lazy‑load the Product doc for image_url
-            prod_ref   = item.ProductDetails.product_id
-            img_url    = prod_ref.image_url if prod_ref else None
+                total_price = round(unit_price * qty, 2)
+                purchase_dt = order_local_time.strftime("%Y-%m-%d %H:%M:%S")
 
-            total_price = round(unit_price * qty, 2)
-            purchase_dt = order.order_date.strftime("%Y-%m-%d %H:%M:%S")
+                orders_out.append({
+                    "sellerSku": sku,
+                    "asin": asin,
+                    "title": title,
+                    "quantityOrdered": qty,
+                    "imageUrl": img_url,
+                    "price": total_price,
+                    "purchaseDate": purchase_dt
+                })
 
-            orders_out.append({
-                "sellerSku":      sku,
-                "asin":           asin,
-                "title":          title,
-                "quantityOrdered": qty,
-                "imageUrl":       img_url,
-                "price":          total_price,
-                "purchaseDate":   purchase_dt
-            })
-
-            # add to units count
-            if bk in chart:
+                # add to units count
                 chart[bk]["unitsCount"] += qty
 
     # 5️⃣ sort orders by most recent purchaseDate
     orders_out.sort(key=lambda o: o["purchaseDate"], reverse=True)
-    data = dict()
+    
+    # Convert chart to list format for easier frontend consumption
+    chart_list = [{"hour": hour, **data} for hour, data in chart.items()]
+    
     data = {
         "orders": orders_out,
-        "hourly_order_count": chart
+        "hourly_order_count": chart_list
     }
     return data
 
@@ -442,6 +452,9 @@ def get_date_range(preset):
 
 
 def get_graph_data(start_date, end_date, preset):
+    now = datetime.utcnow()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
     # Determine time buckets based on preset
     if preset in ["Today", "Yesterday"]:
         # Hourly data for 24 hours
@@ -449,8 +462,15 @@ def get_graph_data(start_date, end_date, preset):
                       for i in range(24)]
         time_format = "%Y-%m-%d %H:00:00"
     else:
-        # Daily data for the period
-        days = (end_date - start_date).days
+        # Daily data - only up to current day
+        if preset in ["This Week", "This Month", "This Quarter", "This Year"]:
+            # For current periods, only include days up to today
+            last_day = min(end_date, today + timedelta(days=1))  # Include today
+            days = (last_day - start_date).days
+        else:
+            # For past periods, include all days
+            days = (end_date - start_date).days
+            
         time_buckets = [(start_date + timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0) 
                       for i in range(days)]
         time_format = "%Y-%m-%d 00:00:00"
