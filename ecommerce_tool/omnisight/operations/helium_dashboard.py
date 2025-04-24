@@ -814,7 +814,7 @@ def get_top_products(request):
 
 #########################SELVA WORKING APIS##########
 
-def calculate_metrics(start_date, end_date):
+def calculate_metricss(start_date, end_date):
     gross_revenue = 0
     total_cogs = 0
     refund = 0
@@ -884,14 +884,13 @@ def calculate_metrics(start_date, end_date):
 
 
 def getPeriodWiseData(request):
-    target_date = datetime.today()
-    
+    target_date = datetime.today() - timedelta(days=1)
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
-        current_metrics = calculate_metrics(current_start, current_end)
-        previous_metrics = calculate_metrics(prev_start, prev_end)
+        current_metrics = calculate_metricss(current_start, current_end)
+        previous_metrics = calculate_metricss(prev_start, prev_end)
 
         output = {
             "label": label,
@@ -950,7 +949,7 @@ def getPeriodWiseData(request):
 
 
 def getPeriodWiseDataXl(request):
-    current_date = datetime.utcnow()
+    current_date = datetime.today() - timedelta(days=1)
     def grossRevenue(start_date, end_date):
         pipeline = [
                 {
@@ -990,9 +989,8 @@ def getPeriodWiseDataXl(request):
         net_profit = 0
         margin = 0
         total_units = 0
-        tax_price = 0
         sku_set = set()
-
+        tax_price = 0
         result = grossRevenue(start_date, end_date)
         order_total = 0
         other_price = 0
@@ -1125,8 +1123,10 @@ def getPeriodWiseDataXl(request):
     wb.save(response)
     return response
 
+
 def exportPeriodWiseCSV(request):
-    current_date = datetime.utcnow()
+    current_date = datetime.today() - timedelta(days=1)
+
 
     def grossRevenue(start_date, end_date):
         pipeline = [
@@ -1167,9 +1167,8 @@ def exportPeriodWiseCSV(request):
         net_profit = 0
         margin = 0
         total_units = 0
-        tax_price = 0
         sku_set = set()
-
+        tax_price = 0
         result = grossRevenue(start_date, end_date)
         order_total = 0
         other_price = 0
@@ -1380,7 +1379,8 @@ def getPeriodWiseDataCustom(request):
             "tax_price":tax_price,
             "total_cogs":total_cogs,
             "product_cost":order_total,
-            "shipping_cost":0
+            "shipping_cost":0,
+            'orders':len(result)
         }
 
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to):
@@ -1409,7 +1409,8 @@ def getPeriodWiseDataCustom(request):
                 "pageViews": with_delta("pageViews"),
                 "unitSessionPercentage": with_delta("unitSessionPercentage"),
                 "margin": with_delta("margin"),
-                "roi": with_delta("roi")
+                "roi": with_delta("roi"),
+                "orders": with_delta("orders"),
             },
             "netProfitCalculation": {
                 "current": {
@@ -1452,25 +1453,19 @@ def getPeriodWiseDataCustom(request):
     last_7_prev_start = today_start - timedelta(days=14)
     last_7_prev_end = last_7_start - timedelta(seconds=1)
 
-    from_date_str = request.GET.get('from_date')  
-    to_date_str = request.GET.get('to_date')
+    preset = request.GET.get('preset') 
+    start_date, end_date = get_date_range(preset)
     
-    try:
-        from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
-        to_date = datetime.strptime(to_date_str, "%Y-%m-%d")
-    except (TypeError, ValueError):
-        from_date = today_start - timedelta(days=30)
-        to_date = now 
     
-    custom_duration = to_date - from_date
-    prev_from_date = from_date - custom_duration
-    prev_to_date = to_date - custom_duration
+    custom_duration = end_date - start_date
+    prev_from_date = start_date - custom_duration
+    prev_to_date = end_date - custom_duration
 
     response_data = {
         "today": create_period_response("Today", today_start, now, yesterday_start, yesterday_end),
         "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1)),
         "last7Days": create_period_response("Last 7 Days", last_7_start, now, last_7_prev_start, last_7_prev_end),
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
+        "custom": create_period_response("Custom", start_date, end_date, prev_from_date, prev_to_date),
     }
 
     return JsonResponse(response_data, safe=False)
@@ -1717,6 +1712,387 @@ def allMarketplaceData(request):
 
     return JsonResponse(response_data, safe=False)
 
+
+
+def getProductPerformanceSummary(request):
+    yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    today = yesterday + timedelta(days=1)
+
+    order_pipeline = [
+        {
+            "$match": {
+                "order_date": {"$gte": yesterday, "$lt": today},
+                "order_status": {"$in": ["Shipped", "Delivered"]}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "order_items": 1,
+                "order_total": 1,
+                "marketplace_name": 1
+            }
+        }
+    ]
+    orders = list(Order.objects.aggregate(*order_pipeline))
+
+    sku_summary = defaultdict(lambda: {
+        "sku": "",
+        "product_name": "",
+        "images": "",
+        "unitsSold": 0,
+        "grossRevenue": 0.0,
+        "totalCogs": 0.0,
+        "netProfit": 0.0,
+        "margin": 0.0
+    })
+
+    for order in orders:
+        order_total = order.get("order_total", 0.0)
+        item_ids = order.get("order_items", [])
+        temp_price = 0.0
+        total_cogs = 0.0
+        sku_set = set()
+
+        for item_id in item_ids:
+            item_pipeline = [
+                {"$match": {"_id": item_id}},
+                {
+                    "$lookup": {
+                        "from": "product",
+                        "localField": "ProductDetails.product_id",
+                        "foreignField": "_id",
+                        "as": "product_ins"
+                    }
+                },
+                {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                {
+                    "$project": {
+                        "_id": 0,
+                        "price": "$Pricing.ItemPrice.Amount",
+                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                        "sku": "$product_ins.sku",
+                        "product_name": "$product_ins.product_title",
+                        "images": "$product_ins.image_urls"
+                    }
+                }
+            ]
+            item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+            if item_result:
+                item_data = item_result[0]
+                sku = item_data.get("sku")
+                product_name = item_data.get("product_name", "")
+                images = item_data.get("images", [])
+                price = item_data.get("price", 0.0)
+                cogs = item_data.get("cogs", 0.0)
+                temp_price += price
+                total_cogs += cogs
+                if sku:
+                    sku_set.add(sku)
+
+                    sku_summary[sku]["sku"] = sku
+                    sku_summary[sku]["product_name"] = product_name
+                    sku_summary[sku]["images"] = images
+                    sku_summary[sku]["unitsSold"] += 1
+                    sku_summary[sku]["grossRevenue"] += price
+                    sku_summary[sku]["totalCogs"] += cogs
+
+        other_price = order_total - temp_price
+
+        for sku in sku_set:
+            gross = sku_summary[sku]["grossRevenue"]
+            cogs = sku_summary[sku]["totalCogs"]
+            net_profit = gross - (other_price + cogs)
+            margin = (net_profit / gross) * 100 if gross > 0 else 0
+            sku_summary[sku]["netProfit"] = round(net_profit, 2)
+            sku_summary[sku]["margin"] = round(margin, 2)
+
+    sorted_skus = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
+    print(len(sorted_skus))
+    top_3 = sorted_skus[:3]
+    least_3 = sorted_skus[-3:] if len(sorted_skus) >= 3 else sorted_skus
+
+    return JsonResponse({
+        "top_3_products": top_3,
+        "least_3_products": least_3
+    })
+
+
+def downloadProductPerformanceSummary(request):
+    action = request.GET.get("action", "").lower()
+
+    yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    today = yesterday + timedelta(days=1)
+
+    order_pipeline = [
+        {
+            "$match": {
+                "order_date": {"$gte": yesterday, "$lt": today},
+                "order_status": {"$in": ["Shipped", "Delivered"]}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "order_items": 1,
+                "order_total": 1,
+                "marketplace_name": 1
+            }
+        }
+    ]
+    orders = list(Order.objects.aggregate(*order_pipeline))
+
+    sku_summary = defaultdict(lambda: {
+        "sku": "",
+        "product_name": "",
+        "images": "",
+        "unitsSold": 0,
+        "grossRevenue": 0.0,
+        "totalCogs": 0.0,
+        "netProfit": 0.0,
+        "margin": 0.0
+    })
+
+    for order in orders:
+        order_total = order.get("order_total", 0.0)
+        item_ids = order.get("order_items", [])
+        temp_price = 0.0
+        total_cogs = 0.0
+        sku_set = set()
+
+        for item_id in item_ids:
+            item_pipeline = [
+                {"$match": {"_id": item_id}},
+                {
+                    "$lookup": {
+                        "from": "product",
+                        "localField": "ProductDetails.product_id",
+                        "foreignField": "_id",
+                        "as": "product_ins"
+                    }
+                },
+                {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                {
+                    "$project": {
+                        "_id": 0,
+                        "price": "$Pricing.ItemPrice.Amount",
+                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                        "sku": "$product_ins.sku",
+                        "product_name": "$product_ins.product_title",
+                        "images": "$product_ins.image_urls"
+                    }
+                }
+            ]
+            item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+            if item_result:
+                item_data = item_result[0]
+                sku = item_data.get("sku")
+                product_name = item_data.get("product_name", "")
+                images = item_data.get("images", [])
+                price = item_data.get("price", 0.0)
+                cogs = item_data.get("cogs", 0.0)
+                temp_price += price
+                total_cogs += cogs
+                if sku:
+                    sku_set.add(sku)
+
+                    sku_summary[sku]["sku"] = sku
+                    sku_summary[sku]["product_name"] = product_name
+                    sku_summary[sku]["images"] = images
+                    sku_summary[sku]["unitsSold"] += 1
+                    sku_summary[sku]["grossRevenue"] += price
+                    sku_summary[sku]["totalCogs"] += cogs
+
+        other_price = order_total - temp_price
+
+        for sku in sku_set:
+            gross = sku_summary[sku]["grossRevenue"]
+            cogs = sku_summary[sku]["totalCogs"]
+            net_profit = gross - (other_price + cogs)
+            margin = (net_profit / gross) * 100 if gross > 0 else 0
+            sku_summary[sku]["netProfit"] = round(net_profit, 2)
+            sku_summary[sku]["margin"] = round(margin, 2)
+
+    # Sort and limit based on action
+    sorted_summary = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
+
+    if action == "top":
+        final_summary = sorted_summary[:3]
+    elif action == "least":
+        final_summary = sorted_summary[-3:]
+    else:
+        final_summary = sorted_summary  # all products
+
+    # Create Excel workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Product Performance"
+
+    # Headers
+    headers = ["SKU", "Product Name", "Units Sold", "Gross Revenue", "Total COGS", "Net Profit", "Margin (%)"]
+    ws.append(headers)
+
+    # Rows
+    for data in final_summary:
+        ws.append([
+            data["sku"],
+            data["product_name"],
+            data["unitsSold"],
+            round(data["grossRevenue"], 2),
+            round(data["totalCogs"], 2),
+            round(data["netProfit"], 2),
+            round(data["margin"], 2)
+        ])
+
+    # Auto width
+    for col_num, col in enumerate(ws.columns, start=1):
+        max_length = max(len(str(cell.value)) if cell.value else 0 for cell in col)
+        ws.column_dimensions[get_column_letter(col_num)].width = max_length + 2
+
+    # Response
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    filename = f"Product_Performance_{yesterday.strftime('%Y-%m-%d')}_{action or 'all'}.xlsx"
+    response['Content-Disposition'] = f'attachment; filename={filename}'
+    wb.save(response)
+
+    return response
+
+
+
+def downloadProductPerformanceCSV(request):
+    yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    today = yesterday + timedelta(days=1)
+
+    order_pipeline = [
+        {
+            "$match": {
+                "order_date": {"$gte": yesterday, "$lt": today},
+                "order_status": {"$in": ["Shipped", "Delivered"]}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "order_items": 1,
+                "order_total": 1,
+                "marketplace_name": 1
+            }
+        }
+    ]
+    orders = list(Order.objects.aggregate(*order_pipeline))
+
+    sku_summary = defaultdict(lambda: {
+        "sku": "",
+        "product_name": "",
+        "images": "",
+        "unitsSold": 0,
+        "grossRevenue": 0.0,
+        "totalCogs": 0.0,
+        "netProfit": 0.0,
+        "margin": 0.0
+    })
+
+    for order in orders:
+        order_total = order.get("order_total", 0.0)
+        item_ids = order.get("order_items", [])
+        temp_price = 0.0
+        total_cogs = 0.0
+        sku_set = set()
+
+        for item_id in item_ids:
+            item_pipeline = [
+                {"$match": {"_id": item_id}},
+                {
+                    "$lookup": {
+                        "from": "product",
+                        "localField": "ProductDetails.product_id",
+                        "foreignField": "_id",
+                        "as": "product_ins"
+                    }
+                },
+                {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                {
+                    "$project": {
+                        "_id": 0,
+                        "price": "$Pricing.ItemPrice.Amount",
+                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                        "sku": "$product_ins.sku",
+                        "product_name": "$product_ins.product_title",
+                        "images": "$product_ins.image_urls"
+                    }
+                }
+            ]
+            item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+            if item_result:
+                item_data = item_result[0]
+                sku = item_data.get("sku")
+                product_name = item_data.get("product_name", "")
+                images = item_data.get("images", [])
+                price = item_data.get("price", 0.0)
+                cogs = item_data.get("cogs", 0.0)
+                temp_price += price
+                total_cogs += cogs
+                if sku:
+                    sku_set.add(sku)
+
+                    sku_summary[sku]["sku"] = sku
+                    sku_summary[sku]["product_name"] = product_name
+                    sku_summary[sku]["images"] = images
+                    sku_summary[sku]["unitsSold"] += 1
+                    sku_summary[sku]["grossRevenue"] += price
+                    sku_summary[sku]["totalCogs"] += cogs
+
+        other_price = order_total - temp_price
+
+        for sku in sku_set:
+            gross = sku_summary[sku]["grossRevenue"]
+            cogs = sku_summary[sku]["totalCogs"]
+            net_profit = gross - (other_price + cogs)
+            margin = (net_profit / gross) * 100 if gross > 0 else 0
+            sku_summary[sku]["netProfit"] = round(net_profit, 2)
+            sku_summary[sku]["margin"] = round(margin, 2)
+
+    # Get action parameter to determine top or least
+    action = request.GET.get('action', '').lower()
+
+    # Sort and pick top 3 or least 3 based on netProfit
+    sorted_summary = sorted(
+        sku_summary.values(),
+        key=lambda x: x["unitsSold"],
+        reverse=(action == "top")
+    )
+    limited_summary = sorted_summary[:3]
+
+    # Create CSV response
+    response = HttpResponse(content_type='text/csv')
+    filename = f"Product_Performance_{yesterday.strftime('%Y-%m-%d')}.csv"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+    writer = csv.writer(response)
+    # CSV headers
+    writer.writerow([
+        "SKU", "Product Name", "Units Sold", "Gross Revenue",
+        "Total COGS", "Net Profit", "Margin (%)"
+    ])
+
+    # CSV rows
+    for data in limited_summary:
+        writer.writerow([
+            data["sku"],
+            data["product_name"],
+            data["unitsSold"],
+            round(data["grossRevenue"], 2),
+            round(data["totalCogs"], 2),
+            round(data["netProfit"], 2),
+            round(data["margin"], 2)
+        ])
+
+    return response
+
+from openpyxl.styles import Font
+import io
 
 def allMarketplaceDataxl(request):
     from_str = request.GET.get("from_date")
@@ -2008,386 +2384,8 @@ def downloadMarketplaceDataCSV(request):
     return response
 
 
-def getProductPerformanceSummary(request):
-    yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    today = yesterday + timedelta(days=1)
-
-    order_pipeline = [
-        {
-            "$match": {
-                "order_date": {"$gte": yesterday, "$lt": today},
-                "order_status": {"$in": ["Shipped", "Delivered"]}
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "order_items": 1,
-                "order_total": 1,
-                "marketplace_name": 1
-            }
-        }
-    ]
-    orders = list(Order.objects.aggregate(*order_pipeline))
-
-    sku_summary = defaultdict(lambda: {
-        "sku": "",
-        "product_name": "",
-        "images": "",
-        "unitsSold": 0,
-        "grossRevenue": 0.0,
-        "totalCogs": 0.0,
-        "netProfit": 0.0,
-        "margin": 0.0
-    })
-
-    for order in orders:
-        order_total = order.get("order_total", 0.0)
-        item_ids = order.get("order_items", [])
-        temp_price = 0.0
-        total_cogs = 0.0
-        sku_set = set()
-
-        for item_id in item_ids:
-            item_pipeline = [
-                {"$match": {"_id": item_id}},
-                {
-                    "$lookup": {
-                        "from": "product",
-                        "localField": "ProductDetails.product_id",
-                        "foreignField": "_id",
-                        "as": "product_ins"
-                    }
-                },
-                {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                {
-                    "$project": {
-                        "_id": 0,
-                        "price": "$Pricing.ItemPrice.Amount",
-                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                        "sku": "$product_ins.sku",
-                        "product_name": "$product_ins.product_title",
-                        "images": "$product_ins.image_urls"
-                    }
-                }
-            ]
-            item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-            if item_result:
-                item_data = item_result[0]
-                sku = item_data.get("sku")
-                product_name = item_data.get("product_name", "")
-                images = item_data.get("images", [])
-                price = item_data.get("price", 0.0)
-                cogs = item_data.get("cogs", 0.0)
-                temp_price += price
-                total_cogs += cogs
-                if sku:
-                    sku_set.add(sku)
-
-                    sku_summary[sku]["sku"] = sku
-                    sku_summary[sku]["product_name"] = product_name
-                    sku_summary[sku]["images"] = images
-                    sku_summary[sku]["unitsSold"] += 1
-                    sku_summary[sku]["grossRevenue"] += price
-                    sku_summary[sku]["totalCogs"] += cogs
-
-        other_price = order_total - temp_price
-
-        for sku in sku_set:
-            gross = sku_summary[sku]["grossRevenue"]
-            cogs = sku_summary[sku]["totalCogs"]
-            net_profit = gross - (other_price + cogs)
-            margin = (net_profit / gross) * 100 if gross > 0 else 0
-            sku_summary[sku]["netProfit"] = round(net_profit, 2)
-            sku_summary[sku]["margin"] = round(margin, 2)
-
-    sorted_skus = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
-    print(len(sorted_skus))
-    top_3 = sorted_skus[:3]
-    least_3 = sorted_skus[-3:] if len(sorted_skus) >= 3 else sorted_skus
-
-    return JsonResponse({
-        "top_3_products": top_3,
-        "least_3_products": least_3
-    })
-
-
-
-def downloadProductPerformanceSummary(request):
-    action = request.GET.get("action", "").lower()
-
-    yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    today = yesterday + timedelta(days=1)
-
-    order_pipeline = [
-        {
-            "$match": {
-                "order_date": {"$gte": yesterday, "$lt": today},
-                "order_status": {"$in": ["Shipped", "Delivered"]}
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "order_items": 1,
-                "order_total": 1,
-                "marketplace_name": 1
-            }
-        }
-    ]
-    orders = list(Order.objects.aggregate(*order_pipeline))
-
-    sku_summary = defaultdict(lambda: {
-        "sku": "",
-        "product_name": "",
-        "images": "",
-        "unitsSold": 0,
-        "grossRevenue": 0.0,
-        "totalCogs": 0.0,
-        "netProfit": 0.0,
-        "margin": 0.0
-    })
-
-    for order in orders:
-        order_total = order.get("order_total", 0.0)
-        item_ids = order.get("order_items", [])
-        temp_price = 0.0
-        total_cogs = 0.0
-        sku_set = set()
-
-        for item_id in item_ids:
-            item_pipeline = [
-                {"$match": {"_id": item_id}},
-                {
-                    "$lookup": {
-                        "from": "product",
-                        "localField": "ProductDetails.product_id",
-                        "foreignField": "_id",
-                        "as": "product_ins"
-                    }
-                },
-                {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                {
-                    "$project": {
-                        "_id": 0,
-                        "price": "$Pricing.ItemPrice.Amount",
-                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                        "sku": "$product_ins.sku",
-                        "product_name": "$product_ins.product_title",
-                        "images": "$product_ins.image_urls"
-                    }
-                }
-            ]
-            item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-            if item_result:
-                item_data = item_result[0]
-                sku = item_data.get("sku")
-                product_name = item_data.get("product_name", "")
-                images = item_data.get("images", [])
-                price = item_data.get("price", 0.0)
-                cogs = item_data.get("cogs", 0.0)
-                temp_price += price
-                total_cogs += cogs
-                if sku:
-                    sku_set.add(sku)
-
-                    sku_summary[sku]["sku"] = sku
-                    sku_summary[sku]["product_name"] = product_name
-                    sku_summary[sku]["images"] = images
-                    sku_summary[sku]["unitsSold"] += 1
-                    sku_summary[sku]["grossRevenue"] += price
-                    sku_summary[sku]["totalCogs"] += cogs
-
-        other_price = order_total - temp_price
-
-        for sku in sku_set:
-            gross = sku_summary[sku]["grossRevenue"]
-            cogs = sku_summary[sku]["totalCogs"]
-            net_profit = gross - (other_price + cogs)
-            margin = (net_profit / gross) * 100 if gross > 0 else 0
-            sku_summary[sku]["netProfit"] = round(net_profit, 2)
-            sku_summary[sku]["margin"] = round(margin, 2)
-
-    # Sort and limit based on action
-    sorted_summary = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
-
-    if action == "top":
-        final_summary = sorted_summary[:3]
-    elif action == "least":
-        final_summary = sorted_summary[-3:]
-    else:
-        final_summary = sorted_summary  # all products
-
-    # Create Excel workbook
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Product Performance"
-
-    # Headers
-    headers = ["SKU", "Product Name", "Units Sold", "Gross Revenue", "Total COGS", "Net Profit", "Margin (%)"]
-    ws.append(headers)
-
-    # Rows
-    for data in final_summary:
-        ws.append([
-            data["sku"],
-            data["product_name"],
-            data["unitsSold"],
-            round(data["grossRevenue"], 2),
-            round(data["totalCogs"], 2),
-            round(data["netProfit"], 2),
-            round(data["margin"], 2)
-        ])
-
-    # Auto width
-    for col_num, col in enumerate(ws.columns, start=1):
-        max_length = max(len(str(cell.value)) if cell.value else 0 for cell in col)
-        ws.column_dimensions[get_column_letter(col_num)].width = max_length + 2
-
-    # Response
-    response = HttpResponse(
-        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    )
-    filename = f"Product_Performance_{yesterday.strftime('%Y-%m-%d')}_{action or 'all'}.xlsx"
-    response['Content-Disposition'] = f'attachment; filename={filename}'
-    wb.save(response)
-
-    return response
-
-
-
-def downloadProductPerformanceCSV(request):
-    yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    today = yesterday + timedelta(days=1)
-
-    order_pipeline = [
-        {
-            "$match": {
-                "order_date": {"$gte": yesterday, "$lt": today},
-                "order_status": {"$in": ["Shipped", "Delivered"]}
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "order_items": 1,
-                "order_total": 1,
-                "marketplace_name": 1
-            }
-        }
-    ]
-    orders = list(Order.objects.aggregate(*order_pipeline))
-
-    sku_summary = defaultdict(lambda: {
-        "sku": "",
-        "product_name": "",
-        "images": "",
-        "unitsSold": 0,
-        "grossRevenue": 0.0,
-        "totalCogs": 0.0,
-        "netProfit": 0.0,
-        "margin": 0.0
-    })
-
-    for order in orders:
-        order_total = order.get("order_total", 0.0)
-        item_ids = order.get("order_items", [])
-        temp_price = 0.0
-        total_cogs = 0.0
-        sku_set = set()
-
-        for item_id in item_ids:
-            item_pipeline = [
-                {"$match": {"_id": item_id}},
-                {
-                    "$lookup": {
-                        "from": "product",
-                        "localField": "ProductDetails.product_id",
-                        "foreignField": "_id",
-                        "as": "product_ins"
-                    }
-                },
-                {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                {
-                    "$project": {
-                        "_id": 0,
-                        "price": "$Pricing.ItemPrice.Amount",
-                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                        "sku": "$product_ins.sku",
-                        "product_name": "$product_ins.product_title",
-                        "images": "$product_ins.image_urls"
-                    }
-                }
-            ]
-            item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-            if item_result:
-                item_data = item_result[0]
-                sku = item_data.get("sku")
-                product_name = item_data.get("product_name", "")
-                images = item_data.get("images", [])
-                price = item_data.get("price", 0.0)
-                cogs = item_data.get("cogs", 0.0)
-                temp_price += price
-                total_cogs += cogs
-                if sku:
-                    sku_set.add(sku)
-
-                    sku_summary[sku]["sku"] = sku
-                    sku_summary[sku]["product_name"] = product_name
-                    sku_summary[sku]["images"] = images
-                    sku_summary[sku]["unitsSold"] += 1
-                    sku_summary[sku]["grossRevenue"] += price
-                    sku_summary[sku]["totalCogs"] += cogs
-
-        other_price = order_total - temp_price
-
-        for sku in sku_set:
-            gross = sku_summary[sku]["grossRevenue"]
-            cogs = sku_summary[sku]["totalCogs"]
-            net_profit = gross - (other_price + cogs)
-            margin = (net_profit / gross) * 100 if gross > 0 else 0
-            sku_summary[sku]["netProfit"] = round(net_profit, 2)
-            sku_summary[sku]["margin"] = round(margin, 2)
-
-    # Get action parameter to determine top or least
-    action = request.GET.get('action', '').lower()
-
-    # Sort and pick top 3 or least 3 based on netProfit
-    sorted_summary = sorted(
-        sku_summary.values(),
-        key=lambda x: x["unitsSold"],
-        reverse=(action == "top")
-    )
-    limited_summary = sorted_summary[:3]
-
-    # Create CSV response
-    response = HttpResponse(content_type='text/csv')
-    filename = f"Product_Performance_{yesterday.strftime('%Y-%m-%d')}.csv"
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
-
-    writer = csv.writer(response)
-    # CSV headers
-    writer.writerow([
-        "SKU", "Product Name", "Units Sold", "Gross Revenue",
-        "Total COGS", "Net Profit", "Margin (%)"
-    ])
-
-    # CSV rows
-    for data in limited_summary:
-        writer.writerow([
-            data["sku"],
-            data["product_name"],
-            data["unitsSold"],
-            round(data["grossRevenue"], 2),
-            round(data["totalCogs"], 2),
-            round(data["netProfit"], 2),
-            round(data["margin"], 2)
-        ])
-
-    return response
-
-
-
+import csv
+import io
 @csrf_exempt
 def CityCSVUploadView(request):
     if request.method != 'POST':
@@ -2442,10 +2440,11 @@ def CityCSVUploadView(request):
 
 
 def getCitywiseSales(request):
-    level = request.GET.get("type", "city").lower()  # Accepts city, state, or country
+    level = request.GET.get("type", "city").lower()  
+    action = request.GET.get("action", "all").lower()  
 
     today = datetime.utcnow()
-    one_year_ago = today - timedelta(days=1)
+    one_year_ago = today - timedelta(days=30)
 
     pipeline = [
         {
@@ -2475,14 +2474,14 @@ def getCitywiseSales(request):
 
         city = address.get("city") or address.get("City")
         state = address.get("state") or address.get("StateOrRegion")
-        country = address.get("country") or address.get("CountryCode") or "US"
+        country =  "USA"
 
         if level == "city" and city and state and country:
             key = f"{city}|{state}|{country}"
         elif level == "state" and state and country:
             key = f"{state}|{country}"
         elif level == "country" and country:
-            key = f"{country}"
+            key = "USA"
         else:
             continue
 
@@ -2490,50 +2489,92 @@ def getCitywiseSales(request):
         grouped_data[key]["gross"] += entry.get("order_total", 0.0)
         grouped_data[key]["city"] = city or ""
         grouped_data[key]["state"] = state or ""
-        grouped_data[key]["country"] = country or ""
+        grouped_data[key]["country"] = "USA"
 
-    # Prepare optional geolocation lookup for cities
     geo_lookup = {}
-    if level == "city":
-        all_cities = {data["city"] for data in grouped_data.values() if data["city"]}
-        geo_data = CityDetails.objects.filter(city__in=list(all_cities))
-        geo_lookup = {geo.city: geo for geo in geo_data}
+    state_population = defaultdict(int)
+    country_population = defaultdict(int)
+    if level in ["city", "state", "country"]:
+        # all_cities = {data["city"] for data in grouped_data.values() if data["city"]}
+        # print(all_cities)
+        geo_data = CityDetails.objects.filter()
 
+        for geo in geo_data:
+
+            geo_lookup[geo.city] = geo
+            if geo.population:
+
+                if level in ["state"]:
+                    key = f"{geo.state_id}|USA"
+                    state_population[key] += geo.population
+                if level == "country":
+                    country_population['USA'] += geo.population
     items = []
     for key, data_ in grouped_data.items():
         city = data_["city"]
         geo = geo_lookup.get(city) if level == "city" else None
+
         item = {
             "units": data_["units"],
             "gross": round(data_["gross"], 2),
-            "country": data_["country"]
+            "country": data_["country"],
+            "state_name": ""
+
         }
 
         if level in ["city", "state"]:
             item["state"] = data_["state"]
-            if geo:  # For city level, get lat and lng from geo lookup
+
+        if level == "city":
+            item["city"] = city
+            if geo:
                 item["lat"] = geo.lat
                 item["lon"] = geo.lng
-                item["code"] = geo.code if geo else ""
-                item["fips"] = geo.fips if geo else ""
-                item["population"] = geo.population if geo else None
-            else:  # For state and country level, lat/lng remain None
+                item["code"] = ""
+                item["fips"] = ""
+                item["population"] = geo.population
+                item["state_name"] = geo.state_name
+            else:
                 item["lat"] = None
                 item["lon"] = None
                 item["code"] = ""
                 item["fips"] = ""
-                item["population"] = None
+                item["population"] = 1
+                item["state_name"] = ""
 
-        if level == "city":
-            item["city"] = data_["city"]
-        
+
+        elif level == "state":
+            geo_data = CityDetails.objects.filter(state_id=data_["state"]).first()
+            
+
+            item["lat"] = None
+            item["lon"] = None
+            item["code"] = ""
+            item["fips"] = ""
+            if geo_data:
+                item["state_name"] = geo_data.state_name
+
+            state_key = f"{data_['state']}|USA"
+            item["population"] = state_population.get(state_key, 1)
+
+        elif level == "country":
+            item["lat"] = None
+            item["lon"] = None
+            item["code"] = ""
+            item["fips"] = ""
+            item["population"] = country_population.get('USA', 1)
+        if action != "all":
+            print(item["population"])
+            item['units'] = item['units'] / item["population"] if item["population"] >0 else 1
+            item['gross'] = item['gross'] / item["population"] if item["population"] >0 else 1
         items.append(item)
 
     return JsonResponse({"items": items}, safe=False)
 
 def exportCitywiseSalesExcel(request):
     today = datetime.utcnow()
-    one_year_ago = today - timedelta(days=1)
+    one_year_ago = today - timedelta(days=365)
+    action = request.GET.get("action", "all").lower()  
 
     level = request.GET.get("type", "city").lower()  
 
@@ -2580,7 +2621,27 @@ def exportCitywiseSalesExcel(request):
         grouped_data[key]["city"] = city or ""
         grouped_data[key]["state"] = state or ""
         grouped_data[key]["country"] = country or ""
+    geo_lookup = {}
+    city_population = defaultdict(int)
+    state_population = defaultdict(int)
+    country_population = defaultdict(int)
+    if level in ["city", "state", "country"]:
+        # all_cities = {data["city"] for data in grouped_data.values() if data["city"]}
+        # print(all_cities)
+        geo_data = CityDetails.objects.filter()
 
+        for geo in geo_data:
+
+            geo_lookup[geo.city] = geo
+            if geo.population:
+                if level in ["city"]:
+                    key = f"{city}|{state}|{country}"
+                    city_population[key] += geo.population
+                if level in ["state"]:
+                    key = f"{geo.state_id}|USA"
+                    state_population[key] += geo.population
+                if level == "country":
+                    country_population['USA'] += geo.population
     data_rows = []
     for key, values in grouped_data.items():
         row = [one_year_ago.strftime("%b %d, %Y"), today.strftime("%b %d, %Y")]
@@ -2594,8 +2655,15 @@ def exportCitywiseSalesExcel(request):
         else:  # country
             row.append(values["country"])
             headers = ["Date From", "Date To", "Country", "Gross Revenue", "Units Sold"]
-
-        row.extend([round(values["gross"], 2), values["units"]])
+        if action == 'all':
+            row.extend([round(values["gross"], 2), values["units"]])
+        else:
+            if level == "city":
+                row.extend([(values["gross"]/city_population.get(values["city"], 1)), values["units"]])
+            elif level == "state":
+                row.extend([(values["gross"]/state_population.get(values["state"], 1)), values["units"]])
+            else:
+                row.extend([(values["gross"]/country_population.get("USA", 1)), values["units"]])
         data_rows.append(row)
 
     wb = openpyxl.Workbook()
@@ -2624,10 +2692,12 @@ def exportCitywiseSalesExcel(request):
     return response
 
 
+from io import StringIO
 def downloadCitywiseSalesCSV(request):
-    level = request.GET.get("type", "city").lower()  # city, state, or country
     today = datetime.utcnow()
-    one_year_ago = today - timedelta(days=1)
+    one_year_ago = today - timedelta(days=365)
+    action = request.GET.get("action", "all").lower()  # 'all' or 'percapita'
+    level = request.GET.get("type", "city").lower()  # 'city', 'state', 'country'
 
     pipeline = [
         {
@@ -2635,8 +2705,7 @@ def downloadCitywiseSalesCSV(request):
                 "order_date": {
                     "$gte": one_year_ago,
                     "$lt": today
-                },
-                "order_status": {"$in": ['Shipped', 'Delivered']}
+                }
             }
         },
         {
@@ -2648,22 +2717,21 @@ def downloadCitywiseSalesCSV(request):
             }
         }
     ]
-
-    results = list(Order.objects.aggregate(*pipeline))
+    results = list(Order.objects.aggregate(pipeline))
     grouped_data = defaultdict(lambda: {"units": 0, "gross": 0.0, "city": "", "state": "", "country": ""})
 
     for entry in results:
-        address = entry.get("shipping_address") or entry.get("shipping_information", {}).get("postalAddress", {})
-        city = address.get("city") or address.get("City")
-        state = address.get("state") or address.get("StateOrRegion")
-        country = address.get("country") or address.get("CountryCode") or "US"
+        shipping = entry.get("shipping_address") or entry.get("shipping_information", {}).get("postalAddress", {})
+        city = shipping.get("city")
+        state = shipping.get("state") or shipping.get("StateOrRegion")
+        country = shipping.get("country") or shipping.get("CountryCode")
 
         if level == "city" and city and state and country:
             key = f"{city}|{state}|{country}"
         elif level == "state" and state and country:
             key = f"{state}|{country}"
         elif level == "country" and country:
-            key = country
+            key = f"{country}"
         else:
             continue
 
@@ -2673,36 +2741,511 @@ def downloadCitywiseSalesCSV(request):
         grouped_data[key]["state"] = state or ""
         grouped_data[key]["country"] = country or ""
 
-    # Create CSV file in memory
-    buffer = StringIO()
-    writer = csv.writer(buffer)
+    # Geo population data
+    geo_lookup = {}
+    city_population = {}
+    state_population = defaultdict(int)  # ✅ use defaultdict here
+    country_population = defaultdict(int)
 
-    # Write headers
-    if level == "city":
-        headers = ["Date From", "Date To", "Country", "State", "City", "Gross Revenue", "Units Sold"]
-    elif level == "state":
-        headers = ["Date From", "Date To", "Country", "State", "Gross Revenue", "Units Sold"]
-    else:
-        headers = ["Date From", "Date To", "Country", "Gross Revenue", "Units Sold"]
-    writer.writerow(headers)
+    geo_data = CityDetails.objects.all()
+    for geo in geo_data:
+        geo_lookup[geo.city] = geo
+        if geo.population:
+            city_key = f"{geo.city}|{geo.state_id}|USA"
+            state_key = f"{geo.state_id}|USA"
+            city_population[city_key] = geo.population
+            state_population[state_key] += geo.population
+            country_population["USA"] += geo.population
 
-    # Write rows
-    for data in grouped_data.values():
-        row = [
-            one_year_ago.strftime("%Y-%m-%d"),
-            today.strftime("%Y-%m-%d"),
-            data["country"]
-        ]
+    data_rows = []
+    for key, values in grouped_data.items():
+        row = [one_year_ago.strftime("%b %d, %Y"), today.strftime("%b %d, %Y")]
+
         if level == "city":
-            row.extend([data["state"], data["city"]])
+            row.extend([values["country"], values["state"], values["city"]])
+            headers = ["Date From", "Date To", "Country", "State", "City", "Gross Revenue", "Units Sold"]
+            pop_key = f"{values['city']}|{values['state']}|{values['country']}"
+            population = city_population.get(pop_key, 1)
         elif level == "state":
-            row.append(data["state"])
-        row.extend([round(data["gross"], 2), data["units"]])
+            row.extend([values["country"], values["state"]])
+            headers = ["Date From", "Date To", "Country", "State", "Gross Revenue", "Units Sold"]
+            pop_key = f"{values['state']}|{values['country']}"
+            population = state_population.get(pop_key, 1)
+        else:  # country
+            row.append(values["country"])
+            headers = ["Date From", "Date To", "Country", "Gross Revenue", "Units Sold"]
+            population = country_population.get(values['country'], 1)
+
+        if action == 'all':
+            row.extend([round(values["gross"], 2), values["units"]])
+        else:
+            per_capita = round(values["gross"] / population, 4)
+            u_p = round(values["units"]/ population,4)
+            row.extend([per_capita, u_p])
+            headers = headers[:len(headers) - 2] + ["Per Capita Revenue", "Units Sold"]
+
+        data_rows.append(row)
+
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="{level.capitalize()}wiseSales.csv"'
+
+    writer = csv.writer(response)
+    writer.writerow(headers)
+    for row in data_rows:
         writer.writerow(row)
 
-    # Prepare response
-    response = HttpResponse(buffer.getvalue(), content_type='text/csv')
-    filename = f"{level.capitalize()}wiseSales.csv"
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
-
     return response
+
+
+
+
+def getProfitAndLossDetails(request):
+    current_date = datetime.utcnow()
+    
+    def grossRevenue(start_date, end_date):
+        pipeline = [
+            {
+                "$match": {
+                    "order_date": {"$gte": start_date, "$lte": end_date},
+                    "order_status": {"$in": ['Shipped', 'Delivered']}
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "order_items": 1,
+                    "order_total": 1
+                }
+            }
+        ]
+        return list(Order.objects.aggregate(*pipeline))
+    
+    def calculate_metrics(start_date, end_date):
+        gross_revenue = 0
+        total_cogs = 0
+        refund = 0
+        net_profit = 0
+        margin = 0
+        total_units = 0
+        sku_set = set()
+        product_categories = {}
+        product_completeness = {"complete": 0, "incomplete": 0}
+
+        result = grossRevenue(start_date, end_date)
+        order_total = 0
+        other_price = 0
+        tax_price = 0
+        temp_price = 0
+        if result:
+            for order in result:
+                gross_revenue += order['order_total']
+                order_total = order['order_total']
+                temp_price = 0
+                
+                for item_id in order['order_items']:
+                    item_pipeline = [
+                        { "$match": { "_id": item_id } },
+                        {
+                            "$lookup": {
+                                "from": "product",
+                                "localField": "ProductDetails.product_id",
+                                "foreignField": "_id",
+                                "as": "product_ins"
+                            }
+                        },
+                        { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "price": "$Pricing.ItemPrice.Amount",
+                                "tax_price": "$Pricing.ItemTax.Amount",
+                                "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
+                                "sku": "$product_ins.sku",
+                                "category": "$product_ins.category"
+                            }
+                        }
+                    ]
+                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                    if item_result:
+                        item_data = item_result[0]
+                        temp_price += item_data['price']
+                        tax_price += item_data['tax_price']
+                        total_cogs += item_data['cogs']
+                        total_units += 1
+                        if item_data.get('sku'):
+                            sku_set.add(item_data['sku'])
+                        
+                        # Track product category distribution
+                        category = item_data.get('category', 'Unknown')
+                        if category in product_categories:
+                            product_categories[category] += 1
+                        else:
+                            product_categories[category] = 1
+
+                        # Track product completeness
+                        if item_data['price'] and item_data['cogs'] and item_data['sku']:
+                            product_completeness["complete"] += 1
+                        else:
+                            product_completeness["incomplete"] += 1
+
+            other_price += order_total - temp_price
+            net_profit = gross_revenue - (other_price + total_cogs)
+            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+            
+        return {
+            "grossRevenue": round(gross_revenue, 2),
+            "expenses": round((other_price + total_cogs - tax_price), 2),
+            "netProfit": round(net_profit, 2),
+            "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
+            "unitsSold": total_units,
+            "refunds": refund,  
+            "skuCount": len(sku_set),
+            "sessions": 0,
+            "pageViews": 0,
+            "unitSessionPercentage": 0,
+            "margin": round(margin, 2),
+            "seller":"",
+            "tax_price":tax_price,
+            "total_cogs":total_cogs,
+            "product_cost":order_total,
+            "shipping_cost":0,
+            "productCategories": product_categories,  # Added product distribution data
+            "productCompleteness": product_completeness  # Added product completeness data
+        }
+
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to):
+        current = calculate_metrics(cur_from, cur_to)
+        previous = calculate_metrics(prev_from, prev_to)
+
+        def with_delta(metric):
+            return {
+                "current": current[metric],
+                "previous": previous[metric],
+                "delta": round(current[metric] - previous[metric], 2)
+            }
+
+        return {
+            "dateRanges": {
+                "current": {"from": cur_from.isoformat() + "Z", "to": cur_to.isoformat() + "Z"},
+                "previous": {"from": prev_from.isoformat() + "Z", "to": prev_to.isoformat() + "Z"}
+            },
+            "summary": {
+                "grossRevenue": with_delta("grossRevenue"),
+                "netProfit": with_delta("netProfit"),
+                "expenses": with_delta("expenses"),
+                "unitsSold": with_delta("unitsSold"),
+                "refunds": with_delta("refunds"),
+                "skuCount": with_delta("skuCount"),
+                "sessions": with_delta("sessions"),
+                "pageViews": with_delta("pageViews"),
+                "unitSessionPercentage": with_delta("unitSessionPercentage"),
+                "margin": with_delta("margin"),
+                "roi": with_delta("roi")
+            },
+            "netProfitCalculation": {
+                "current": {
+                    "gross": current["grossRevenue"],
+                    "totalCosts": current["expenses"],
+                    "productRefunds": current["refunds"],
+                    "totalTax": current["tax_price"] if 'tax_price' in current else 0,
+                    "totalTaxWithheld": 0,
+                    "ppcProductCost": 0,
+                    "ppcBrandsCost": 0,
+                    "ppcDisplayCost": 0,
+                    "ppcStCost": 0,
+                    "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
+                    "product_cost": current["product_cost"],
+                    "shipping_cost": current["shipping_cost"],
+                },
+                "previous": {
+                    "gross": previous["grossRevenue"],
+                    "totalCosts": previous["expenses"],
+                    "productRefunds": previous["refunds"],
+                    "totalTax": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                    "totalTaxWithheld": 0,
+                    "ppcProductCost": 0,
+                    "ppcBrandsCost": 0,
+                    "ppcDisplayCost": 0,
+                    "ppcStCost": 0,
+                    "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                    "product_cost": previous["product_cost"],
+                    "shipping_cost": previous["shipping_cost"],
+                }
+            },
+            "charts": {
+                "productDistribution": current["productCategories"],  # Bar chart data
+                "productCompleteness": current["productCompleteness"]  # Pie chart data
+            }
+        }
+
+    current_date = datetime.now()
+    today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    now = current_date
+
+    from_date_str = request.GET.get('from_date')  
+    to_date_str = request.GET.get('to_date')
+    
+    try:
+        from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
+        to_date = datetime.strptime(to_date_str, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        from_date = today_start - timedelta(days=30)
+        to_date = now 
+    
+    custom_duration = to_date - from_date
+    prev_from_date = from_date - custom_duration
+    prev_to_date = to_date - custom_duration
+
+    response_data = {
+        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
+    }
+
+    return JsonResponse(response_data, safe=False)
+
+
+def generate_monthly_intervals(from_date, to_date):
+    intervals = []
+    current_date = from_date.replace(day=1)
+
+    while current_date <= to_date:
+        intervals.append(current_date.strftime('%Y-%m-%d 00:00:00'))
+        
+        # Move to the next month
+        if current_date.month == 12:
+            current_date = current_date.replace(year=current_date.year + 1, month=1)
+        else:
+            current_date = current_date.replace(month=current_date.month + 1)
+    print(intervals)
+    return intervals
+
+# Function to calculate the profit/loss metrics
+def calculate_metrics(start_date, end_date):
+    gross_revenue = 0
+    total_cogs = 0
+    refund = 0
+    net_profit = 0
+    margin = 0
+    total_units = 0
+    sku_set = set()
+    product_categories = {}
+    product_completeness = {"complete": 0, "incomplete": 0}
+
+    result = grossRevenue(start_date, end_date)
+    order_total = 0
+    other_price = 0
+    tax_price = 0
+    temp_price = 0
+    if result:
+        for order in result:
+            gross_revenue += order['order_total']
+            order_total = order['order_total']
+            temp_price = 0
+
+            for item_id in order['order_items']:
+                item_pipeline = [
+                    { "$match": { "_id": item_id } },
+                    {
+                        "$lookup": {
+                            "from": "product",
+                            "localField": "ProductDetails.product_id",
+                            "foreignField": "_id",
+                            "as": "product_ins"
+                        }
+                    },
+                    { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "price": "$Pricing.ItemPrice.Amount",
+                            "tax_price": "$Pricing.ItemTax.Amount",
+                            "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
+                            "sku": "$product_ins.sku",
+                            "category": "$product_ins.category"
+                        }
+                    }
+                ]
+                item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                if item_result:
+                    item_data = item_result[0]
+                    temp_price += item_data['price']
+                    tax_price += item_data['tax_price']
+                    total_cogs += item_data['cogs']
+                    total_units += 1
+                    if item_data.get('sku'):
+                        sku_set.add(item_data['sku'])
+
+                    # Track product category distribution
+                    category = item_data.get('category', 'Unknown')
+                    if category in product_categories:
+                        product_categories[category] += 1
+                    else:
+                        product_categories[category] = 1
+
+                    # Track product completeness
+                    if item_data['price'] and item_data['cogs'] and item_data['sku']:
+                        product_completeness["complete"] += 1
+                    else:
+                        product_completeness["incomplete"] += 1
+
+        other_price += order_total - temp_price
+        net_profit = gross_revenue - (other_price + total_cogs)
+        margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+
+    return {
+        "grossRevenue": round(gross_revenue, 2),
+        "expenses": round((other_price + total_cogs - tax_price), 2),
+        "netProfit": round(net_profit, 2),
+        "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price + total_cogs > 0 else 0,
+        "unitsSold": total_units,
+        "refunds": refund,  
+        "skuCount": len(sku_set),
+        "sessions": 0,
+        "pageViews": 0,
+        "unitSessionPercentage": 0,
+        "margin": round(margin, 2),
+        "seller": "",
+        "tax_price": tax_price,
+        "total_cogs": total_cogs,
+        "product_cost": order_total,
+        "shipping_cost": 0,
+        "productCategories": product_categories,  # Product distribution
+        "productCompleteness": product_completeness  # Product completeness
+    }
+def profit_loss_chart(request):
+    # Get from_date and to_date from query parameters or default to some range
+    from_date_str = request.GET.get('from_date')  
+    to_date_str = request.GET.get('to_date')
+    current_date = datetime.now()
+    today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    now = current_date
+    try:
+        from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
+        to_date = datetime.strptime(to_date_str, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        from_date = today_start - timedelta(days=30)
+        to_date = now 
+
+    # Generate intervals (monthly)
+    intervals = generate_monthly_intervals(from_date, to_date)
+
+    charts = {}
+    
+    for interval in intervals:
+        start_date = datetime.strptime(interval, '%Y-%m-%d 00:00:00')
+        end_date = start_date.replace(day=28) + timedelta(days=4)  # Last day of the month
+        
+        # Call the calculate_metrics function to get the data for this interval
+        data = calculate_metrics(start_date, end_date)
+
+        charts[interval] = {
+            "gross": data["grossRevenue"],
+            "ppcBrandsCost": 0,  # Placeholder (update based on actual data logic)
+            "ppcDisplayCost": 0,  # Placeholder
+            "ppcProductCost": data["total_cogs"],
+            "ppcStCost": 0,  # Placeholder
+            "productRefunds": data["refunds"],
+            "promotionValue": 0,  # Placeholder
+            "reimbursementsAmount": 0,  # Placeholder
+            "totalCosts": data["expenses"],
+            "totalFbaFees": 0,  # Placeholder
+            "totalTax": data["tax_price"],
+            "totalTaxWithheld": 0  # Placeholder
+        }
+
+    # Return the result as a response
+    return JsonResponse({
+        'charts': charts
+    }, safe=False)
+
+
+
+def get_products_with_pagination(request):
+    page = int(request.GET.get("page", 1))
+    page_size = 10
+
+    # Define the pipeline for pagination and data fetching
+    pipeline = [
+        {
+            "$facet": {
+                "total_count": [{"$count": "count"}],
+                "products": [
+                    {"$skip": (page - 1) * page_size},
+                    {"$limit": page_size},
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "id": {"$toString":"$_id"},
+                            "AmazonToken_id": {"$ifNull": ["$AmazonToken_id", "N/A"]},
+                            "asin": {"$ifNull": ["$product_id", "N/A"]},
+                            "sellerSku": {"$ifNull": ["$sku", "N/A"]},
+                            "marketplace": {"$ifNull": ["$marketplace", "N/A"]},
+                            "inventoryStatus": {"$ifNull": ["$inventoryStatus", "N/A"]},
+                            "fulfillmentChannel": {"$ifNull": ["$fulfillmentChannel", "N/A"]},
+                            "price": {"$ifNull": ["$price", "N/A"]},
+                            "priceDraft": {"$ifNull": ["$priceDraft", "N/A"]},
+                            "title": {"$ifNull": ["$product_title", "N/A"]},
+                            "totalRatingsCount": {"$ifNull": ["$totalRatingsCount", "N/A"]},
+                            "reviewRating": {"$ifNull": ["$reviewRating", "N/A"]},
+                            "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
+                            "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
+                            "parentAsin": {"$ifNull": ["$parentAsin", "N/A"]},
+                            "buyBoxWinnerId": {"$ifNull": ["$buyBoxWinnerId", "N/A"]},
+                            "newInsightsCount": {"$ifNull": ["$newInsightsCount", "N/A"]},
+                            "newInsightsGrouped": {"$ifNull": ["$newInsightsGrouped", "N/A"]},
+                            "category": {"$ifNull": ["$category", "N/A"]},
+                            "categoryTitle": {"$ifNull": ["$categoryTitle", "N/A"]},
+                            "amazonLink": {"$ifNull": ["$amazonLink", "N/A"]},
+                            "bsr": {"$ifNull": ["$bsr", "N/A"]},
+                            "subcategoriesBsr": {"$ifNull": ["$subcategoriesBsr", "N/A"]},
+                            "salesForToday": {"$ifNull": ["$salesForToday", 0]},
+                            "unitsSoldForToday": {"$ifNull": ["$unitsSoldForToday", 0]},
+                            "unitsSoldForPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
+                            "refunds": {"$ifNull": ["$refunds", 0]},
+                            "refundsAmount": {"$ifNull": ["$refundsAmount", 0]},
+                            "refundRate": {"$ifNull": ["$refundRate", "0%"]},
+                            "pageViews": {"$ifNull": ["$pageViews", 0]},
+                            "pageViewsPercentage": {"$ifNull": ["$pageViewsPercentage", "0%"]},
+                            "conversionRate": {"$ifNull": ["$conversionRate", "N/A"]},
+                            "grossProfit": {"$ifNull": ["$grossProfit", 0]},
+                            "netProfit": {"$ifNull": ["$netProfit", 0]},
+                            "margin": {"$ifNull": ["$margin", "0%"]},
+                            "totalAmazonFees": {"$ifNull": ["$totalAmazonFees", "N/A"]},
+                            "roi": {"$ifNull": ["$roi", "0%"]},
+                            "cogs": {"$ifNull": ["$cogs", 0]},
+                            "fbaPerOrderFulfillmentFee": {"$ifNull": ["$fbaPerOrderFulfillmentFee", "N/A"]},
+                            "fbaPerUnitFulfillmentFee": {"$ifNull": ["$fbaPerUnitFulfillmentFee", "N/A"]},
+                            "fbaWeightBasedFee": {"$ifNull": ["$fbaWeightBasedFee", "N/A"]},
+                            "variableClosingFee": {"$ifNull": ["$variableClosingFee", "N/A"]},
+                            "commission": {"$ifNull": ["$commission", "N/A"]},
+                            "fixedClosingFee": {"$ifNull": ["$fixedClosingFee", "N/A"]},
+                            "salesTaxCollectionFee": {"$ifNull": ["$salesTaxCollectionFee", "N/A"]},
+                            "shippingHbFee": {"$ifNull": ["$shippingHbFee", "N/A"]},
+                            "isFavorite": {"$ifNull": ["$isFavorite", "N/A"]},
+                            "trafficSessions": {"$ifNull": ["$trafficSessions", "N/A"]},
+                            "trafficSessionPercentage": {"$ifNull": ["$trafficSessionPercentage", "0%"]},
+                            # "deltas": {"$ifNull": ["$deltas", None]},
+                            "competitorsProducts": {"$ifNull": ["$competitorsProducts", 0]},
+                            "tags": {"$ifNull": ["$tags", []]},
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+
+    # Execute the pipeline
+    result = list(Product.objects.aggregate(*pipeline))
+
+    # Extract total count and products
+    total_products = result[0]["total_count"][0]["count"] if result[0]["total_count"] else 0
+    products = result[0]["products"]
+
+    # Prepare response data
+    response_data = {
+        "total_products": total_products,
+        "page": page,
+        "page_size": page_size,
+        "products": products,
+    }
+
+    return JsonResponse(response_data, safe=False)
