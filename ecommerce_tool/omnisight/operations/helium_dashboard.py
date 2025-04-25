@@ -15,37 +15,58 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font
 import io
 from pytz import timezone
+from bson import ObjectId
 
 
 
-def grossRevenue(start_date, end_date):
+def grossRevenue(start_date, end_date, marketplace_id=None):
+    match=dict()
+    match['order_date'] = {"$gte": start_date, "$lte": end_date}
+    match['order_status'] = {"$in": ['Shipped', 'Delivered']}
+    if marketplace_id:
+        match['marketplace_id'] = ObjectId(marketplace_id)
     pipeline = [
             {
-            "$match": {
-                "order_date": {"$gte": start_date, "$lte": end_date},
-                "order_status": {"$in": ['Shipped', 'Delivered']}
-            }
+                "$match": match
             },
             {
-            "$project": {
-                "_id": 0,
-                "order_items": 1,
-                "order_total" :1
-            }
-            }
+                "$lookup": {
+                    "from": "marketplace",
+                    "localField": "marketplace_id",
+                    "foreignField": "_id",
+                    "as": "marketplace_ins"
+                }
+            },
+            {
+                "$unwind": {
+                    "path": "$marketplace_ins",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            {
+                "$project": {
+                    "_id" : 1,
+                    "order_date": 1,
+                    "order_items": 1,
+                    "order_total": 1,
+                    "marketplace_name": "$marketplace_ins.name",
+                    "marketplace_id": 1,
+                    "currency": 1
+                }
+            },
         ]
-
-    result = list(Order.objects.aggregate(*pipeline))
-    return result
+    return list(Order.objects.aggregate(*pipeline))
 
 
-def refundOrder(start_date, end_date):
+def refundOrder(start_date, end_date, marketplace_id=None):
+    match=dict()
+    match['order_date'] = {"$gte": start_date, "$lte": end_date}
+    match['order_status'] = "Refunded"
+    if marketplace_id:
+        match['marketplace_id'] = ObjectId(marketplace_id)
     pipeline = [
             {
-            "$match": {
-                "order_date": {"$gte": start_date, "$lte": end_date},
-                "order_status": 'Refunded'
-            }
+            "$match": match
             },
             {
             "$project": {
@@ -67,6 +88,7 @@ def refundOrder(start_date, end_date):
 
 
 def get_metrics_by_date_range(request):
+    marketplace_id = request.GET.get('marketplace_id',None)
     target_date_str = request.GET.get('target_date')
     # Parse target date and previous day
     target_date = datetime.strptime(target_date_str, "%d/%m/%Y")
@@ -118,8 +140,8 @@ def get_metrics_by_date_range(request):
         total_units = 0
         total_orders = 0
 
-        result = grossRevenue(date_range["start"], date_range["end"])
-        refund_ins = refundOrder(date_range["start"], date_range["end"])
+        result = grossRevenue(date_range["start"], date_range["end"],marketplace_id)
+        refund_ins = refundOrder(date_range["start"], date_range["end"],marketplace_id)
         if refund_ins != []:
             for ins in refund_ins:
                 refund += len(ins['order_items'])
@@ -950,38 +972,6 @@ def getPeriodWiseData(request):
 
 def getPeriodWiseDataXl(request):
     current_date = datetime.today() - timedelta(days=1)
-    def grossRevenue(start_date, end_date):
-        pipeline = [
-                {
-                    "$match": {
-                        "order_date": {"$gte": start_date, "$lte": end_date},
-                        "order_status": {"$in": ['Shipped', 'Delivered']}
-                    }
-                },
-                {
-                    "$lookup": {
-                        "from": "marketplace",
-                        "localField": "marketplace_id",
-                        "foreignField": "_id",
-                        "as": "marketplace_ins"
-                    }
-                },
-                {
-                    "$unwind": {
-                        "path": "$marketplace_ins",
-                        "preserveNullAndEmptyArrays": True
-                    }
-                },
-                {
-                    "$project": {
-                        "order_items": 1,
-                        "order_total": 1,
-                        "marketplace_name": "$marketplace_ins.name"
-                    }
-                },
-            ]
-        return list(Order.objects.aggregate(*pipeline))
-    
     def calculate_metrics(start_date, end_date):
         gross_revenue = 0
         total_cogs = 0
@@ -1126,39 +1116,6 @@ def getPeriodWiseDataXl(request):
 
 def exportPeriodWiseCSV(request):
     current_date = datetime.today() - timedelta(days=1)
-
-
-    def grossRevenue(start_date, end_date):
-        pipeline = [
-                {
-                    "$match": {
-                        "order_date": {"$gte": start_date, "$lte": end_date},
-                        "order_status": {"$in": ['Shipped', 'Delivered']}
-                    }
-                },
-                {
-                    "$lookup": {
-                        "from": "marketplace",
-                        "localField": "marketplace_id",
-                        "foreignField": "_id",
-                        "as": "marketplace_ins"
-                    }
-                },
-                {
-                    "$unwind": {
-                        "path": "$marketplace_ins",
-                        "preserveNullAndEmptyArrays": True
-                    }
-                },
-                {
-                    "$project": {
-                        "order_items": 1,
-                        "order_total": 1,
-                        "marketplace_name": "$marketplace_ins.name"
-                    }
-                },
-            ]
-        return list(Order.objects.aggregate(*pipeline))
     
     def calculate_metrics(start_date, end_date):
         gross_revenue = 0
@@ -1288,24 +1245,6 @@ def exportPeriodWiseCSV(request):
 
 def getPeriodWiseDataCustom(request):
     current_date = datetime.utcnow()
-
-    def grossRevenue(start_date, end_date):
-        pipeline = [
-        {
-            "$match": {
-                "order_date": {"$gte": start_date, "$lte": end_date},
-                "order_status": {"$in": ['Shipped', 'Delivered']}
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "order_items": 1,
-                "order_total": 1
-            }
-        }
-        ]
-        return list(Order.objects.aggregate(*pipeline))
     
     def calculate_metrics(start_date, end_date):
         gross_revenue = 0
@@ -1481,26 +1420,6 @@ def allMarketplaceData(request):
     except:
         to_date = datetime.now()
         from_date = to_date - timedelta(days=30)
-
-    def grossRevenue(start_date, end_date):
-        pipeline = [
-            {
-                "$match": {
-                    "order_date": {"$gte": start_date, "$lte": end_date},
-                    "order_status": {"$in": ['Shipped', 'Delivered']}
-                }
-            },
-            {
-                "$project": {
-                    "_id": 1,
-                    "order_items": 1,
-                    "order_total": 1,
-                    "marketplace_id": 1,
-                    "currency": 1
-                }
-            }
-        ]
-        return list(Order.objects.aggregate(*pipeline))
 
     def grouped_marketplace_metrics(start_date, end_date):
         orders = grossRevenue(start_date, end_date)
@@ -2104,26 +2023,6 @@ def allMarketplaceDataxl(request):
         to_date = datetime.now()
         from_date = to_date - timedelta(days=30)
 
-    def grossRevenue(start_date, end_date):
-        pipeline = [
-            {
-                "$match": {
-                    "order_date": {"$gte": start_date, "$lte": end_date},
-                    "order_status": {"$in": ['Shipped', 'Delivered']}
-                }
-            },
-            {
-                "$project": {
-                    "_id": 1,
-                    "order_items": 1,
-                    "order_total": 1,
-                    "marketplace_id": 1,
-                    "currency": 1
-                }
-            }
-        ]
-        return list(Order.objects.aggregate(*pipeline))
-
     def grouped_marketplace_metrics(start_date, end_date):
         orders = grossRevenue(start_date, end_date)
         grouped_orders = defaultdict(list)
@@ -2260,27 +2159,6 @@ def downloadMarketplaceDataCSV(request):
     except:
         to_date = datetime.now()
         from_date = to_date - timedelta(days=30)
-
-    # This part is similar to your existing grouped_marketplace_metrics
-    def grossRevenue(start_date, end_date):
-        pipeline = [
-            {
-                "$match": {
-                    "order_date": {"$gte": start_date, "$lte": end_date},
-                    "order_status": {"$in": ['Shipped', 'Delivered']}
-                }
-            },
-            {
-                "$project": {
-                    "_id": 1,
-                    "order_items": 1,
-                    "order_total": 1,
-                    "marketplace_id": 1,
-                    "currency": 1
-                }
-            }
-        ]
-        return list(Order.objects.aggregate(*pipeline))
 
     def grouped_marketplace_metrics(start_date, end_date):
         orders = grossRevenue(start_date, end_date)
@@ -2801,24 +2679,6 @@ def downloadCitywiseSalesCSV(request):
 
 def getProfitAndLossDetails(request):
     current_date = datetime.utcnow()
-    
-    def grossRevenue(start_date, end_date):
-        pipeline = [
-            {
-                "$match": {
-                    "order_date": {"$gte": start_date, "$lte": end_date},
-                    "order_status": {"$in": ['Shipped', 'Delivered']}
-                }
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "order_items": 1,
-                    "order_total": 1
-                }
-            }
-        ]
-        return list(Order.objects.aggregate(*pipeline))
     
     def calculate_metrics(start_date, end_date):
         gross_revenue = 0
