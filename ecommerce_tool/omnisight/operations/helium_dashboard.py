@@ -170,6 +170,34 @@ def refundOrder(start_date, end_date, marketplace_id=None):
     return result
 
 
+def AnnualizedRevenueAPIView(target_date):
+    # Calculate date range (last 12 months from today)
+    start_date = target_date - timedelta(days=365)
+    # Initialize variables
+    monthly_revenues = []
+    total_gross_revenue = 0
+    
+    # Calculate revenue for each of the last 12 months
+    for i in range(12):
+        month_start = start_date + timedelta(days=30*i)
+        month_end = month_start + timedelta(days=30)
+        
+        # Get gross revenue for this month (using your existing grossRevenue function)
+        monthly_result = grossRevenue(month_start, month_end)
+        monthly_gross = sum(ins['order_total'] for ins in monthly_result) if monthly_result else 0
+        monthly_revenues.append(monthly_gross)
+        total_gross_revenue += monthly_gross
+    
+    # Calculate average monthly revenue
+    average_monthly = total_gross_revenue / 12 if 12 > 0 else 0
+    
+    # Calculate annualized revenue (average * 12)
+    annualized_revenue = average_monthly * 12
+    
+    # Return just the final value rounded to 2 decimal places
+    annualized_revenue = round(annualized_revenue, 2)
+    return annualized_revenue
+
 def get_metrics_by_date_range(request):
     marketplace_id = request.GET.get('marketplace_id',None)
     target_date_str = request.GET.get('target_date')
@@ -293,6 +321,7 @@ def get_metrics_by_date_range(request):
         "total_orders": round(metrics["targeted"]["total_orders"] - metrics["previous"]["total_orders"],2),
         "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"],2),
     }
+    metrics['targeted']["business_value"] = AnnualizedRevenueAPIView(target_date)
     metrics["difference"] = difference
     return metrics
 
@@ -1770,7 +1799,7 @@ def getProductPerformanceSummary(request):
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
-                        "images": "$product_ins.image_urls"
+                        "images": "$product_ins.image_url"
                     }
                 }
             ]
