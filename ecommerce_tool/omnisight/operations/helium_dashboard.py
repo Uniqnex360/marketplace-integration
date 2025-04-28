@@ -18,12 +18,56 @@ from pytz import timezone
 from bson import ObjectId
 
 
+def get_date_range(preset):
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if preset == "Today":
+        return today, today + timedelta(days=1)
+    elif preset == "Yesterday":
+        return today - timedelta(days=1), today
+    elif preset == "This Week":
+        start = today - timedelta(days=today.weekday())
+        return start, start + timedelta(days=7)
+    elif preset == "Last Week":
+        start = today - timedelta(days=today.weekday() + 7)
+        return start, start + timedelta(days=7)
+    elif preset == "Last 7 days":
+        return today - timedelta(days=6), today + timedelta(days=1)
+    elif preset == "Last 14 days":
+        return today - timedelta(days=13), today + timedelta(days=1)
+    elif preset == "Last 30 days":
+        return today - timedelta(days=29), today + timedelta(days=1)
+    elif preset == "Last 60 days":
+        return today - timedelta(days=59), today + timedelta(days=1)
+    elif preset == "Last 90 days":
+        return today - timedelta(days=89), today + timedelta(days=1)
+    elif preset == "This Month":
+        start = today.replace(day=1)
+        return start, (start + relativedelta(months=1))
+    elif preset == "Last Month":
+        start = (today.replace(day=1) - relativedelta(months=1))
+        return start, today.replace(day=1)
+    elif preset == "This Quarter":
+        quarter = (today.month - 1) // 3
+        start = today.replace(month=quarter * 3 + 1, day=1)
+        return start, start + relativedelta(months=3)
+    elif preset == "Last Quarter":
+        quarter = ((today.month - 1) // 3) - 1
+        start = today.replace(month=quarter * 3 + 1, day=1)
+        return start, start + relativedelta(months=3)
+    elif preset == "This Year":
+        return today.replace(month=1, day=1), today.replace(year=today.year + 1, month=1, day=1)
+    elif preset == "Last Year":
+        return today.replace(year=today.year - 1, month=1, day=1), today.replace(month=1, day=1)
+    return today, today + timedelta(days=1)
+
+
 
 def grossRevenue(start_date, end_date, marketplace_id=None):
     match=dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
     match['order_status'] = {"$in": ['Shipped', 'Delivered']}
-    if marketplace_id:
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all":
         match['marketplace_id'] = ObjectId(marketplace_id)
     pipeline = [
             {
@@ -58,11 +102,50 @@ def grossRevenue(start_date, end_date, marketplace_id=None):
     return list(Order.objects.aggregate(*pipeline))
 
 
+def get_previous_periods(current_start, current_end):
+    # Calculate the duration of the current period
+    period_duration = current_end - current_start
+    
+    # Calculate previous periods
+    previous_period = {
+        'start': (current_start - period_duration).strftime('%b %d, %Y'),
+        'end': (current_end - period_duration - timedelta(days=1)).strftime('%b %d, %Y')
+    }
+    
+    previous_week = {
+        'start': (current_start - timedelta(weeks=1)).strftime('%b %d, %Y'),
+        'end': (current_end - timedelta(weeks=1) - timedelta(days=1)).strftime('%b %d, %Y')
+    }
+    
+    previous_month = {
+        'start': (current_start - relativedelta(months=1)).strftime('%b %d, %Y'),
+        'end': (current_end - relativedelta(months=1) - timedelta(days=1)).strftime('%b %d, %Y')
+    }
+    
+    previous_year = {
+        'start': (current_start - relativedelta(years=1)).strftime('%b %d, %Y'),
+        'end': (current_end - relativedelta(years=1) - timedelta(days=1)).strftime('%b %d, %Y')
+    }
+    
+    response_data = {
+        'previous_period': previous_period,
+        'previous_week': previous_week,
+        'previous_month': previous_month,
+        'previous_year': previous_year,
+        'current_period': {
+            'start': current_start.strftime('%b %d, %Y'),
+            'end': (current_end - timedelta(days=1)).strftime('%b %d, %Y')
+        }
+    }
+    
+    return response_data
+
+
 def refundOrder(start_date, end_date, marketplace_id=None):
     match=dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
     match['order_status'] = "Refunded"
-    if marketplace_id:
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all":
         match['marketplace_id'] = ObjectId(marketplace_id)
     pipeline = [
             {
@@ -139,6 +222,7 @@ def get_metrics_by_date_range(request):
         net_profit = 0
         total_units = 0
         total_orders = 0
+        tax_price = 0
 
         result = grossRevenue(date_range["start"], date_range["end"],marketplace_id)
         refund_ins = refundOrder(date_range["start"], date_range["end"],marketplace_id)
@@ -148,6 +232,7 @@ def get_metrics_by_date_range(request):
         total_orders = len(result)
         if result != []:
             for ins in result:
+                tax_price = 0
                 gross_revenue += ins['order_total']
                 other_price = 0
                 temp_other_price = 0 
@@ -176,15 +261,17 @@ def get_metrics_by_date_range(request):
                             "$project": {
                                 "_id" : 0,
                                 "price": "$Pricing.ItemPrice.Amount",
-                                "cogs": {"$ifNull":["$product_ins.cogs",0.0]}
+                                "cogs": {"$ifNull":["$product_ins.cogs",0.0]},
+                                "tax_price": "$Pricing.ItemTax.Amount",
                             }
                         }
                     ]
                     result = list(OrderItems.objects.aggregate(*pipeline))
+                    tax_price += result[0]['tax_price']
                     temp_other_price += result[0]['price']
                     total_cogs += result[0]['cogs']
                     total_units += 1
-            other_price += ins['order_total'] - temp_other_price
+            other_price += ins['order_total'] - temp_other_price - tax_price
 
             net_profit = gross_revenue - (other_price + total_cogs)
             margin = (net_profit / gross_revenue) * 100
@@ -429,48 +516,6 @@ def LatestOrdersTodayAPIView(request):
     }
     return data
 
-def get_date_range(preset):
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-
-    if preset == "Today":
-        return today, today + timedelta(days=1)
-    elif preset == "Yesterday":
-        return today - timedelta(days=1), today
-    elif preset == "This Week":
-        start = today - timedelta(days=today.weekday())
-        return start, start + timedelta(days=7)
-    elif preset == "Last Week":
-        start = today - timedelta(days=today.weekday() + 7)
-        return start, start + timedelta(days=7)
-    elif preset == "Last 7 days":
-        return today - timedelta(days=6), today + timedelta(days=1)
-    elif preset == "Last 14 days":
-        return today - timedelta(days=13), today + timedelta(days=1)
-    elif preset == "Last 30 days":
-        return today - timedelta(days=29), today + timedelta(days=1)
-    elif preset == "Last 60 days":
-        return today - timedelta(days=59), today + timedelta(days=1)
-    elif preset == "Last 90 days":
-        return today - timedelta(days=89), today + timedelta(days=1)
-    elif preset == "This Month":
-        start = today.replace(day=1)
-        return start, (start + relativedelta(months=1))
-    elif preset == "Last Month":
-        start = (today.replace(day=1) - relativedelta(months=1))
-        return start, today.replace(day=1)
-    elif preset == "This Quarter":
-        quarter = (today.month - 1) // 3
-        start = today.replace(month=quarter * 3 + 1, day=1)
-        return start, start + relativedelta(months=3)
-    elif preset == "Last Quarter":
-        quarter = ((today.month - 1) // 3) - 1
-        start = today.replace(month=quarter * 3 + 1, day=1)
-        return start, start + relativedelta(months=3)
-    elif preset == "This Year":
-        return today.replace(month=1, day=1), today.replace(year=today.year + 1, month=1, day=1)
-    elif preset == "Last Year":
-        return today.replace(year=today.year - 1, month=1, day=1), today.replace(month=1, day=1)
-    return today, today + timedelta(days=1)
 
 
 def get_graph_data(start_date, end_date, preset):
@@ -553,6 +598,7 @@ def get_graph_data(start_date, end_date, preset):
         for order in bucket_orders:
             gross_revenue += order.order_total
             temp_other_price = 0
+            tax_price = 0
             
             for item in order.order_items:
                 # Get product and COGS (same as your total calculation)
@@ -580,7 +626,8 @@ def get_graph_data(start_date, end_date, preset):
                         "$project": {
                             "_id": 0,
                             "price": "$Pricing.ItemPrice.Amount",
-                            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]}
+                            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                            "tax_price": "$Pricing.ItemTax.Amount",
                         }
                     }
                 ]
@@ -589,8 +636,9 @@ def get_graph_data(start_date, end_date, preset):
                     temp_other_price += result[0]['price']
                     total_cogs += result[0]['cogs']
                     total_units += 1
+                    tax_price += result[0]['tax_price']
             
-            other_price += order.order_total - temp_other_price
+            other_price += order.order_total - temp_other_price - tax_price
 
         # Calculate net profit and margin
         net_profit = gross_revenue - (other_price + total_cogs)
@@ -609,9 +657,9 @@ def get_graph_data(start_date, end_date, preset):
 
     return graph_data
 
-def RevenueWidgetAPIView(request):
-    preset = request.GET.get("preset", "Today")
-    start_date, end_date = get_date_range(preset)
+
+def totalRevenueCalculation(start_date, end_date):
+    total = dict()
     gross_revenue = 0
     total_cogs = 0
     refund = 0
@@ -629,6 +677,7 @@ def RevenueWidgetAPIView(request):
     total_orders = len(result)
     if result != []:
         for ins in result:
+            tax_price = 0
             gross_revenue += ins['order_total']
             other_price = 0
             temp_other_price = 0 
@@ -657,15 +706,17 @@ def RevenueWidgetAPIView(request):
                         "$project": {
                             "_id" : 0,
                             "price": "$Pricing.ItemPrice.Amount",
-                            "cogs": {"$ifNull":["$product_ins.cogs",0.0]}
+                            "cogs": {"$ifNull":["$product_ins.cogs",0.0]},
+                            "tax_price": "$Pricing.ItemTax.Amount",
                         }
                     }
                 ]
                 result = list(OrderItems.objects.aggregate(*pipeline))
+                tax_price += result[0]['tax_price']
                 temp_other_price += result[0]['price']
                 total_cogs += result[0]['cogs']
                 total_units += 1
-        other_price += ins['order_total'] - temp_other_price
+        other_price += ins['order_total'] - temp_other_price - tax_price
 
         net_profit = gross_revenue - (other_price + total_cogs)
 
@@ -679,12 +730,46 @@ def RevenueWidgetAPIView(request):
         "refund_amount": round(refund, 2),
         "refund_quantity": refund_quantity_ins
     }
+    return total
+
+
+def RevenueWidgetAPIView(request):
+    preset = request.GET.get("preset", "Today")
+    compare_startdate = request.GET.get("compare_startdate")
+    compare_enddate = request.GET.get("compare_enddate")
+
+    start_date, end_date = get_date_range(preset)
+    comapre_past = get_previous_periods(start_date, end_date)
+    total = totalRevenueCalculation(start_date, end_date)
     graph_data = get_graph_data(start_date, end_date, preset)
+    
     data = dict()
     data = {
         "total": total,
-        "graph": graph_data
+        "graph": graph_data,
+        "comapre_past" : comapre_past
     }
+    if compare_startdate != None and compare_startdate != "":
+
+        compare_total = totalRevenueCalculation(compare_startdate, compare_enddate)
+        initial = "Today" if compare_startdate == compare_enddate else None
+
+
+        compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d")
+        compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d")
+
+        
+        difference = {
+        "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
+        "total_cogs": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
+        "refund": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0, 2),
+        "margin": round(((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0, 2),
+        "net_profit": round(((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0, 2),
+        "total_orders": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0, 2),
+        "total_units": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
+        }
+        data['compare_total'] = difference
+        data['compare_graph'] = get_graph_data(compare_startdate, compare_enddate, initial)
     return data
 
 
@@ -1412,15 +1497,8 @@ def getPeriodWiseDataCustom(request):
 
 
 def allMarketplaceData(request):
-    from_str = request.GET.get("from_date")
-    to_str = request.GET.get("to_date")
-    try:
-        from_date = datetime.strptime(from_str, "%Y-%m-%d")
-        to_date = datetime.strptime(to_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
-    except:
-        to_date = datetime.now()
-        from_date = to_date - timedelta(days=30)
-
+    preset = request.GET.get("preset")
+    from_date,to_date = get_date_range(preset)
     def grouped_marketplace_metrics(start_date, end_date):
         orders = grossRevenue(start_date, end_date)
         grouped_orders = defaultdict(list)
@@ -3109,3 +3187,633 @@ def get_products_with_pagination(request):
     }
 
     return JsonResponse(response_data, safe=False)
+
+
+
+def getProfitAndLossDetails(request):
+    current_date = datetime.utcnow()
+    
+    def grossRevenue(start_date, end_date):
+        pipeline = [
+            {
+                "$match": {
+                    "order_date": {"$gte": start_date, "$lte": end_date},
+                    "order_status": {"$in": ['Shipped', 'Delivered']}
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "order_items": 1,
+                    "order_total": 1
+                }
+            }
+        ]
+        return list(Order.objects.aggregate(*pipeline))
+    
+    def calculate_metrics(start_date, end_date):
+        gross_revenue = 0
+        total_cogs = 0
+        refund = 0
+        net_profit = 0
+        margin = 0
+        total_units = 0
+        sku_set = set()
+        product_categories = {}
+        product_completeness = {"complete": 0, "incomplete": 0}
+
+        result = grossRevenue(start_date, end_date)
+        order_total = 0
+        other_price = 0
+        tax_price = 0
+        temp_price = 0
+        if result:
+            for order in result:
+                gross_revenue += order['order_total']
+                order_total = order['order_total']
+                temp_price = 0
+                
+                for item_id in order['order_items']:
+                    item_pipeline = [
+                        { "$match": { "_id": item_id } },
+                        {
+                            "$lookup": {
+                                "from": "product",
+                                "localField": "ProductDetails.product_id",
+                                "foreignField": "_id",
+                                "as": "product_ins"
+                            }
+                        },
+                        { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "price": "$Pricing.ItemPrice.Amount",
+                                "tax_price": "$Pricing.ItemTax.Amount",
+                                "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
+                                "sku": "$product_ins.sku",
+                                "category": "$product_ins.category"
+                            }
+                        }
+                    ]
+                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                    if item_result:
+                        item_data = item_result[0]
+                        temp_price += item_data['price']
+                        tax_price += item_data['tax_price']
+                        total_cogs += item_data['cogs']
+                        total_units += 1
+                        if item_data.get('sku'):
+                            sku_set.add(item_data['sku'])
+                        
+                        # Track product category distribution
+                        category = item_data.get('category', 'Unknown')
+                        if category in product_categories:
+                            product_categories[category] += 1
+                        else:
+                            product_categories[category] = 1
+
+                        # Track product completeness
+                        if item_data['price'] and item_data['cogs'] and item_data['sku']:
+                            product_completeness["complete"] += 1
+                        else:
+                            product_completeness["incomplete"] += 1
+
+            other_price += order_total - temp_price
+            net_profit = gross_revenue - (other_price + total_cogs)
+            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+            
+        return {
+            "grossRevenue": round(gross_revenue, 2),
+            "expenses": round((other_price + total_cogs - tax_price), 2),
+            "netProfit": round(net_profit, 2),
+            "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
+            "unitsSold": total_units,
+            "refunds": refund,  
+            "skuCount": len(sku_set),
+            "sessions": 0,
+            "pageViews": 0,
+            "unitSessionPercentage": 0,
+            "margin": round(margin, 2),
+            "seller":"",
+            "tax_price":tax_price,
+            "total_cogs":total_cogs,
+            "product_cost":order_total,
+            "shipping_cost":0,
+            "productCategories": product_categories,  # Added product distribution data
+            "productCompleteness": product_completeness  # Added product completeness data
+        }
+
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to):
+        current = calculate_metrics(cur_from, cur_to)
+        previous = calculate_metrics(prev_from, prev_to)
+
+        def with_delta(metric):
+            return {
+                "current": current[metric],
+                "previous": previous[metric],
+                "delta": round(current[metric] - previous[metric], 2)
+            }
+
+        return {
+            "dateRanges": {
+                "current": {"from": cur_from.isoformat() + "Z", "to": cur_to.isoformat() + "Z"},
+                "previous": {"from": prev_from.isoformat() + "Z", "to": prev_to.isoformat() + "Z"}
+            },
+            "summary": {
+                "grossRevenue": with_delta("grossRevenue"),
+                "netProfit": with_delta("netProfit"),
+                "expenses": with_delta("expenses"),
+                "unitsSold": with_delta("unitsSold"),
+                "refunds": with_delta("refunds"),
+                "skuCount": with_delta("skuCount"),
+                "sessions": with_delta("sessions"),
+                "pageViews": with_delta("pageViews"),
+                "unitSessionPercentage": with_delta("unitSessionPercentage"),
+                "margin": with_delta("margin"),
+                "roi": with_delta("roi")
+            },
+            "netProfitCalculation": {
+                "current": {
+                    "gross": current["grossRevenue"],
+                    "totalCosts": current["expenses"],
+                    "productRefunds": current["refunds"],
+                    "totalTax": current["tax_price"] if 'tax_price' in current else 0,
+                    "totalTaxWithheld": 0,
+                    "ppcProductCost": 0,
+                    "ppcBrandsCost": 0,
+                    "ppcDisplayCost": 0,
+                    "ppcStCost": 0,
+                    "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
+                    "product_cost": current["product_cost"],
+                    "shipping_cost": current["shipping_cost"],
+                },
+                "previous": {
+                    "gross": previous["grossRevenue"],
+                    "totalCosts": previous["expenses"],
+                    "productRefunds": previous["refunds"],
+                    "totalTax": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                    "totalTaxWithheld": 0,
+                    "ppcProductCost": 0,
+                    "ppcBrandsCost": 0,
+                    "ppcDisplayCost": 0,
+                    "ppcStCost": 0,
+                    "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                    "product_cost": previous["product_cost"],
+                    "shipping_cost": previous["shipping_cost"],
+                }
+            },
+            "charts": {
+                "productDistribution": current["productCategories"],  # Bar chart data
+                "productCompleteness": current["productCompleteness"]  # Pie chart data
+            }
+        }
+
+    current_date = datetime.now()
+    today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    now = current_date
+
+    from_date_str = request.GET.get('from_date')  
+    to_date_str = request.GET.get('to_date')
+    
+    try:
+        from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
+        to_date = datetime.strptime(to_date_str, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        from_date = today_start - timedelta(days=30)
+        to_date = now 
+    
+    custom_duration = to_date - from_date
+    prev_from_date = from_date - custom_duration
+    prev_to_date = to_date - custom_duration
+
+    response_data = {
+        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
+    }
+
+    return JsonResponse(response_data, safe=False)
+
+
+
+from calendar import monthrange
+def profit_loss_chart(request):
+    def get_month_range(year, month):
+        start_date = datetime(year, month, 1)
+        last_day = monthrange(year, month)[1]
+        end_date = datetime(year, month, last_day, 23, 59, 59)
+        return start_date, end_date
+
+    def gross_revenue(start_date, end_date):
+        pipeline = [
+            {
+                "$match": {
+                    "order_date": {"$gte": start_date, "$lte": end_date},
+                    "order_status": {"$in": ['Shipped', 'Delivered']}
+                }
+            },
+            {
+                "$project": {
+                    "order_items": 1,
+                    "order_total": 1
+                }
+            }
+        ]
+        return list(Order.objects.aggregate(*pipeline))
+
+    def calculate_metrics(start_date, end_date):
+        gross_revenue_amt = 0
+        total_cogs = 0
+        refund = 0
+        net_profit = 0
+        margin = 0
+        total_units = 0
+        sku_set = set()
+        product_categories = {}
+        product_completeness = {"complete": 0, "incomplete": 0}
+        order_total = 0
+        other_price = 0
+        tax_price = 0
+        temp_price = 0
+
+        result = gross_revenue(start_date, end_date)
+        for order in result:
+            gross_revenue_amt += order.get("order_total", 0)
+            order_total = order.get("order_total", 0)
+            temp_price = 0
+
+            for item_id in order.get("order_items", []):
+                item_pipeline = [
+                    {"$match": {"_id": item_id}},
+                    {
+                        "$lookup": {
+                            "from": "product",
+                            "localField": "ProductDetails.product_id",
+                            "foreignField": "_id",
+                            "as": "product_ins"
+                        }
+                    },
+                    {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                    {
+                        "$project": {
+                            "price": "$Pricing.ItemPrice.Amount",
+                            "tax_price": "$Pricing.ItemTax.Amount",
+                            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                            "sku": "$product_ins.sku",
+                            "category": "$product_ins.category"
+                        }
+                    }
+                ]
+                item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                if item_result:
+                    item = item_result[0]
+                    temp_price += item.get("price", 0)
+                    tax_price += item.get("tax_price", 0)
+                    total_cogs += item.get("cogs", 0)
+                    total_units += 1
+                    sku = item.get("sku")
+                    if sku:
+                        sku_set.add(sku)
+                    category = item.get("category", "Unknown")
+                    product_categories[category] = product_categories.get(category, 0) + 1
+                    if item.get("price") and item.get("cogs") and sku:
+                        product_completeness["complete"] += 1
+                    else:
+                        product_completeness["incomplete"] += 1
+
+            other_price += order_total - temp_price
+
+        net_profit = gross_revenue_amt - (other_price + total_cogs)
+        margin = (net_profit / gross_revenue_amt * 100) if gross_revenue_amt else 0
+
+        return {
+            "grossRevenue": round(gross_revenue_amt, 2),
+            "expenses": round((other_price + total_cogs - tax_price), 2),
+            "netProfit": round(net_profit, 2),
+            "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
+            "unitsSold": total_units,
+            "refunds": refund,
+            "skuCount": len(sku_set),
+            "margin": round(margin, 2),
+            "tax_price": tax_price,
+            "total_cogs": total_cogs,
+            "product_cost": order_total,
+            "productCategories": product_categories,
+            "productCompleteness": product_completeness
+        }
+
+    def generate_month_keys(start_year, start_month, end_year, end_month):
+        months = []
+        current = datetime(start_year, start_month, 1)
+        end = datetime(end_year, end_month, 1)
+        while current <= end:
+            months.append(current.strftime("%Y-%m-%d 00:00:00"))
+            current += timedelta(days=32)
+            current = current.replace(day=1)
+        return months
+
+    # Init
+    metrics = ["grossRevenue", "estimatedPayout", "expenses", "netProfit", "units", "ppcSales"]
+    values = {metric: {} for metric in metrics}
+    preset = request.GET.get('preset')
+    from_date, to_date = get_date_range(preset)
+
+    # Preset types
+    hourly_presets = ["Today", "Yesterday"]
+    daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", "Last 60 days", "Last 90 days"]
+
+    # Key generation
+    if preset in hourly_presets:
+        interval_keys = [(from_date + timedelta(hours=i)).strftime("%Y-%m-%d %H:00:00") 
+                         for i in range(0, int((to_date - from_date).total_seconds() // 3600) + 1)]
+        interval_type = "hour"
+    elif preset in daily_presets:
+        interval_keys = [(from_date + timedelta(days=i)).strftime("%Y-%m-%d 00:00:00") 
+                         for i in range((to_date - from_date).days + 1)]
+        interval_type = "day"
+    else:
+        interval_keys = generate_month_keys(
+            from_date.year, from_date.month,
+            to_date.year, to_date.month
+        )
+        interval_type = "month"
+
+    # Main loop
+    for key in interval_keys:
+        if interval_type == "hour":
+            start = datetime.strptime(key, "%Y-%m-%d %H:00:00")
+            end = start + timedelta(hours=1) - timedelta(seconds=1)
+        elif interval_type == "day":
+            start = datetime.strptime(key, "%Y-%m-%d 00:00:00")
+            end = start + timedelta(days=1) - timedelta(seconds=1)
+        else:
+            year, month = int(key[:4]), int(key[5:7])
+            start, end = get_month_range(year, month)
+
+        data = calculate_metrics(start, end)
+
+        values["grossRevenue"][key] = data["grossRevenue"]
+        values["expenses"][key] = data["expenses"]
+        values["netProfit"][key] = data["netProfit"]
+        values["units"][key] = data["unitsSold"]
+
+    # Fill default 0s
+    for metric in metrics:
+        for key in interval_keys:
+            values[metric].setdefault(key, 0)
+
+    # Final response
+    graph = [{"metric": metric, "values": values[metric]} for metric in metrics]
+    return JsonResponse({"graph": graph}, safe=False)
+
+
+
+def profitLossExportXl(request):
+    def get_month_range(year, month):
+        start_date = datetime(year, month, 1)
+        last_day = monthrange(year, month)[1]
+        end_date = datetime(year, month, last_day, 23, 59, 59)
+        return start_date, end_date
+
+    def gross_revenue(start_date, end_date):
+        pipeline = [
+            {
+                "$match": {
+                    "order_date": {"$gte": start_date, "$lte": end_date},
+                    "order_status": {"$in": ['Shipped', 'Delivered']}
+                }
+            },
+            {
+                "$project": {
+                    "order_items": 1,
+                    "order_total": 1
+                }
+            }
+        ]
+        return list(Order.objects.aggregate(*pipeline))
+
+    def calculate_metrics(start_date, end_date):
+        gross_revenue_amt = 0
+        total_cogs = 0
+        refund = 0
+        net_profit = 0
+        margin = 0
+        total_units = 0
+        sku_set = set()
+        order_total = 0
+        other_price = 0
+        tax_price = 0
+        temp_price = 0
+
+        result = gross_revenue(start_date, end_date)
+        for order in result:
+            gross_revenue_amt += order.get("order_total", 0)
+            order_total = order.get("order_total", 0)
+            temp_price = 0
+
+            for item_id in order.get("order_items", []):
+                item_pipeline = [
+                    {"$match": {"_id": item_id}},
+                    {
+                        "$lookup": {
+                            "from": "product",
+                            "localField": "ProductDetails.product_id",
+                            "foreignField": "_id",
+                            "as": "product_ins"
+                        }
+                    },
+                    {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                    {
+                        "$project": {
+                            "price": "$Pricing.ItemPrice.Amount",
+                            "tax_price": "$Pricing.ItemTax.Amount",
+                            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                            "sku": "$product_ins.sku"
+                        }
+                    }
+                ]
+                item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                if item_result:
+                    item = item_result[0]
+                    temp_price += item.get("price", 0)
+                    tax_price += item.get("tax_price", 0)
+                    total_cogs += item.get("cogs", 0)
+                    total_units += 1
+                    sku = item.get("sku")
+                    if sku:
+                        sku_set.add(sku)
+
+            other_price += order_total - temp_price
+
+        net_profit = gross_revenue_amt - (other_price + total_cogs)
+        margin = (net_profit / gross_revenue_amt * 100) if gross_revenue_amt else 0
+
+        return {
+            "Gross Revenue": round(gross_revenue_amt, 2),
+            "Expenses": round((other_price + total_cogs - tax_price), 2),
+            "Net Profit": round(net_profit, 2),
+            "ROI (%)": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
+            "Units Sold": total_units,
+            "SKU Count": len(sku_set),
+            "Tax Collected": round(tax_price, 2),
+            "Total COGS": round(total_cogs, 2),
+            "Profit Margin (%)": round(margin, 2)
+        }
+
+    def generate_month_keys(start_year, start_month, end_year, end_month):
+        months = []
+        current = datetime(start_year, start_month, 1)
+        end = datetime(end_year, end_month, 1)
+        while current <= end:
+            months.append(current.strftime("%Y-%m-%d"))
+            current += timedelta(days=32)
+            current = current.replace(day=1)
+        return months
+
+    # Date setup
+    preset = request.GET.get('preset', 'Last 30 days')
+    from_date, to_date = get_date_range(preset)
+
+    # Determine interval
+    interval_keys = []
+    interval_type = ""
+
+    if preset in ["Today", "Yesterday"]:
+        interval_keys = [(from_date + timedelta(hours=i)).strftime("%Y-%m-%d %H:00:00")
+                         for i in range(int((to_date - from_date).total_seconds() // 3600) + 1)]
+        interval_type = "hour"
+    elif preset in ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", "Last 60 days", "Last 90 days"]:
+        interval_keys = [(from_date + timedelta(days=i)).strftime("%Y-%m-%d")
+                         for i in range((to_date - from_date).days + 1)]
+        interval_type = "day"
+    else:
+        interval_keys = generate_month_keys(from_date.year, from_date.month, to_date.year, to_date.month)
+        interval_type = "month"
+
+    # Create Excel workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Profit Loss Report"
+
+    headers = ["Date", "Gross Revenue", "Expenses", "Net Profit", "ROI (%)", "Units Sold", "SKU Count", "Tax Collected", "Total COGS", "Profit Margin (%)"]
+    ws.append(headers)
+
+    for key in interval_keys:
+        if interval_type == "hour":
+            start = datetime.strptime(key, "%Y-%m-%d %H:00:00")
+            end = start + timedelta(hours=1) - timedelta(seconds=1)
+        elif interval_type == "day":
+            start = datetime.strptime(key, "%Y-%m-%d")
+            end = start + timedelta(days=1) - timedelta(seconds=1)
+        else:
+            year, month = int(key[:4]), int(key[5:7])
+            start, end = get_month_range(year, month)
+
+        row_data = calculate_metrics(start, end)
+        ws.append([key] + list(row_data.values()))
+
+    # Save to BytesIO stream
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    # Build response
+    response = HttpResponse(output.read(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = 'attachment; filename=profit_loss_report.xlsx'
+    return response
+
+
+
+def profitLossChartCsv(request):
+    def get_month_range(year, month):
+        from calendar import monthrange
+        start_date = datetime(year, month, 1)
+        last_day = monthrange(year, month)[1]
+        end_date = datetime(year, month, last_day, 23, 59, 59)
+        return start_date, end_date
+
+    def generate_month_keys(start_year, start_month, end_year, end_month):
+        months = []
+        current = datetime(start_year, start_month, 1)
+        end = datetime(end_year, end_month, 1)
+        while current <= end:
+            months.append(current.strftime("%Y-%m-%d 00:00:00"))
+            current += timedelta(days=32)
+            current = current.replace(day=1)
+        return months
+
+    def get_date_range(preset):
+        today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+        if preset == "Today":
+            return today, today + timedelta(days=1) - timedelta(seconds=1)
+        elif preset == "Yesterday":
+            yesterday = today - timedelta(days=1)
+            return yesterday, today - timedelta(seconds=1)
+        elif preset == "This Week":
+            start = today - timedelta(days=today.weekday())
+            return start, today + timedelta(days=6 - today.weekday(), hours=23, minutes=59, seconds=59)
+        elif preset == "Last 7 days":
+            return today - timedelta(days=6), today + timedelta(hours=23, minutes=59, seconds=59)
+        elif preset == "Last 14 days":
+            return today - timedelta(days=13), today + timedelta(hours=23, minutes=59, seconds=59)
+        elif preset == "Last 30 days":
+            return today - timedelta(days=29), today + timedelta(hours=23, minutes=59, seconds=59)
+        elif preset == "Last 60 days":
+            return today - timedelta(days=59), today + timedelta(hours=23, minutes=59, seconds=59)
+        elif preset == "Last 90 days":
+            return today - timedelta(days=89), today + timedelta(hours=23, minutes=59, seconds=59)
+        return today, today
+
+    def dummy_calculate_metrics(start, end):
+        return {
+            "grossRevenue": 1000,
+            "expenses": 300,
+            "netProfit": 700,
+            "unitsSold": 20,
+        }
+
+    preset = request.GET.get('preset', 'Last 7 days')
+    from_date, to_date = get_date_range(preset)
+
+    hourly_presets = ["Today", "Yesterday"]
+    daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", "Last 60 days", "Last 90 days"]
+
+    if preset in hourly_presets:
+        interval_keys = [(from_date + timedelta(hours=i)).strftime("%Y-%m-%d %H:00:00")
+                         for i in range(0, int((to_date - from_date).total_seconds() // 3600) + 1)]
+        interval_type = "hour"
+    elif preset in daily_presets:
+        interval_keys = [(from_date + timedelta(days=i)).strftime("%Y-%m-%d 00:00:00")
+                         for i in range((to_date - from_date).days + 1)]
+        interval_type = "day"
+    else:
+        interval_keys = generate_month_keys(from_date.year, from_date.month, to_date.year, to_date.month)
+        interval_type = "month"
+
+    # Prepare CSV
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="profit_loss_{preset.replace(" ", "_").lower()}.csv"'
+
+    writer = csv.writer(response)
+    writer.writerow(["Date", "Gross Revenue", "Expenses", "Net Profit", "Units Sold"])
+
+    for key in interval_keys:
+        if interval_type == "hour":
+            start = datetime.strptime(key, "%Y-%m-%d %H:00:00")
+            end = start + timedelta(hours=1) - timedelta(seconds=1)
+        elif interval_type == "day":
+            start = datetime.strptime(key, "%Y-%m-%d 00:00:00")
+            end = start + timedelta(days=1) - timedelta(seconds=1)
+        else:
+            year, month = int(key[:4]), int(key[5:7])
+            start, end = get_month_range(year, month)
+
+        data = dummy_calculate_metrics(start, end)
+        writer.writerow([
+            key,
+            round(data["grossRevenue"], 2),
+            round(data["expenses"], 2),
+            round(data["netProfit"], 2),
+            data["unitsSold"]
+        ])
+
+    return response
