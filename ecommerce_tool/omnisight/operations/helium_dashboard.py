@@ -1758,13 +1758,14 @@ def allMarketplaceData(request):
 
 
 def getProductPerformanceSummary(request):
-    yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    today = yesterday + timedelta(days=1)
+    # yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    # today = yesterday + timedelta(days=1)
+    from_date, to_date = get_date_range('Yesterday')
 
     order_pipeline = [
         {
             "$match": {
-                "order_date": {"$gte": yesterday, "$lt": today},
+                "order_date": {"$gte": from_date, "$lt": to_date},
                 "order_status": {"$in": ["Shipped", "Delivered"]}
             }
         },
@@ -1864,13 +1865,12 @@ def getProductPerformanceSummary(request):
 def downloadProductPerformanceSummary(request):
     action = request.GET.get("action", "").lower()
 
-    yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    today = yesterday + timedelta(days=1)
+    from_date, to_date = get_date_range('Yesterday')
 
     order_pipeline = [
         {
             "$match": {
-                "order_date": {"$gte": yesterday, "$lt": today},
+                "order_date": {"$gte": from_date, "$lt": to_date},
                 "order_status": {"$in": ["Shipped", "Delivered"]}
             }
         },
@@ -1996,7 +1996,7 @@ def downloadProductPerformanceSummary(request):
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
-    filename = f"Product_Performance_{yesterday.strftime('%Y-%m-%d')}_{action or 'all'}.xlsx"
+    filename = f"Product_Performance_{from_date.strftime('%Y-%m-%d')}_{action or 'all'}.xlsx"
     response['Content-Disposition'] = f'attachment; filename={filename}'
     wb.save(response)
 
@@ -2005,13 +2005,12 @@ def downloadProductPerformanceSummary(request):
 
 
 def downloadProductPerformanceCSV(request):
-    yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    today = yesterday + timedelta(days=1)
+    from_date, to_date = get_date_range('Yesterday')
 
     order_pipeline = [
         {
             "$match": {
-                "order_date": {"$gte": yesterday, "$lt": today},
+                "order_date": {"$gte": from_date, "$lt": to_date},
                 "order_status": {"$in": ["Shipped", "Delivered"]}
             }
         },
@@ -2110,7 +2109,7 @@ def downloadProductPerformanceCSV(request):
 
     # Create CSV response
     response = HttpResponse(content_type='text/csv')
-    filename = f"Product_Performance_{yesterday.strftime('%Y-%m-%d')}.csv"
+    filename = f"Product_Performance_{from_date.strftime('%Y-%m-%d')}.csv"
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
 
     writer = csv.writer(response)
