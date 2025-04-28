@@ -1145,7 +1145,7 @@ def getPeriodWiseDataXl(request):
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs - tax_price), 2),
+            "expenses": round((other_price + total_cogs) - tax_price, 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
@@ -1291,7 +1291,7 @@ def exportPeriodWiseCSV(request):
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs - tax_price), 2),
+            "expenses": round((other_price + total_cogs) - tax_price, 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
@@ -1437,7 +1437,7 @@ def getPeriodWiseDataCustom(request):
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs - tax_price), 2),
+            "expenses": round((other_price + total_cogs) - tax_price, 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
@@ -1699,7 +1699,7 @@ def allMarketplaceData(request):
 
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs - tax_price), 2),
+            "expenses": round((other_price + total_cogs) - tax_price, 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price + total_cogs > 0 else 0,
             "unitsSold": total_units,
@@ -2887,7 +2887,7 @@ def calculate_metrics(start_date, end_date):
 
     return {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round((other_price + total_cogs - tax_price), 2),
+        "expenses": round((other_price + total_cogs) - tax_price, 2),
         "netProfit": round(net_profit, 2),
         "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price + total_cogs > 0 else 0,
         "unitsSold": total_units,
@@ -3095,7 +3095,7 @@ def getProfitAndLossDetails(request):
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs - tax_price), 2),
+            "expenses": round((other_price + total_cogs) - tax_price, 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
@@ -3296,7 +3296,7 @@ def profit_loss_chart(request):
 
         return {
             "grossRevenue": round(gross_revenue_amt, 2),
-            "expenses": round((other_price + total_cogs - tax_price), 2),
+            "expenses": round((other_price + total_cogs) - tax_price, 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
             "unitsSold": total_units,
@@ -3458,7 +3458,7 @@ def profitLossExportXl(request):
 
         return {
             "Gross Revenue": round(gross_revenue_amt, 2),
-            "Expenses": round((other_price + total_cogs - tax_price), 2),
+            "Expenses": round((other_price + total_cogs) - tax_price, 2),
             "Net Profit": round(net_profit, 2),
             "ROI (%)": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
             "Units Sold": total_units,
