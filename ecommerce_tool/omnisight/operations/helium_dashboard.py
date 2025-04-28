@@ -16,6 +16,7 @@ from openpyxl.styles import Font
 import io
 from pytz import timezone
 from bson import ObjectId
+from calendar import monthrange
 
 
 def get_date_range(preset):
@@ -1359,6 +1360,24 @@ def exportPeriodWiseCSV(request):
 
 def getPeriodWiseDataCustom(request):
     current_date = datetime.utcnow()
+ 
+    def grossRevenue(start_date, end_date):
+        pipeline = [
+        {
+            "$match": {
+                "order_date": {"$gte": start_date, "$lte": end_date},
+                "order_status": {"$in": ['Shipped', 'Delivered']}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "order_items": 1,
+                "order_total": 1
+            }
+        }
+        ]
+        return list(Order.objects.aggregate(*pipeline))
     
     def calculate_metrics(start_date, end_date):
         gross_revenue = 0
@@ -1368,7 +1387,7 @@ def getPeriodWiseDataCustom(request):
         margin = 0
         total_units = 0
         sku_set = set()
-
+ 
         result = grossRevenue(start_date, end_date)
         order_total = 0
         other_price = 0
@@ -1435,7 +1454,7 @@ def getPeriodWiseDataCustom(request):
             "shipping_cost":0,
             'orders':len(result)
         }
-
+ 
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to):
         current = calculate_metrics(cur_from, cur_to)
         previous = calculate_metrics(prev_from, prev_to)
@@ -1445,7 +1464,6 @@ def getPeriodWiseDataCustom(request):
                 "previous": previous[metric],
                 "delta": round(current[metric] - previous[metric], 2)
             }
-
         return {
             "dateRanges": {
                 "current": {"from": cur_from.isoformat() + "Z", "to": cur_to.isoformat() + "Z"},
@@ -1496,7 +1514,7 @@ def getPeriodWiseDataCustom(request):
                 }
             }
         }
-
+ 
     current_date = datetime.now()
     today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
     now = current_date
@@ -1505,25 +1523,24 @@ def getPeriodWiseDataCustom(request):
     last_7_start = today_start - timedelta(days=7)
     last_7_prev_start = today_start - timedelta(days=14)
     last_7_prev_end = last_7_start - timedelta(seconds=1)
-
-    preset = request.GET.get('preset') 
-    start_date, end_date = get_date_range(preset)
-    
-    
-    custom_duration = end_date - start_date
-    prev_from_date = start_date - custom_duration
-    prev_to_date = end_date - custom_duration
-
+    preset = request.GET.get('preset')
+    from_date, to_date = get_date_range(preset)
+    custom_duration = to_date - from_date
+    prev_from_date = from_date - custom_duration
+    prev_to_date = to_date - custom_duration
+    today_start, today_end = get_date_range('Today')
+    yesterday_start, yesterday_end = get_date_range('Yesterday')
+    print(today_start,today_end)
+    print(from_date,to_date)
     response_data = {
-        "today": create_period_response("Today", today_start, now, yesterday_start, yesterday_end),
+        "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end),
         "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1)),
         "last7Days": create_period_response("Last 7 Days", last_7_start, now, last_7_prev_start, last_7_prev_end),
-        "custom": create_period_response("Custom", start_date, end_date, prev_from_date, prev_to_date),
+        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
     }
-
+ 
     return JsonResponse(response_data, safe=False)
-
-
+ 
 
 def allMarketplaceData(request):
     preset = request.GET.get("preset")
@@ -2117,8 +2134,7 @@ def downloadProductPerformanceCSV(request):
 
     return response
 
-from openpyxl.styles import Font
-import io
+
 
 def allMarketplaceDataxl(request):
     from_str = request.GET.get("from_date")
@@ -2369,8 +2385,7 @@ def downloadMarketplaceDataCSV(request):
     return response
 
 
-import csv
-import io
+
 @csrf_exempt
 def CityCSVUploadView(request):
     if request.method != 'POST':
@@ -2677,7 +2692,6 @@ def exportCitywiseSalesExcel(request):
     return response
 
 
-from io import StringIO
 def downloadCitywiseSalesCSV(request):
     today = datetime.utcnow()
     one_year_ago = today - timedelta(days=365)
@@ -2781,193 +2795,6 @@ def downloadCitywiseSalesCSV(request):
 
     return response
 
-
-
-
-def getProfitAndLossDetails(request):
-    current_date = datetime.utcnow()
-    
-    def calculate_metrics(start_date, end_date):
-        gross_revenue = 0
-        total_cogs = 0
-        refund = 0
-        net_profit = 0
-        margin = 0
-        total_units = 0
-        sku_set = set()
-        product_categories = {}
-        product_completeness = {"complete": 0, "incomplete": 0}
-
-        result = grossRevenue(start_date, end_date)
-        order_total = 0
-        other_price = 0
-        tax_price = 0
-        temp_price = 0
-        if result:
-            for order in result:
-                gross_revenue += order['order_total']
-                order_total = order['order_total']
-                temp_price = 0
-                
-                for item_id in order['order_items']:
-                    item_pipeline = [
-                        { "$match": { "_id": item_id } },
-                        {
-                            "$lookup": {
-                                "from": "product",
-                                "localField": "ProductDetails.product_id",
-                                "foreignField": "_id",
-                                "as": "product_ins"
-                            }
-                        },
-                        { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
-                        {
-                            "$project": {
-                                "_id": 0,
-                                "price": "$Pricing.ItemPrice.Amount",
-                                "tax_price": "$Pricing.ItemTax.Amount",
-                                "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
-                                "sku": "$product_ins.sku",
-                                "category": "$product_ins.category"
-                            }
-                        }
-                    ]
-                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-                    if item_result:
-                        item_data = item_result[0]
-                        temp_price += item_data['price']
-                        tax_price += item_data['tax_price']
-                        total_cogs += item_data['cogs']
-                        total_units += 1
-                        if item_data.get('sku'):
-                            sku_set.add(item_data['sku'])
-                        
-                        # Track product category distribution
-                        category = item_data.get('category', 'Unknown')
-                        if category in product_categories:
-                            product_categories[category] += 1
-                        else:
-                            product_categories[category] = 1
-
-                        # Track product completeness
-                        if item_data['price'] and item_data['cogs'] and item_data['sku']:
-                            product_completeness["complete"] += 1
-                        else:
-                            product_completeness["incomplete"] += 1
-
-            other_price += order_total - temp_price
-            net_profit = gross_revenue - (other_price + total_cogs)
-            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-            
-        return {
-            "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs - tax_price), 2),
-            "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
-            "unitsSold": total_units,
-            "refunds": refund,  
-            "skuCount": len(sku_set),
-            "sessions": 0,
-            "pageViews": 0,
-            "unitSessionPercentage": 0,
-            "margin": round(margin, 2),
-            "seller":"",
-            "tax_price":tax_price,
-            "total_cogs":total_cogs,
-            "product_cost":order_total,
-            "shipping_cost":0,
-            "productCategories": product_categories,  # Added product distribution data
-            "productCompleteness": product_completeness  # Added product completeness data
-        }
-
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to):
-        current = calculate_metrics(cur_from, cur_to)
-        previous = calculate_metrics(prev_from, prev_to)
-
-        def with_delta(metric):
-            return {
-                "current": current[metric],
-                "previous": previous[metric],
-                "delta": round(current[metric] - previous[metric], 2)
-            }
-
-        return {
-            "dateRanges": {
-                "current": {"from": cur_from.isoformat() + "Z", "to": cur_to.isoformat() + "Z"},
-                "previous": {"from": prev_from.isoformat() + "Z", "to": prev_to.isoformat() + "Z"}
-            },
-            "summary": {
-                "grossRevenue": with_delta("grossRevenue"),
-                "netProfit": with_delta("netProfit"),
-                "expenses": with_delta("expenses"),
-                "unitsSold": with_delta("unitsSold"),
-                "refunds": with_delta("refunds"),
-                "skuCount": with_delta("skuCount"),
-                "sessions": with_delta("sessions"),
-                "pageViews": with_delta("pageViews"),
-                "unitSessionPercentage": with_delta("unitSessionPercentage"),
-                "margin": with_delta("margin"),
-                "roi": with_delta("roi")
-            },
-            "netProfitCalculation": {
-                "current": {
-                    "gross": current["grossRevenue"],
-                    "totalCosts": current["expenses"],
-                    "productRefunds": current["refunds"],
-                    "totalTax": current["tax_price"] if 'tax_price' in current else 0,
-                    "totalTaxWithheld": 0,
-                    "ppcProductCost": 0,
-                    "ppcBrandsCost": 0,
-                    "ppcDisplayCost": 0,
-                    "ppcStCost": 0,
-                    "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
-                    "product_cost": current["product_cost"],
-                    "shipping_cost": current["shipping_cost"],
-                },
-                "previous": {
-                    "gross": previous["grossRevenue"],
-                    "totalCosts": previous["expenses"],
-                    "productRefunds": previous["refunds"],
-                    "totalTax": previous["total_cogs"] if 'total_cogs' in previous else 0,
-                    "totalTaxWithheld": 0,
-                    "ppcProductCost": 0,
-                    "ppcBrandsCost": 0,
-                    "ppcDisplayCost": 0,
-                    "ppcStCost": 0,
-                    "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
-                    "product_cost": previous["product_cost"],
-                    "shipping_cost": previous["shipping_cost"],
-                }
-            },
-            "charts": {
-                "productDistribution": current["productCategories"],  # Bar chart data
-                "productCompleteness": current["productCompleteness"]  # Pie chart data
-            }
-        }
-
-    current_date = datetime.now()
-    today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    now = current_date
-
-    from_date_str = request.GET.get('from_date')  
-    to_date_str = request.GET.get('to_date')
-    
-    try:
-        from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
-        to_date = datetime.strptime(to_date_str, "%Y-%m-%d")
-    except (TypeError, ValueError):
-        from_date = today_start - timedelta(days=30)
-        to_date = now 
-    
-    custom_duration = to_date - from_date
-    prev_from_date = from_date - custom_duration
-    prev_to_date = to_date - custom_duration
-
-    response_data = {
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
-    }
-
-    return JsonResponse(response_data, safe=False)
 
 
 def generate_monthly_intervals(from_date, to_date):
@@ -3078,52 +2905,6 @@ def calculate_metrics(start_date, end_date):
         "productCategories": product_categories,  # Product distribution
         "productCompleteness": product_completeness  # Product completeness
     }
-def profit_loss_chart(request):
-    # Get from_date and to_date from query parameters or default to some range
-    from_date_str = request.GET.get('from_date')  
-    to_date_str = request.GET.get('to_date')
-    current_date = datetime.now()
-    today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    now = current_date
-    try:
-        from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
-        to_date = datetime.strptime(to_date_str, "%Y-%m-%d")
-    except (TypeError, ValueError):
-        from_date = today_start - timedelta(days=30)
-        to_date = now 
-
-    # Generate intervals (monthly)
-    intervals = generate_monthly_intervals(from_date, to_date)
-
-    charts = {}
-    
-    for interval in intervals:
-        start_date = datetime.strptime(interval, '%Y-%m-%d 00:00:00')
-        end_date = start_date.replace(day=28) + timedelta(days=4)  # Last day of the month
-        
-        # Call the calculate_metrics function to get the data for this interval
-        data = calculate_metrics(start_date, end_date)
-
-        charts[interval] = {
-            "gross": data["grossRevenue"],
-            "ppcBrandsCost": 0,  # Placeholder (update based on actual data logic)
-            "ppcDisplayCost": 0,  # Placeholder
-            "ppcProductCost": data["total_cogs"],
-            "ppcStCost": 0,  # Placeholder
-            "productRefunds": data["refunds"],
-            "promotionValue": 0,  # Placeholder
-            "reimbursementsAmount": 0,  # Placeholder
-            "totalCosts": data["expenses"],
-            "totalFbaFees": 0,  # Placeholder
-            "totalTax": data["tax_price"],
-            "totalTaxWithheld": 0  # Placeholder
-        }
-
-    # Return the result as a response
-    return JsonResponse({
-        'charts': charts
-    }, safe=False)
-
 
 
 def get_products_with_pagination(request):
@@ -3424,7 +3205,6 @@ def getProfitAndLossDetails(request):
 
 
 
-from calendar import monthrange
 def profit_loss_chart(request):
     def get_month_range(year, month):
         start_date = datetime(year, month, 1)
@@ -3749,7 +3529,6 @@ def profitLossExportXl(request):
     response = HttpResponse(output.read(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename=profit_loss_report.xlsx'
     return response
-
 
 
 def profitLossChartCsv(request):
