@@ -987,7 +987,6 @@ def calculate_metricss(start_date, end_date):
             gross_revenue += order['order_total']
             order_total = order['order_total']
             temp_price = 0
-            tax_price = 0
             for item_id in order['order_items']:
                 item_pipeline = [
                     { "$match": { "_id": item_id } },
@@ -1021,12 +1020,15 @@ def calculate_metricss(start_date, end_date):
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
             # other_price += (order_total - temp_price) + total_cogs
-        other_price += order_total - temp_price
+        other_price += order_total - temp_price - tax_price
         net_profit = gross_revenue - (other_price + total_cogs)
+
+
+        
         margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
     return {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round((other_price + total_cogs) - tax_price, 2),
+        "expenses": round((other_price + total_cogs) , 2),
         "netProfit": round(net_profit, 2),
         "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
         "unitsSold": total_units,
@@ -1125,7 +1127,6 @@ def getPeriodWiseDataXl(request):
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
                 temp_price = 0
-                tax_price = 0
                 for item_id in order['order_items']:
                     item_pipeline = [
                         { "$match": { "_id": item_id } },
@@ -1158,13 +1159,13 @@ def getPeriodWiseDataXl(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
                 # other_price += (order_total - temp_price) + total_cogs
-            other_price += order_total - temp_price
+            other_price += order_total - temp_price - tax_price
             net_profit = gross_revenue - (other_price + total_cogs)
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs) - tax_price, 2),
+            "expenses": round((other_price + total_cogs), 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
@@ -1304,13 +1305,13 @@ def exportPeriodWiseCSV(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
                 # other_price += (order_total - temp_price) + total_cogs
-            other_price += order_total - temp_price
+            other_price += order_total - temp_price - tax_price
             net_profit = gross_revenue - (other_price + total_cogs)
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs) - tax_price, 2),
+            "expenses": round((other_price + total_cogs) , 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
@@ -1450,13 +1451,13 @@ def getPeriodWiseDataCustom(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
                 # other_price += (order_total - temp_price) + total_cogs
-            other_price += order_total - temp_price
+            other_price += order_total - temp_price - tax_price
             net_profit = gross_revenue - (other_price + total_cogs)
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs) - tax_price, 2),
+            "expenses": round((other_price + total_cogs) , 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
@@ -1625,9 +1626,9 @@ def allMarketplaceData(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
-                other_price += order_total - temp_price
+            other_price += order_total - temp_price - tax_price
 
-            expenses = ((total_cogs + other_price )- tax_price)
+            expenses = ((total_cogs + other_price ))
             net_profit = gross_revenue - expenses
             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
@@ -1711,14 +1712,14 @@ def allMarketplaceData(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
-            other_price += order_total - temp_price
+            other_price += order_total - temp_price - tax_price
 
             net_profit = gross_revenue - (other_price + total_cogs)
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
 
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs) - tax_price, 2),
+            "expenses": round((other_price + total_cogs) , 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price + total_cogs > 0 else 0,
             "unitsSold": total_units,
@@ -1860,7 +1861,7 @@ def getProductPerformanceSummary(request):
                     sku_summary[sku]["grossRevenue"] += price
                     sku_summary[sku]["totalCogs"] += cogs
 
-        other_price = order_total - temp_price
+        other_price = order_total - temp_price - tax_price
 
         for sku in sku_set:
             gross = sku_summary[sku]["grossRevenue"]
@@ -1977,7 +1978,7 @@ def downloadProductPerformanceSummary(request):
                     sku_summary[sku]["grossRevenue"] += price
                     sku_summary[sku]["totalCogs"] += cogs
  
-        other_price = order_total - temp_price
+        other_price = order_total - temp_price - tax_price
  
         for sku in sku_set:
             gross = sku_summary[sku]["grossRevenue"]
@@ -2135,7 +2136,7 @@ def downloadProductPerformanceCSV(request):
                     sku_summary[sku]["grossRevenue"] += price
                     sku_summary[sku]["totalCogs"] += cogs
  
-        other_price = order_total - temp_price
+        other_price = order_total - temp_price - tax_price
  
         for sku in sku_set:
             gross = sku_summary[sku]["grossRevenue"]
@@ -2258,9 +2259,9 @@ def allMarketplaceDataxl(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
-            other_price += order_total - temp_price
+            other_price += order_total - temp_price - tax_price
 
-            expenses = total_cogs + other_price - tax_price
+            expenses = total_cogs + other_price
             net_profit = gross_revenue - expenses
             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
@@ -2395,9 +2396,9 @@ def downloadMarketplaceDataCSV(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
-            other_price += order_total - temp_price
+            other_price += order_total - temp_price - tax_price
 
-            expenses = total_cogs + other_price - tax_price
+            expenses = total_cogs + other_price 
             net_profit = gross_revenue - expenses
             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
@@ -2932,13 +2933,13 @@ def calculate_metrics(start_date, end_date):
                     else:
                         product_completeness["incomplete"] += 1
 
-        other_price += order_total - temp_price
+        other_price += order_total - temp_price - tax_price
         net_profit = gross_revenue - (other_price + total_cogs)
         margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
 
     return {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round((other_price + total_cogs) - tax_price, 2),
+        "expenses": round((other_price + total_cogs), 2),
         "netProfit": round(net_profit, 2),
         "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price + total_cogs > 0 else 0,
         "unitsSold": total_units,
@@ -3140,13 +3141,13 @@ def getProfitAndLossDetails(request):
                         else:
                             product_completeness["incomplete"] += 1
 
-            other_price += order_total - temp_price
+            other_price += order_total - temp_price - tax_price
             net_profit = gross_revenue - (other_price + total_cogs)
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs) - tax_price, 2),
+            "expenses": round((other_price + total_cogs) , 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
@@ -3340,14 +3341,14 @@ def profit_loss_chart(request):
                     else:
                         product_completeness["incomplete"] += 1
 
-            other_price += order_total - temp_price
+            other_price += order_total - temp_price - tax_price
 
         net_profit = gross_revenue_amt - (other_price + total_cogs)
         margin = (net_profit / gross_revenue_amt * 100) if gross_revenue_amt else 0
 
         return {
             "grossRevenue": round(gross_revenue_amt, 2),
-            "expenses": round((other_price + total_cogs) - tax_price, 2),
+            "expenses": round((other_price + total_cogs) , 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
             "unitsSold": total_units,
@@ -3502,14 +3503,14 @@ def profitLossExportXl(request):
                     if sku:
                         sku_set.add(sku)
 
-            other_price += order_total - temp_price
+            other_price += order_total - temp_price - tax_price
 
         net_profit = gross_revenue_amt - (other_price + total_cogs)
         margin = (net_profit / gross_revenue_amt * 100) if gross_revenue_amt else 0
 
         return {
             "Gross Revenue": round(gross_revenue_amt, 2),
-            "Expenses": round((other_price + total_cogs) - tax_price, 2),
+            "Expenses": round((other_price + total_cogs) , 2),
             "Net Profit": round(net_profit, 2),
             "ROI (%)": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
             "Units Sold": total_units,
@@ -3676,3 +3677,33 @@ def profitLossChartCsv(request):
         ])
 
     return response
+
+from rest_framework.parsers import JSONParser # type: ignore
+def updateChooseMatrix(request):
+    try:
+        json_req = JSONParser().parse(request)
+        name = json_req['name']
+
+        update_fields = {
+            'select_all': json_req['select_all'],
+            'gross_revenue': json_req['gross_revenue'],
+            'units_sold': json_req['units_sold'],
+            'acos': json_req['acos'],
+            'tacos': json_req['tacos'],
+            'refund_quantity': json_req['refund_quantity'],
+            'net_profit': json_req['net_profit'],
+            'profit_margin': json_req['profit_margin'],
+            'refund_amount': json_req['refund_amount'],
+            'roas': json_req['roas'],
+            'orders': json_req['orders'],
+            'ppc_spend': json_req['ppc_spend']
+        }
+        updated_count = chooseMatrix.objects.filter(name=name).update(**update_fields)
+
+        if updated_count == 0:
+            return JsonResponse({'status': 'not found', 'message': f'No entry found with name: {name}'}, status=404)
+
+        return JsonResponse({'status': 'success', 'updated_records': updated_count}, status=200)
+
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=400)

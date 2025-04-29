@@ -382,3 +382,24 @@ class CityDetails(Document):
     ranking = IntField()
     zips = StringField()  
     uid = IntField(unique=True)
+
+class chooseMatrix(Document):
+    name = StringField(max_length=100)
+    select_all =  BooleanField()
+    gross_revenue =  BooleanField()
+    units_sold =  BooleanField()
+    acos =  BooleanField()
+    tacos =  BooleanField()
+    refund_quantity =  BooleanField()
+    net_profit =  BooleanField()
+    profit_margin =  BooleanField()
+    refund_amount =  BooleanField()
+    roas =  BooleanField()
+    orders =  BooleanField()
+    ppc_spend =  BooleanField()
+
+
+class notes_data(Document):
+    product_id = ReferenceField(Product)
+    date_f = DateTimeField(default=datetime.now())
+    notes = StringField()
