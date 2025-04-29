@@ -987,6 +987,7 @@ def calculate_metricss(start_date, end_date):
             gross_revenue += order['order_total']
             order_total = order['order_total']
             temp_price = 0
+            tax_price = 0
             for item_id in order['order_items']:
                 item_pipeline = [
                     { "$match": { "_id": item_id } },
@@ -1042,6 +1043,7 @@ def calculate_metricss(start_date, end_date):
 
 
 def getPeriodWiseData(request):
+    print(">>>>>>>>>>>>>>>>>>>>>>.")
     target_date = datetime.today() - timedelta(days=1)
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1074,29 +1076,28 @@ def getPeriodWiseData(request):
         return output
 
     # Yesterday
-    y_current_start = datetime(target_date.year, target_date.month, target_date.day)
-    y_current_end = y_current_start + timedelta(hours=23, minutes=59, seconds=59)
+    y_current_start, y_current_end = get_date_range("Yesterday")
     y_previous_start = y_current_start - timedelta(days=1)
     y_previous_end = y_previous_start + timedelta(hours=23, minutes=59, seconds=59)
 
     # Last 7 Days
-    l7_current_start = target_date - timedelta(days=6)
+    l7_current_start = y_current_start - timedelta(days=6)
     l7_current_end = y_current_end
     l7_previous_start = l7_current_start - timedelta(days=7)
     l7_previous_end = l7_current_start - timedelta(seconds=1)
 
     # Last 30 Days
-    l30_current_start = target_date - timedelta(days=29)
+    l30_current_start = y_current_start - timedelta(days=29)
     l30_current_end = y_current_end
     l30_previous_start = l30_current_start - timedelta(days=30)
     l30_previous_end = l30_current_start - timedelta(seconds=1)
 
-    ytd_current_start = datetime(target_date.year, 1, 1)
+    ytd_current_start = datetime(y_current_start.year, 1, 1)
     ytd_current_end = y_current_end
-    last_year = target_date.year - 1
+    last_year = y_current_start.year - 1
     ytd_previous_start = datetime(last_year, 1, 1)
-    ytd_previous_end = datetime(last_year, target_date.month, target_date.day, 23, 59, 59)
-
+    ytd_previous_end = datetime(last_year, y_current_start.month, y_current_start.day, 23, 59, 59)
+    
     response_data = {
         "yesterday": format_period_metrics("Yesterday", y_current_start, y_current_end, y_previous_start, y_previous_end),
         "last7Days": format_period_metrics("Last 7 Days", l7_current_start, l7_current_end, l7_previous_start, l7_previous_end),
@@ -1127,6 +1128,7 @@ def getPeriodWiseDataXl(request):
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
                 temp_price = 0
+                tax_price = 0
                 for item_id in order['order_items']:
                     item_pipeline = [
                         { "$match": { "_id": item_id } },
@@ -1200,7 +1202,7 @@ def getPeriodWiseDataXl(request):
             data["margin"]
         ]
 
-    today = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    today, y_current_end = get_date_range("Today")
     yesterday = today - timedelta(days=1)
     last_7_start = today - timedelta(days=7)
     last_30_start = today - timedelta(days=30)
@@ -1208,7 +1210,7 @@ def getPeriodWiseDataXl(request):
     year_start = today.replace(month=1, day=1)
 
     period_rows = [
-        create_period_row("Yesterday", yesterday, yesterday),
+        create_period_row("Yesterday", yesterday, today),
         create_period_row("Last 7 Days", last_7_start, today - timedelta(seconds=1)),
         create_period_row("Last 30 Days", last_30_start, today - timedelta(seconds=1)),
         create_period_row("Month to Date", month_start, today),
@@ -1271,6 +1273,7 @@ def exportPeriodWiseCSV(request):
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
                 temp_price = 0
+                tax_price = 0
                 
                 for item_id in order['order_items']:
                     item_pipeline = [
@@ -1346,7 +1349,8 @@ def exportPeriodWiseCSV(request):
             str(data["margin"])      # Ensuring the value is converted to string
         ]
 
-    today = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    today, y_current_end = get_date_range("Today")
+
     yesterday = today - timedelta(days=1)
     last_7_start = today - timedelta(days=7)
     last_30_start = today - timedelta(days=30)
@@ -1418,6 +1422,7 @@ def getPeriodWiseDataCustom(request):
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
                 temp_price = 0
+                tax_price = 0
                 
                 for item_id in order['order_items']:
                     item_pipeline = [
@@ -1535,9 +1540,8 @@ def getPeriodWiseDataCustom(request):
             }
         }
  
-    current_date = datetime.now()
-    today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    now = current_date
+    today_start, today_end = get_date_range("Today")
+
     yesterday_start = today_start - timedelta(days=1)
     yesterday_end = today_start - timedelta(seconds=1)
     last_7_start = today_start - timedelta(days=7)
@@ -1555,7 +1559,7 @@ def getPeriodWiseDataCustom(request):
     response_data = {
         "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end),
         "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1)),
-        "last7Days": create_period_response("Last 7 Days", last_7_start, now, last_7_prev_start, last_7_prev_end),
+        "last7Days": create_period_response("Last 7 Days", last_7_start, today_end, last_7_prev_start, last_7_prev_end),
         "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
     }
  
@@ -1592,6 +1596,7 @@ def allMarketplaceData(request):
                 gross_revenue += order["order_total"]
                 order_total = order["order_total"]
                 temp_price = 0
+                tax_price = 0
 
                 for item_id in order['order_items']:
                     item_pipeline = [
@@ -1679,6 +1684,7 @@ def allMarketplaceData(request):
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
                 temp_price = 0
+                tax_price = 0
 
                 for item_id in order['order_items']:
                     item_pipeline = [
@@ -2235,6 +2241,7 @@ def allMarketplaceDataxl(request):
                 gross_revenue += order["order_total"]
                 order_total = order["order_total"]
                 temp_price = 0
+                tax_price = 0
 
                 for item_id in order['order_items']:
                     item_pipeline = [
@@ -2372,6 +2379,7 @@ def downloadMarketplaceDataCSV(request):
                 gross_revenue += order["order_total"]
                 order_total = order["order_total"]
                 temp_price = 0
+                tax_price = 0
 
                 for item_id in order['order_items']:
                     item_pipeline = [
@@ -2896,6 +2904,7 @@ def calculate_metrics(start_date, end_date):
             gross_revenue += order['order_total']
             order_total = order['order_total']
             temp_price = 0
+            tax_price = 0
 
             for item_id in order['order_items']:
                 item_pipeline = [
@@ -3104,6 +3113,7 @@ def getProfitAndLossDetails(request):
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
                 temp_price = 0
+                tax_price = 0
                 
                 for item_id in order['order_items']:
                     item_pipeline = [
@@ -3311,6 +3321,7 @@ def profit_loss_chart(request):
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
             temp_price = 0
+            tax_price = 0
 
             for item_id in order.get("order_items", []):
                 item_pipeline = [
@@ -3480,6 +3491,7 @@ def profitLossExportXl(request):
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
             temp_price = 0
+            tax_price = 0
 
             for item_id in order.get("order_items", []):
                 item_pipeline = [
