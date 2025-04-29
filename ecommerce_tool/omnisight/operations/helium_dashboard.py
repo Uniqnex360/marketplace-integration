@@ -1817,7 +1817,7 @@ def getProductPerformanceSummary(request):
         temp_price = 0.0
         total_cogs = 0.0
         sku_set = set()
-
+        tax_price = 0
         for item_id in item_ids:
             item_pipeline = [
                 {"$match": {"_id": item_id}},
@@ -1834,6 +1834,8 @@ def getProductPerformanceSummary(request):
                     "$project": {
                         "_id": 0,
                         "price": "$Pricing.ItemPrice.Amount",
+                        "tax_price": "$Pricing.ItemTax.Amount",
+
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
@@ -1846,6 +1848,8 @@ def getProductPerformanceSummary(request):
                 item_data = item_result[0]
                 sku = item_data.get("sku")
                 product_name = item_data.get("product_name", "")
+                tax_price += item_data['tax_price']
+
                 images = item_data.get("images", [])
                 price = item_data.get("price", 0.0)
                 cogs = item_data.get("cogs", 0.0)
@@ -1924,6 +1928,7 @@ def downloadProductPerformanceSummary(request):
         fulfillment_channel = order.get("fulfillment_channel", "")
         temp_price = 0.0
         total_cogs = 0.0
+        tax_price = 0
         sku_set = set()
         Marketplace_obj = Marketplace.objects.filter(id = marketplace_id).first()
         m_name = ""
@@ -1945,6 +1950,7 @@ def downloadProductPerformanceSummary(request):
                     "$project": {
                         "_id": 0,
                         "price": "$Pricing.ItemPrice.Amount",
+                        "tax_price": "$Pricing.ItemPrice.tax_price",
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
@@ -1961,6 +1967,7 @@ def downloadProductPerformanceSummary(request):
                 images = item_data.get("images", [])
                 asin = item_data.get("asin", "")
                 
+                tax_price = item_data.get("tax_price", 0.0)
                 price = item_data.get("price", 0.0)
                 cogs = item_data.get("cogs", 0.0)
                 temp_price += price
@@ -2081,6 +2088,7 @@ def downloadProductPerformanceCSV(request):
         fulfillment_channel = order.get("fulfillment_channel", "")
         temp_price = 0.0
         total_cogs = 0.0
+        tax_price = 0
         sku_set = set()
         Marketplace_obj = Marketplace.objects.filter(id = marketplace_id).first()
         m_name = ""
@@ -2102,6 +2110,7 @@ def downloadProductPerformanceCSV(request):
                     "$project": {
                         "_id": 0,
                         "price": "$Pricing.ItemPrice.Amount",
+                        "tax_price": "$Pricing.ItemPrice.tax_price",
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
@@ -2119,6 +2128,7 @@ def downloadProductPerformanceCSV(request):
                 asin =  item_data.get("asin", "")
                 
                 price = item_data.get("price", 0.0)
+                tax_price = item_data.get("tax_price", 0.0)
                 cogs = item_data.get("cogs", 0.0)
                 temp_price += price
                 total_cogs += cogs
