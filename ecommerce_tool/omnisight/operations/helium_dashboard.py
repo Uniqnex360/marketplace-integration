@@ -68,7 +68,7 @@ def grossRevenue(start_date, end_date, marketplace_id=None):
     match=dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
     match['order_status'] = {"$in": ['Shipped', 'Delivered']}
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all":
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
     pipeline = [
             {
@@ -146,7 +146,7 @@ def refundOrder(start_date, end_date, marketplace_id=None):
     match=dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
     match['order_status'] = "Refunded"
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all":
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
     pipeline = [
             {
@@ -328,17 +328,21 @@ def get_metrics_by_date_range(request):
 
 
 def LatestOrdersTodayAPIView(request):
+    marketplace_id = request.GET.get('marketplace_id', None)
     today = datetime.utcnow().date()
     start_of_day = datetime.combine(today, datetime.min.time())
     end_of_day = datetime.combine(today, datetime.max.time())
 
+    match = dict()
+    match['order_date'] = {"$gte": start_of_day, "$lte": end_of_day}
+    match['order_status'] = {"$in": ['Shipped', 'Delivered']}
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+
     # 1️⃣ Hourly aggregation: Use order-level date for bucket, sum quantities from items
     hourly_pipeline = [
         {
-            "$match": {
-                "order_date": { "$gte": start_of_day, "$lte": end_of_day },
-                "order_status": { "$in": ["Shipped", "Delivered"] }
-            }
+            "$match": match
         },
         {
             "$lookup": {
@@ -404,10 +408,7 @@ def LatestOrdersTodayAPIView(request):
     # 2️⃣ Detailed order info
     detail_pipeline = [
         {
-            "$match": {
-                "order_date": { "$gte": start_of_day, "$lte": end_of_day },
-                "order_status": { "$in": ["Shipped", "Delivered"] }
-            }
+            "$match": match
         },
         {
             "$lookup": {
@@ -470,6 +471,7 @@ def LatestOrdersTodayAPIView(request):
 
 
 def LatestOrdersTodayAPIView(request):
+    marketplace_id = request.GET.get('marketplace_id', None)
     # 1️⃣ Compute bounds for "today" based on the user's local timezone
     user_timezone = request.GET.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
     local_tz = timezone(user_timezone)
@@ -480,11 +482,19 @@ def LatestOrdersTodayAPIView(request):
     end_of_day = now
 
     # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
-    qs = Order.objects.filter(
-        order_date__gte=start_of_day,
-        order_date__lte=end_of_day,
-        order_status__in=["Shipped", "Delivered"]
-    )
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        qs = Order.objects.filter(
+            order_date__gte=start_of_day,
+            order_date__lte=end_of_day,
+            order_status__in=["Shipped", "Delivered"],
+            marketplace_id=ObjectId(marketplace_id)
+        )
+    else:
+        qs = Order.objects.filter(
+            order_date__gte=start_of_day,
+            order_date__lte=end_of_day,
+            order_status__in=["Shipped", "Delivered"]
+        )
 
     # 3️⃣ Pre-fill a 24-slot OrderedDict for every hour in the time range
     chart = OrderedDict()
@@ -548,7 +558,11 @@ def LatestOrdersTodayAPIView(request):
 
 
 
-def get_graph_data(start_date, end_date, preset):
+def get_graph_data(start_date, end_date, preset,marketplace_id):
+    marketplace_boolean = False
+    # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        marketplace_boolean = True
     now = datetime.utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
@@ -594,11 +608,18 @@ def get_graph_data(start_date, end_date, preset):
             bucket_end = dt + timedelta(hours=1)
         else:
             bucket_end = dt + timedelta(days=1)
-        
-        orders = Order.objects.filter(
-            order_date__gte=bucket_start,
-            order_date__lt=bucket_end
-        )
+
+        if marketplace_boolean:
+            orders = Order.objects.filter(
+                order_date__gte=bucket_start,
+                order_date__lt=bucket_end,
+                marketplace_id=ObjectId(marketplace_id)
+            )
+        else:
+            orders = Order.objects.filter(
+                order_date__gte=bucket_start,
+                order_date__lt=bucket_end
+            )
         orders_by_bucket[dt.strftime(time_format)] = list(orders)
 
     # Process each time bucket
@@ -617,7 +638,7 @@ def get_graph_data(start_date, end_date, preset):
         else:
             bucket_end = bucket_start.replace(hour=23, minute=59, second=59)
         # Calculate refunds first (same as your total calculation)
-        refund_ins = refundOrder(bucket_start, bucket_end)
+        refund_ins = refundOrder(bucket_start, bucket_end,marketplace_id)
         if refund_ins:
             for ins in refund_ins:
                 if ins['order_date'] >= bucket_start and ins['order_date'] < bucket_end:
@@ -688,7 +709,7 @@ def get_graph_data(start_date, end_date, preset):
     return graph_data
 
 
-def totalRevenueCalculation(start_date, end_date):
+def totalRevenueCalculation(start_date, end_date, marketplace_id=None):
     total = dict()
     gross_revenue = 0
     total_cogs = 0
@@ -697,8 +718,8 @@ def totalRevenueCalculation(start_date, end_date):
     total_units = 0
     total_orders = 0
 
-    result = grossRevenue(start_date, end_date)
-    refund_ins = refundOrder(start_date, end_date)
+    result = grossRevenue(start_date, end_date,marketplace_id)
+    refund_ins = refundOrder(start_date, end_date,marketplace_id)
     refund_quantity_ins = 0
     if refund_ins != []:
         for ins in refund_ins:
@@ -767,11 +788,12 @@ def RevenueWidgetAPIView(request):
     preset = request.GET.get("preset", "Today")
     compare_startdate = request.GET.get("compare_startdate")
     compare_enddate = request.GET.get("compare_enddate")
+    marketplace_id = request.GET.get("marketplace_id", None)
 
     start_date, end_date = get_date_range(preset)
     comapre_past = get_previous_periods(start_date, end_date)
-    total = totalRevenueCalculation(start_date, end_date)
-    graph_data = get_graph_data(start_date, end_date, preset)
+    total = totalRevenueCalculation(start_date, end_date,marketplace_id)
+    graph_data = get_graph_data(start_date, end_date, preset,marketplace_id)
     
     data = dict()
     data = {
@@ -781,12 +803,12 @@ def RevenueWidgetAPIView(request):
     }
     if compare_startdate != None and compare_startdate != "":
 
-        compare_total = totalRevenueCalculation(compare_startdate, compare_enddate)
-        initial = "Today" if compare_startdate == compare_enddate else None
+        compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
+        compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
 
-
-        compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d")
-        compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d")
+        compare_total = totalRevenueCalculation(compare_startdate, compare_enddate,marketplace_id)
+        initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
+        
 
         
         difference = {
@@ -799,12 +821,13 @@ def RevenueWidgetAPIView(request):
         "total_units": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
         }
         data['compare_total'] = difference
-        data['compare_graph'] = get_graph_data(compare_startdate, compare_enddate, initial)
+        data['compare_graph'] = get_graph_data(compare_startdate, compare_enddate, initial,marketplace_id)
     return data
 
 
 
 def get_top_products(request):
+    marketplace_id = request.GET.get('marketplace_id', None)
     metric = request.GET.get("sortBy", "units_sold")  # 'price', 'refund', etc.
     preset = request.GET.get("preset", "Today")  # today, yesterday, last_7_days
     start_date, end_date = get_date_range(preset)
@@ -827,18 +850,14 @@ def get_top_products(request):
         },
         "refund": "$order_items_ins.ProductDetails.QuantityShipped"
     }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
-
-    # Match criteria based on metric
+    match = dict()
+    match['order_date'] = {"$gte": start_date, "$lte": end_date}
+    match['order_status'] = {"$in": ['Shipped', 'Delivered']}
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        match['marketplace_id'] = ObjectId(marketplace_id)
     if metric == "refund":
-       match = {
-                "order_date": {"$gte": start_date, "$lt": end_date},
-                "order_status": "Refunded"
-            }
-    else:
-        match = {
-            "order_date": {"$gte": start_date, "$lt": end_date},
-            "order_status": {"$in": ['Shipped', 'Delivered']}
-        }
+        match['order_status'] = "Refunded"
+    
 
     pipeline = [
         {
@@ -1692,7 +1711,7 @@ def allMarketplaceData(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
-                other_price += order_total - temp_price
+            other_price += order_total - temp_price
 
             net_profit = gross_revenue - (other_price + total_cogs)
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
@@ -1864,9 +1883,9 @@ def getProductPerformanceSummary(request):
 
 def downloadProductPerformanceSummary(request):
     action = request.GET.get("action", "").lower()
-
+ 
     from_date, to_date = get_date_range('Yesterday')
-
+ 
     order_pipeline = [
         {
             "$match": {
@@ -1879,12 +1898,13 @@ def downloadProductPerformanceSummary(request):
                 "_id": 0,
                 "order_items": 1,
                 "order_total": 1,
-                "marketplace_name": 1
+                "marketplace_id": 1,
+                "fulfillment_channel":1
             }
         }
     ]
     orders = list(Order.objects.aggregate(*order_pipeline))
-
+ 
     sku_summary = defaultdict(lambda: {
         "sku": "",
         "product_name": "",
@@ -1895,14 +1915,19 @@ def downloadProductPerformanceSummary(request):
         "netProfit": 0.0,
         "margin": 0.0
     })
-
+ 
     for order in orders:
         order_total = order.get("order_total", 0.0)
         item_ids = order.get("order_items", [])
+        marketplace_id = order.get("marketplace_id", "")
+        fulfillment_channel = order.get("fulfillment_channel", "")
         temp_price = 0.0
         total_cogs = 0.0
         sku_set = set()
-
+        Marketplace_obj = Marketplace.objects.filter(id = marketplace_id).first()
+        m_name = ""
+        if Marketplace_obj:
+            m_name = Marketplace_obj.name
         for item_id in item_ids:
             item_pipeline = [
                 {"$match": {"_id": item_id}},
@@ -1922,7 +1947,8 @@ def downloadProductPerformanceSummary(request):
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
-                        "images": "$product_ins.image_urls"
+                        "images": "$product_ins.image_urls",
+                        "asin": "$product_ins.asin"
                     }
                 }
             ]
@@ -1932,22 +1958,27 @@ def downloadProductPerformanceSummary(request):
                 sku = item_data.get("sku")
                 product_name = item_data.get("product_name", "")
                 images = item_data.get("images", [])
+                asin = item_data.get("asin", "")
+                
                 price = item_data.get("price", 0.0)
                 cogs = item_data.get("cogs", 0.0)
                 temp_price += price
                 total_cogs += cogs
                 if sku:
                     sku_set.add(sku)
-
+ 
                     sku_summary[sku]["sku"] = sku
                     sku_summary[sku]["product_name"] = product_name
                     sku_summary[sku]["images"] = images
+                    sku_summary[sku]["asin"] = asin
+                    sku_summary[sku]["fulfillment_channel"] = fulfillment_channel
+                    sku_summary[sku]["m_name"] = m_name
                     sku_summary[sku]["unitsSold"] += 1
                     sku_summary[sku]["grossRevenue"] += price
                     sku_summary[sku]["totalCogs"] += cogs
-
+ 
         other_price = order_total - temp_price
-
+ 
         for sku in sku_set:
             gross = sku_summary[sku]["grossRevenue"]
             cogs = sku_summary[sku]["totalCogs"]
@@ -1955,43 +1986,48 @@ def downloadProductPerformanceSummary(request):
             margin = (net_profit / gross) * 100 if gross > 0 else 0
             sku_summary[sku]["netProfit"] = round(net_profit, 2)
             sku_summary[sku]["margin"] = round(margin, 2)
-
+ 
     # Sort and limit based on action
     sorted_summary = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
-
+ 
     if action == "top":
         final_summary = sorted_summary[:3]
     elif action == "least":
         final_summary = sorted_summary[-3:]
     else:
         final_summary = sorted_summary  # all products
-
+ 
     # Create Excel workbook
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Product Performance"
-
+ 
     # Headers
-    headers = ["SKU", "Product Name", "Units Sold", "Gross Revenue", "Total COGS", "Net Profit", "Margin (%)"]
+    headers = [
+         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold",
+    ]
     ws.append(headers)
-
+ 
     # Rows
     for data in final_summary:
         ws.append([
-            data["sku"],
             data["product_name"],
-            data["unitsSold"],
+            data["asin"],
+            data["sku"],
+            data["fulfillment_channel"],
+            data["m_name"],
+            from_date,
+            to_date,
             round(data["grossRevenue"], 2),
-            round(data["totalCogs"], 2),
             round(data["netProfit"], 2),
-            round(data["margin"], 2)
+            data["unitsSold"],
         ])
-
+ 
     # Auto width
     for col_num, col in enumerate(ws.columns, start=1):
         max_length = max(len(str(cell.value)) if cell.value else 0 for cell in col)
         ws.column_dimensions[get_column_letter(col_num)].width = max_length + 2
-
+ 
     # Response
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -1999,14 +2035,14 @@ def downloadProductPerformanceSummary(request):
     filename = f"Product_Performance_{from_date.strftime('%Y-%m-%d')}_{action or 'all'}.xlsx"
     response['Content-Disposition'] = f'attachment; filename={filename}'
     wb.save(response)
-
+ 
     return response
-
-
-
+ 
+ 
+ 
 def downloadProductPerformanceCSV(request):
     from_date, to_date = get_date_range('Yesterday')
-
+ 
     order_pipeline = [
         {
             "$match": {
@@ -2019,12 +2055,13 @@ def downloadProductPerformanceCSV(request):
                 "_id": 0,
                 "order_items": 1,
                 "order_total": 1,
-                "marketplace_name": 1
+                "marketplace_id": 1,
+                "fulfillment_channel":1
             }
         }
     ]
     orders = list(Order.objects.aggregate(*order_pipeline))
-
+ 
     sku_summary = defaultdict(lambda: {
         "sku": "",
         "product_name": "",
@@ -2035,14 +2072,19 @@ def downloadProductPerformanceCSV(request):
         "netProfit": 0.0,
         "margin": 0.0
     })
-
+ 
     for order in orders:
         order_total = order.get("order_total", 0.0)
         item_ids = order.get("order_items", [])
+        marketplace_id = order.get("marketplace_id", "")
+        fulfillment_channel = order.get("fulfillment_channel", "")
         temp_price = 0.0
         total_cogs = 0.0
         sku_set = set()
-
+        Marketplace_obj = Marketplace.objects.filter(id = marketplace_id).first()
+        m_name = ""
+        if Marketplace_obj:
+            m_name = Marketplace_obj.name
         for item_id in item_ids:
             item_pipeline = [
                 {"$match": {"_id": item_id}},
@@ -2062,7 +2104,8 @@ def downloadProductPerformanceCSV(request):
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
-                        "images": "$product_ins.image_urls"
+                        "images": "$product_ins.image_urls",
+                        "asin": "$product_ins.asin"
                     }
                 }
             ]
@@ -2072,22 +2115,28 @@ def downloadProductPerformanceCSV(request):
                 sku = item_data.get("sku")
                 product_name = item_data.get("product_name", "")
                 images = item_data.get("images", [])
+                asin =  item_data.get("asin", "")
+                
                 price = item_data.get("price", 0.0)
                 cogs = item_data.get("cogs", 0.0)
                 temp_price += price
                 total_cogs += cogs
                 if sku:
                     sku_set.add(sku)
-
+ 
                     sku_summary[sku]["sku"] = sku
                     sku_summary[sku]["product_name"] = product_name
                     sku_summary[sku]["images"] = images
+                    sku_summary[sku]["m_name"] = m_name
+                    sku_summary[sku]["fulfillment_channel"] = fulfillment_channel
+ 
+                    sku_summary[sku]["asin"] = asin
                     sku_summary[sku]["unitsSold"] += 1
                     sku_summary[sku]["grossRevenue"] += price
                     sku_summary[sku]["totalCogs"] += cogs
-
+ 
         other_price = order_total - temp_price
-
+ 
         for sku in sku_set:
             gross = sku_summary[sku]["grossRevenue"]
             cogs = sku_summary[sku]["totalCogs"]
@@ -2095,10 +2144,10 @@ def downloadProductPerformanceCSV(request):
             margin = (net_profit / gross) * 100 if gross > 0 else 0
             sku_summary[sku]["netProfit"] = round(net_profit, 2)
             sku_summary[sku]["margin"] = round(margin, 2)
-
+ 
     # Get action parameter to determine top or least
     action = request.GET.get('action', '').lower()
-
+ 
     # Sort and pick top 3 or least 3 based on netProfit
     sorted_summary = sorted(
         sku_summary.values(),
@@ -2106,32 +2155,35 @@ def downloadProductPerformanceCSV(request):
         reverse=(action == "top")
     )
     limited_summary = sorted_summary[:3]
-
+ 
     # Create CSV response
     response = HttpResponse(content_type='text/csv')
     filename = f"Product_Performance_{from_date.strftime('%Y-%m-%d')}.csv"
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
-
+ 
     writer = csv.writer(response)
     # CSV headers
     writer.writerow([
-        "SKU", "Product Name", "Units Sold", "Gross Revenue",
-        "Total COGS", "Net Profit", "Margin (%)"
+         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold",
     ])
-
+ 
     # CSV rows
     for data in limited_summary:
         writer.writerow([
-            data["sku"],
             data["product_name"],
-            data["unitsSold"],
+            data["asin"],
+            data["sku"],
+            data["fulfillment_channel"],
+            data["m_name"],
+            from_date,
+            to_date,
             round(data["grossRevenue"], 2),
-            round(data["totalCogs"], 2),
             round(data["netProfit"], 2),
-            round(data["margin"], 2)
+            data["unitsSold"],
         ])
-
+ 
     return response
+ 
 
 
 
@@ -2206,7 +2258,7 @@ def allMarketplaceDataxl(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
-                other_price += order_total - temp_price
+            other_price += order_total - temp_price
 
             expenses = total_cogs + other_price - tax_price
             net_profit = gross_revenue - expenses
@@ -2343,7 +2395,7 @@ def downloadMarketplaceDataCSV(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
-                other_price += order_total - temp_price
+            other_price += order_total - temp_price
 
             expenses = total_cogs + other_price - tax_price
             net_profit = gross_revenue - expenses
