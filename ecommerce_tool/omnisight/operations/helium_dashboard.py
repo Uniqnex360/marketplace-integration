@@ -1,5 +1,5 @@
 from mongoengine import Q
-from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails
+from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data
 from mongoengine.queryset.visitor import Q
 from dateutil.relativedelta import relativedelta
 from django.views.decorators.csrf import csrf_exempt
@@ -3251,19 +3251,12 @@ def getProfitAndLossDetails(request):
             }
         }
 
-    current_date = datetime.now()
-    today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    now = current_date
+    # current_date = datetime.now()
+    # today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    # now = current_date
 
-    from_date_str = request.GET.get('from_date')  
-    to_date_str = request.GET.get('to_date')
-    
-    try:
-        from_date = datetime.strptime(from_date_str, "%Y-%m-%d")
-        to_date = datetime.strptime(to_date_str, "%Y-%m-%d")
-    except (TypeError, ValueError):
-        from_date = today_start - timedelta(days=30)
-        to_date = now 
+    preset = request.GET.get('preset')
+    from_date, to_date = get_date_range(preset)
     
     custom_duration = to_date - from_date
     prev_from_date = from_date - custom_duration
@@ -3729,3 +3722,31 @@ def updateChooseMatrix(request):
 
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
+
+
+
+def createNotes(self, request):
+        try:
+            data = JSONParser().parse(request)
+
+
+            product_id = data.get("product_id")
+            user_id = data.get("user_id")
+            notes = data.get("notes")
+
+            if not product_id or not user_id or not notes:
+                return JsonResponse({"error": "Missing required fields."}, status=400)
+
+            try:
+                product = Product.objects.get(id=product_id)
+                user_obj = user.objects.get(id=user_id)
+            except :
+                return JsonResponse({"error": "Product or user not found."}, status=404)
+
+            note = notes_data(product_id=product, user_id=user_obj, notes=notes)
+            note.save()
+
+            return JsonResponse({"message": "Note added successfully."}, status=201)
+
+        except :
+            return JsonResponse({"error": ""}, status=500)
