@@ -1545,8 +1545,7 @@ def getPeriodWiseDataCustom(request):
     yesterday_start = today_start - timedelta(days=1)
     yesterday_end = today_start - timedelta(seconds=1)
     last_7_start = today_start - timedelta(days=7)
-    last_7_prev_start = today_start - timedelta(days=14)
-    last_7_prev_end = last_7_start - timedelta(seconds=1)
+    
     preset = request.GET.get('preset')
     from_date, to_date = get_date_range(preset)
     custom_duration = to_date - from_date
@@ -1554,12 +1553,15 @@ def getPeriodWiseDataCustom(request):
     prev_to_date = to_date - custom_duration
     today_start, today_end = get_date_range('Today')
     yesterday_start, yesterday_end = get_date_range('Yesterday')
+    last_7_start, last_7_end = get_date_range('Last 7 days')
+    last_7_prev_start = today_start - timedelta(days=14)
+    last_7_prev_end = last_7_start - timedelta(seconds=1)
     print(today_start,today_end)
     print(from_date,to_date)
     response_data = {
         "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end),
         "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1)),
-        "last7Days": create_period_response("Last 7 Days", last_7_start, today_end, last_7_prev_start, last_7_prev_end),
+        "last7Days": create_period_response("Last 7 Days", last_7_start, last_7_end, last_7_prev_start, last_7_prev_end),
         "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
     }
  
@@ -1765,7 +1767,9 @@ def allMarketplaceData(request):
                 "pageViews": with_delta("pageViews"),
                 "unitSessionPercentage": with_delta("unitSessionPercentage"),
                 "margin": with_delta("margin"),
-                "roi": with_delta("roi")
+                "roi": with_delta("roi"),
+                "from_date":cur_from,
+                "from_date":cur_from
             },
             "marketplace_list": grouped_marketplace_metrics(cur_from, cur_to)
         }
