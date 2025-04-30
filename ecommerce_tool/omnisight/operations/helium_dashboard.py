@@ -1767,9 +1767,7 @@ def allMarketplaceData(request):
                 "pageViews": with_delta("pageViews"),
                 "unitSessionPercentage": with_delta("unitSessionPercentage"),
                 "margin": with_delta("margin"),
-                "roi": with_delta("roi"),
-                "from_date":cur_from,
-                "from_date":cur_from
+                "roi": with_delta("roi")
             },
             "marketplace_list": grouped_marketplace_metrics(cur_from, cur_to)
         }
@@ -1781,6 +1779,8 @@ def allMarketplaceData(request):
 
     response_data = {
         "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
+        "from_date":from_date,
+        "to_date":to_date
     }
 
     return JsonResponse(response_data, safe=False)
@@ -2064,7 +2064,8 @@ def downloadProductPerformanceSummary(request):
  
 def downloadProductPerformanceCSV(request):
     from_date, to_date = get_date_range('Yesterday')
- 
+    action = request.GET.get('action', '').lower()
+    
     order_pipeline = [
         {
             "$match": {
@@ -2175,7 +2176,6 @@ def downloadProductPerformanceCSV(request):
             elif action == "least":
                 sku_summary[sku]["Trend"] = "Decreasing"
     # Get action parameter to determine top or least
-    action = request.GET.get('action', '').lower()
  
     # Sort and pick top 3 or least 3 based on netProfit
     sorted_summary = sorted(
