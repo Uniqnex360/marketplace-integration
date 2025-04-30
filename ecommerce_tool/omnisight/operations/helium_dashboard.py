@@ -2213,14 +2213,18 @@ def downloadProductPerformanceCSV(request):
 
 
 def allMarketplaceDataxl(request):
-    from_str = request.GET.get("from_date")
-    to_str = request.GET.get("to_date")
-    try:
-        from_date = datetime.strptime(from_str, "%Y-%m-%d")
-        to_date = datetime.strptime(to_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
-    except:
-        to_date = datetime.now()
-        from_date = to_date - timedelta(days=30)
+    # from_str = request.GET.get("from_date")
+    # to_str = request.GET.get("to_date")
+
+    preset = request.GET.get("preset")
+    from_date,to_date = get_date_range(preset)
+
+    # try:
+    #     from_date = datetime.strptime(from_str, "%Y-%m-%d")
+    #     to_date = datetime.strptime(to_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+    # except:
+    #     to_date = datetime.now()
+    #     from_date = to_date - timedelta(days=30)
 
     def grouped_marketplace_metrics(start_date, end_date):
         orders = grossRevenue(start_date, end_date)
@@ -2353,14 +2357,10 @@ def allMarketplaceDataxl(request):
 
 
 def downloadMarketplaceDataCSV(request):
-    from_str = request.GET.get("from_date")
-    to_str = request.GET.get("to_date")
-    try:
-        from_date = datetime.strptime(from_str, "%Y-%m-%d")
-        to_date = datetime.strptime(to_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
-    except:
-        to_date = datetime.now()
-        from_date = to_date - timedelta(days=30)
+
+    preset = request.GET.get("preset")
+    from_date,to_date = get_date_range(preset)
+    
 
     def grouped_marketplace_metrics(start_date, end_date):
         orders = grossRevenue(start_date, end_date)
@@ -2435,7 +2435,7 @@ def downloadMarketplaceDataCSV(request):
                 "Marketplace": marketplace,
                 "Currency": currency,
                 "Start Date": from_date.date(),
-                "End Date": to_date.date.date(),
+                "End Date": to_date.date(),
                 "Gross Revenue": round(gross_revenue, 2),
                 "Expenses": round(expenses, 2),
                 # "SKU Count": len(sku_set),
@@ -3877,52 +3877,85 @@ def createNotes(self, request):
     except :
         return JsonResponse({"error": ""}, status=500)
     
-
+import re
 def ListingOptimizationView(request):
-    try:
-        product_id = request.GET.get('product_id')
+    product_id = request.GET.get('product_id')
+    if not product_id:
+        return JsonResponse({"error": "product_id is required."}, status=400)
 
-        # if not product_id or not isinstance(target_keywords, list):
-        #     return JsonResponse({"error": "product_id and target_keywords (list) are required."}, status=400)
+    product = Product.objects(id=product_id).first()
+    if not product:
+        return JsonResponse({"error": "Product not found."}, status=404)
 
-        product = Product.objects(id=product_id).first()
-        if not product:
-            return JsonResponse({"error": "Product not found."}, status=404)
+    # === Extract fields ===
+    title = product.product_title or ""
+    bullets = product.features or []
+    description = product.product_description or ""
+    images = product.image_urls or []
+    upc = product.upc or ""
+    category = product.category or ""
 
-        # Extract fields
-        title = product.product_title or ""
-        bullets = product.features or []
-        description = product.product_description or ""
-        images = product.image_urls or []
+    full_text = f"{title} {' '.join(bullets)} {description}"
 
-        # Compute Scores
-        def keyword_score(text, keywords):
-            used = [kw for kw in keywords if kw.lower() in text.lower()]
-            missing = list(set(keywords) - set(used))
-            return used, missing
+    # === Helper functions ===
+    def validate_title(text):
+        length_score = min(len(text), 200) / 2
+        format_ok = all([
+            bool(re.search(r'\b[a-zA-Z]{2,}\b', text)),  # Has real words
+            not re.search(r'(?i)(best|free|deal|offer|discount)', text),
+            len(text) >= 50
+        ])
+        return int(length_score), format_ok
 
-        title_score = min(len(title), 200) / 2
-        bullet_score = 100 if len(bullets) >= 5 else len(bullets) * 20
-        description_score = 100 if len(description) > 300 else len(description) / 3
-        image_score = min(len(images), 5) * 20
+    def validate_bullets(bullets):
+        count = len(bullets)
+        score = 100 if count >= 5 else count * 20
+        format_issues = [
+            b for b in bullets
+            if bool(re.search(r'<|>|🔥|👍|😁|[A-Z]{4,}', b))  # HTML, emojis, all caps
+        ]
+        return int(score), format_issues
 
-        full_text = f"{title} {' '.join(bullets)} {description}"
-        used, missing = keyword_score(full_text, [])
+    def validate_description(desc):
+        length_score = 100 if len(desc) > 300 else len(desc) / 3
+        keyword_stuffing = len(re.findall(r'\b\w+\b', desc)) != len(set(re.findall(r'\b\w+\b', desc)))
+        return int(length_score), keyword_stuffing
 
-        overall_score = round((title_score + bullet_score + description_score + image_score) / 4, 2)
+    def validate_images(images):
+        count = len(images)
+        score = min(count, 5) * 20
+        issues = []
+        for img_url in images:
+            if not img_url.endswith(('.jpg', '.png', '.jpeg')) or 'watermark' in img_url.lower():
+                issues.append(img_url)
+        return int(score), issues
 
-        return JsonResponse({
-            "product_id": product_id,
-            "title_score": int(title_score),
-            "bullet_score": int(bullet_score),
-            "description_score": int(description_score),
-            "image_score": int(image_score),
-            "seo_suggestions": {
-                "missing_keywords": missing,
-                "used_keywords": used
-            },
-            "overall_score": overall_score
-        })
+    def validate_upc(upc):
+        return bool(re.fullmatch(r'\d{12,14}', upc))
 
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+    # === Calculate scores ===
+    title_score, title_format_ok = validate_title(title)
+    bullet_score, bullet_format_issues = validate_bullets(bullets)
+    description_score, has_keyword_stuffing = validate_description(description)
+    image_score, image_issues = validate_images(images)
+    upc_valid = validate_upc(upc)
+
+    # === Category and attributes ===
+    category_ok = bool(category and ">" in category)
+
+    overall_score = round((title_score + bullet_score + description_score + image_score) / 4, 2)
+
+    return JsonResponse({
+        "product_id": str(product_id),
+        "title_score": title_score,
+        "title_format_valid": title_format_ok,
+        "bullet_score": bullet_score,
+        "bullet_format_issues": bullet_format_issues,
+        "description_score": description_score,
+        "keyword_stuffing_detected": has_keyword_stuffing,
+        "image_score": image_score,
+        "image_issues": image_issues,
+        "upc_valid": upc_valid,
+        "category_format_valid": category_ok,
+        "overall_score": overall_score
+    })
