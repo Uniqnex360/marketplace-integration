@@ -822,6 +822,7 @@ def RevenueWidgetAPIView(request):
         "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
         }
         data['compare_total'] = difference
+        data['previous_total'] = compare_total
         data['compare_graph'] = get_graph_data(compare_startdate, compare_enddate, initial,marketplace_id)
     return data
 
