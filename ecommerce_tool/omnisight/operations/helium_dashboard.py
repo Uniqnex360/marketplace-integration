@@ -2007,7 +2007,6 @@ def downloadProductPerformanceSummary(request):
             margin = (net_profit / gross) * 100 if gross > 0 else 0
             sku_summary[sku]["netProfit"] = round(net_profit, 2)
             sku_summary[sku]["margin"] = round(margin, 2)
-            print(">>>>>>>>>>>>>>>>",action)
             if action == "top":
                 sku_summary[sku]["Trend"] = "Increasing"
             elif action == "least":
@@ -2029,7 +2028,7 @@ def downloadProductPerformanceSummary(request):
  
     # Headers
     headers = [
-         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold",
+         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold","Trend"
     ]
     ws.append(headers)
  
@@ -2198,7 +2197,7 @@ def downloadProductPerformanceCSV(request):
     writer = csv.writer(response)
     # CSV headers
     writer.writerow([
-         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold",
+         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold","Trend"
     ])
  
     # CSV rows
