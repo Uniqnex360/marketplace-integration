@@ -21,7 +21,10 @@ from omnisight.operations.general_functions import getMarketplaceList, getProduc
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders
 
-from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination
+from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView
+
+
+
 
 urlpatterns = [
     #General Urls
@@ -107,14 +110,13 @@ urlpatterns = [
     path("getProductPerformanceSummary/",getProductPerformanceSummary,name="getProductPerformanceSummary"),
     path("downloadProductPerformanceSummary/",downloadProductPerformanceSummary,name="downloadProductPerformanceSummary"),
     path("downloadProductPerformanceCSV/",downloadProductPerformanceCSV,name="downloadProductPerformanceCSV"),
+    path("profit_loss_chart/",profit_loss_chart,name="profit_loss_chart"),
+    path("getProfitAndLossDetails/",getProfitAndLossDetails,name="getProfitAndLossDetails"),
+    path("profitLossExportXl/",profitLossExportXl,name="profitLossExportXl"),
+    path("profitLossChartCsv/",profitLossChartCsv,name="profitLossChartCsv"),
+    path("ListingOptimizationView/",ListingOptimizationView,name="ListingOptimizationView")
 
 ]
-
-
-
-
-
-
 
 
 
