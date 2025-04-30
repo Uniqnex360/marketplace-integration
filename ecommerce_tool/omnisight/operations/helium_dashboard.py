@@ -1492,7 +1492,7 @@ def getPeriodWiseDataCustom(request):
             }
         return {
             "dateRanges": {
-                "current": {"from": cur_from.isoformat() + "Z", "to": cur_to.isoformat() + "Z"},
+                "current": {"from": cur_from.isoformat() + "Z","to": (cur_to - timedelta(days=1)).isoformat() + "Z"},
                 "previous": {"from": prev_from.isoformat() + "Z", "to": prev_to.isoformat() + "Z"}
             },
             "summary": {
@@ -1562,7 +1562,7 @@ def getPeriodWiseDataCustom(request):
     response_data = {
         "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end),
         "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1)),
-        "last7Days": create_period_response("Last 7 Days", last_7_start, last_7_end, last_7_prev_start, last_7_prev_end),
+        "last7Days": create_period_response("Last 7 Days", last_7_start, last_7_end , last_7_prev_start, last_7_prev_end),
         "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
     }
  
@@ -2006,6 +2006,7 @@ def downloadProductPerformanceSummary(request):
             margin = (net_profit / gross) * 100 if gross > 0 else 0
             sku_summary[sku]["netProfit"] = round(net_profit, 2)
             sku_summary[sku]["margin"] = round(margin, 2)
+            print(">>>>>>>>>>>>>>>>",action)
             if action == "top":
                 sku_summary[sku]["Trend"] = "Increasing"
             elif action == "least":
@@ -2044,6 +2045,8 @@ def downloadProductPerformanceSummary(request):
             round(data["grossRevenue"], 2),
             round(data["netProfit"], 2),
             data["unitsSold"],
+            data["Trend"],
+
         ])
  
     # Auto width
@@ -2210,6 +2213,8 @@ def downloadProductPerformanceCSV(request):
             round(data["grossRevenue"], 2),
             round(data["netProfit"], 2),
             data["unitsSold"],
+            data["Trend"],
+
         ])
  
     return response
