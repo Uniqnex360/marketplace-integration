@@ -2286,6 +2286,8 @@ def allMarketplaceDataxl(request):
             currency_data = {
                 "Marketplace": marketplace,
                 "Currency": currency,
+                "Start Date": from_date,
+                "End Date": to_date,
                 "Gross Revenue": round(gross_revenue, 2),
                 "Expenses": round(expenses, 2),
                 "Net Profit": round(net_profit, 2),
@@ -2293,11 +2295,11 @@ def allMarketplaceDataxl(request):
                 "Units Sold": total_units,
                 "Refunds": refund,
                 "SKU Count": len(sku_set),
-                "Tax": round(tax_price, 2),
+                "Tax Price": round(tax_price, 2),
                 "COGS": round(total_cogs, 2),
                 "Product Cost": round(total_product_cost, 2),
                 "Other Price": round(other_price, 2),
-                "Margin (%)": round(margin, 2)
+                "Margin (%)": round(margin, 2),
             }
 
             marketplace_metrics[marketplace]["currency_list"].append(currency_data)
@@ -2424,18 +2426,20 @@ def downloadMarketplaceDataCSV(request):
             marketplace_metrics.append({
                 "Marketplace": marketplace,
                 "Currency": currency,
+                "Start Date": from_date,
+                "End Date": to_date,
                 "Gross Revenue": round(gross_revenue, 2),
                 "Expenses": round(expenses, 2),
                 "Net Profit": round(net_profit, 2),
                 "ROI (%)": round(roi, 2),
-                "Margin (%)": round(margin, 2),
                 "Units Sold": total_units,
                 "Refunds": refund,
                 "SKU Count": len(sku_set),
                 "Tax Price": round(tax_price, 2),
                 "COGS": round(total_cogs, 2),
                 "Product Cost": round(total_product_cost, 2),
-                "Shipping Cost": 0,
+                "Other Price": round(other_price, 2),
+                "Margin (%)": round(margin, 2),
             })
 
         return marketplace_metrics
@@ -3726,27 +3730,77 @@ def updateChooseMatrix(request):
 
 
 def createNotes(self, request):
+    try:
+        data = JSONParser().parse(request)
+
+
+        product_id = data.get("product_id")
+        user_id = data.get("user_id")
+        notes = data.get("notes")
+
+        if not product_id or not user_id or not notes:
+            return JsonResponse({"error": "Missing required fields."}, status=400)
+
         try:
-            data = JSONParser().parse(request)
-
-
-            product_id = data.get("product_id")
-            user_id = data.get("user_id")
-            notes = data.get("notes")
-
-            if not product_id or not user_id or not notes:
-                return JsonResponse({"error": "Missing required fields."}, status=400)
-
-            try:
-                product = Product.objects.get(id=product_id)
-                user_obj = user.objects.get(id=user_id)
-            except :
-                return JsonResponse({"error": "Product or user not found."}, status=404)
-
-            note = notes_data(product_id=product, user_id=user_obj, notes=notes)
-            note.save()
-
-            return JsonResponse({"message": "Note added successfully."}, status=201)
-
+            product = Product.objects.get(id=product_id)
+            user_obj = user.objects.get(id=user_id)
         except :
-            return JsonResponse({"error": ""}, status=500)
+            return JsonResponse({"error": "Product or user not found."}, status=404)
+
+        note = notes_data(product_id=product, user_id=user_obj, notes=notes)
+        note.save()
+
+        return JsonResponse({"message": "Note added successfully."}, status=201)
+
+    except :
+        return JsonResponse({"error": ""}, status=500)
+    
+
+def ListingOptimizationView(request):
+    try:
+        product_id = request.GET.get('product_id')
+
+        # if not product_id or not isinstance(target_keywords, list):
+        #     return JsonResponse({"error": "product_id and target_keywords (list) are required."}, status=400)
+
+        product = Product.objects(id=product_id).first()
+        if not product:
+            return JsonResponse({"error": "Product not found."}, status=404)
+
+        # Extract fields
+        title = product.product_title or ""
+        bullets = product.features or []
+        description = product.product_description or ""
+        images = product.image_urls or []
+
+        # Compute Scores
+        def keyword_score(text, keywords):
+            used = [kw for kw in keywords if kw.lower() in text.lower()]
+            missing = list(set(keywords) - set(used))
+            return used, missing
+
+        title_score = min(len(title), 200) / 2
+        bullet_score = 100 if len(bullets) >= 5 else len(bullets) * 20
+        description_score = 100 if len(description) > 300 else len(description) / 3
+        image_score = min(len(images), 5) * 20
+
+        full_text = f"{title} {' '.join(bullets)} {description}"
+        used, missing = keyword_score(full_text, [])
+
+        overall_score = round((title_score + bullet_score + description_score + image_score) / 4, 2)
+
+        return JsonResponse({
+            "product_id": product_id,
+            "title_score": int(title_score),
+            "bullet_score": int(bullet_score),
+            "description_score": int(description_score),
+            "image_score": int(image_score),
+            "seo_suggestions": {
+                "missing_keywords": missing,
+                "used_keywords": used
+            },
+            "overall_score": overall_score
+        })
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)

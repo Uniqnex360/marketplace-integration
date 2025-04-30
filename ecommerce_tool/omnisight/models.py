@@ -403,3 +403,4 @@ class notes_data(Document):
     product_id = ReferenceField(Product)
     date_f = DateTimeField(default=datetime.now())
     notes = StringField()
+    user_id = ReferenceField(user)
