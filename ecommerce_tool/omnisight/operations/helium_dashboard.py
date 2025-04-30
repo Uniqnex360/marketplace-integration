@@ -17,6 +17,7 @@ import io
 from pytz import timezone
 from bson import ObjectId
 from calendar import monthrange
+from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
 
 
 def get_date_range(preset):
@@ -1177,7 +1178,7 @@ def getPeriodWiseDataXl(request):
             "pageViews": 0,
             "unitSessionPercentage": 0,
             "margin": round(margin, 2),
-            "seller":"",
+            "seller":SELLER_ID,
             "marketplace":marketplace_name
         }
 
@@ -1324,7 +1325,7 @@ def exportPeriodWiseCSV(request):
             "pageViews": 0,
             "unitSessionPercentage": 0,
             "margin": round(margin, 2),
-            "seller":"",
+            "seller":SELLER_ID,
             "marketplace":marketplace_name
         }
 
@@ -3883,83 +3884,59 @@ def createNotes(self, request):
     
 import re
 def ListingOptimizationView(request):
-    product_id = request.GET.get('product_id')
-    if not product_id:
-        return JsonResponse({"error": "product_id is required."}, status=400)
+    all_products = Product.objects()
+    optimized_count = 0
+    total_products = all_products.count()
 
-    product = Product.objects(id=product_id).first()
-    if not product:
-        return JsonResponse({"error": "Product not found."}, status=404)
+    def is_optimized(product):
+        # Title check
+        title = product.product_title or ""
+        if len(title) < 100 or re.search(r'(?i)(best|free|deal|offer|discount)', title):
+            return False
 
-    # === Extract fields ===
-    title = product.product_title or ""
-    bullets = product.features or []
-    description = product.product_description or ""
-    images = product.image_urls or []
-    upc = product.upc or ""
-    category = product.category or ""
+        # Bullet check
+        bullets = product.features or []
+        if len(bullets) < 5:
+            return False
+        if any(re.search(r'<|>|🔥|👍|😁|[A-Z]{4,}', b) for b in bullets):
+            return False
 
-    full_text = f"{title} {' '.join(bullets)} {description}"
+        # Description check
+        description = product.product_description or ""
+        if len(description) <= 300:
+            return False
+        words = re.findall(r'\b\w+\b', description)
+        if len(words) != len(set(words)):
+            return False
 
-    # === Helper functions ===
-    def validate_title(text):
-        length_score = min(len(text), 200) / 2
-        format_ok = all([
-            bool(re.search(r'\b[a-zA-Z]{2,}\b', text)),  # Has real words
-            not re.search(r'(?i)(best|free|deal|offer|discount)', text),
-            len(text) >= 50
-        ])
-        return int(length_score), format_ok
+        # Image check
+        images = product.image_urls or []
+        if not images:
+            return False
+        if any(
+            not img.endswith(('.jpg', '.jpeg', '.png')) or 'watermark' in img.lower()
+            for img in images
+        ):
+            return False
 
-    def validate_bullets(bullets):
-        count = len(bullets)
-        score = 100 if count >= 5 else count * 20
-        format_issues = [
-            b for b in bullets
-            if bool(re.search(r'<|>|🔥|👍|😁|[A-Z]{4,}', b))  # HTML, emojis, all caps
-        ]
-        return int(score), format_issues
+        # UPC check
+        upc = product.upc or ""
+        if not re.fullmatch(r'\d{12,14}', upc):
+            return False
 
-    def validate_description(desc):
-        length_score = 100 if len(desc) > 300 else len(desc) / 3
-        keyword_stuffing = len(re.findall(r'\b\w+\b', desc)) != len(set(re.findall(r'\b\w+\b', desc)))
-        return int(length_score), keyword_stuffing
+        # Category check
+        category = product.category or ""
+        if ">" not in category:
+            return False
 
-    def validate_images(images):
-        count = len(images)
-        score = min(count, 5) * 20
-        issues = []
-        for img_url in images:
-            if not img_url.endswith(('.jpg', '.png', '.jpeg')) or 'watermark' in img_url.lower():
-                issues.append(img_url)
-        return int(score), issues
+        return True
 
-    def validate_upc(upc):
-        return bool(re.fullmatch(r'\d{12,14}', upc))
-
-    # === Calculate scores ===
-    title_score, title_format_ok = validate_title(title)
-    bullet_score, bullet_format_issues = validate_bullets(bullets)
-    description_score, has_keyword_stuffing = validate_description(description)
-    image_score, image_issues = validate_images(images)
-    upc_valid = validate_upc(upc)
-
-    # === Category and attributes ===
-    category_ok = bool(category and ">" in category)
-
-    overall_score = round((title_score + bullet_score + description_score + image_score) / 4, 2)
+    for product in all_products:
+        if is_optimized(product):
+            optimized_count += 1
 
     return JsonResponse({
-        "product_id": str(product_id),
-        "title_score": title_score,
-        "title_format_valid": title_format_ok,
-        "bullet_score": bullet_score,
-        "bullet_format_issues": bullet_format_issues,
-        "description_score": description_score,
-        "keyword_stuffing_detected": has_keyword_stuffing,
-        "image_score": image_score,
-        "image_issues": image_issues,
-        "upc_valid": upc_valid,
-        "category_format_valid": category_ok,
-        "overall_score": overall_score
+        "total_products": total_products,
+        "optimized_products": optimized_count,
+        "not_optimized_products": total_products - optimized_count
     })
