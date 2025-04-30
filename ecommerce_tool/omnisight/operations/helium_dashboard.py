@@ -1924,7 +1924,8 @@ def downloadProductPerformanceSummary(request):
         "grossRevenue": 0.0,
         "totalCogs": 0.0,
         "netProfit": 0.0,
-        "margin": 0.0
+        "margin": 0.0,
+        "Trend" :""      
     })
  
     for order in orders:
@@ -2000,7 +2001,10 @@ def downloadProductPerformanceSummary(request):
             margin = (net_profit / gross) * 100 if gross > 0 else 0
             sku_summary[sku]["netProfit"] = round(net_profit, 2)
             sku_summary[sku]["margin"] = round(margin, 2)
- 
+            if action == "top":
+                sku_summary[sku]["Trend"] = "Increasing"
+            elif action == "least":
+                sku_summary[sku]["Trend"] = "Decreasing"
     # Sort and limit based on action
     sorted_summary = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
  
@@ -2030,8 +2034,8 @@ def downloadProductPerformanceSummary(request):
             data["sku"],
             data["fulfillment_channel"],
             data["m_name"],
-            from_date,
-            to_date,
+            from_date.date(),
+            to_date.date(),
             round(data["grossRevenue"], 2),
             round(data["netProfit"], 2),
             data["unitsSold"],
@@ -2084,18 +2088,19 @@ def downloadProductPerformanceCSV(request):
         "grossRevenue": 0.0,
         "totalCogs": 0.0,
         "netProfit": 0.0,
-        "margin": 0.0
+        "margin": 0.0,
+        "Trend":""
     })
  
     for order in orders:
         order_total = order.get("order_total", 0.0)
         item_ids = order.get("order_items", [])
-        marketplace_id = order.get("marketplace_id", "")
         fulfillment_channel = order.get("fulfillment_channel", "")
         temp_price = 0.0
         total_cogs = 0.0
         tax_price = 0
         sku_set = set()
+        marketplace_id = order.get("marketplace_id", "")
         Marketplace_obj = Marketplace.objects.filter(id = marketplace_id).first()
         m_name = ""
         if Marketplace_obj:
@@ -2161,7 +2166,10 @@ def downloadProductPerformanceCSV(request):
             margin = (net_profit / gross) * 100 if gross > 0 else 0
             sku_summary[sku]["netProfit"] = round(net_profit, 2)
             sku_summary[sku]["margin"] = round(margin, 2)
- 
+            if action == "top":
+                sku_summary[sku]["Trend"] = "Increasing"
+            elif action == "least":
+                sku_summary[sku]["Trend"] = "Decreasing"
     # Get action parameter to determine top or least
     action = request.GET.get('action', '').lower()
  
@@ -2192,8 +2200,8 @@ def downloadProductPerformanceCSV(request):
             data["sku"],
             data["fulfillment_channel"],
             data["m_name"],
-            from_date,
-            to_date,
+            from_date.date(),
+            to_date.date(),
             round(data["grossRevenue"], 2),
             round(data["netProfit"], 2),
             data["unitsSold"],
@@ -2286,20 +2294,20 @@ def allMarketplaceDataxl(request):
             currency_data = {
                 "Marketplace": marketplace,
                 "Currency": currency,
-                "Start Date": from_date,
-                "End Date": to_date,
+                "Start Date": from_date.date(),
+                "End Date": to_date.date(),
                 "Gross Revenue": round(gross_revenue, 2),
                 "Expenses": round(expenses, 2),
-                "Net Profit": round(net_profit, 2),
-                "ROI (%)": round(roi, 2),
-                "Units Sold": total_units,
-                "Refunds": refund,
-                "SKU Count": len(sku_set),
-                "Tax Price": round(tax_price, 2),
+                # "SKU Count": len(sku_set),
+                # "Tax Price": round(tax_price, 2),
                 "COGS": round(total_cogs, 2),
-                "Product Cost": round(total_product_cost, 2),
-                "Other Price": round(other_price, 2),
+                "Net Profit": round(net_profit, 2),
                 "Margin (%)": round(margin, 2),
+                "ROI (%)": round(roi, 2),
+                "Refunds": refund,
+                "Units Sold": total_units,
+                # "Product Cost": round(total_product_cost, 2),
+                # "Other Price": round(other_price, 2),
             }
 
             marketplace_metrics[marketplace]["currency_list"].append(currency_data)
@@ -2426,20 +2434,20 @@ def downloadMarketplaceDataCSV(request):
             marketplace_metrics.append({
                 "Marketplace": marketplace,
                 "Currency": currency,
-                "Start Date": from_date,
-                "End Date": to_date,
+                "Start Date": from_date.date(),
+                "End Date": to_date.date.date(),
                 "Gross Revenue": round(gross_revenue, 2),
                 "Expenses": round(expenses, 2),
-                "Net Profit": round(net_profit, 2),
-                "ROI (%)": round(roi, 2),
-                "Units Sold": total_units,
-                "Refunds": refund,
-                "SKU Count": len(sku_set),
-                "Tax Price": round(tax_price, 2),
+                # "SKU Count": len(sku_set),
+                # "Tax Price": round(tax_price, 2),
                 "COGS": round(total_cogs, 2),
-                "Product Cost": round(total_product_cost, 2),
-                "Other Price": round(other_price, 2),
+                "Net Profit": round(net_profit, 2),
                 "Margin (%)": round(margin, 2),
+                "ROI (%)": round(roi, 2),
+                "Refunds": refund,
+                "Units Sold": total_units,
+                # "Product Cost": round(total_product_cost, 2),
+                # "Other Price": round(other_price, 2),
             })
 
         return marketplace_metrics
@@ -3464,7 +3472,9 @@ def profitLossExportXl(request):
             {
                 "$project": {
                     "order_items": 1,
-                    "order_total": 1
+                    "order_total": 1,
+                    "marketplace_id": 1,
+
                 }
             }
         ]
@@ -3482,14 +3492,18 @@ def profitLossExportXl(request):
         other_price = 0
         tax_price = 0
         temp_price = 0
-
+        m_name = ""
         result = gross_revenue(start_date, end_date)
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
             temp_price = 0
             tax_price = 0
-
+            marketplace_id = order.get("marketplace_id", "")
+            Marketplace_obj = Marketplace.objects.filter(id = marketplace_id).first()
+            m_name = ""
+            if Marketplace_obj:
+                m_name = Marketplace_obj.name
             for item_id in order.get("order_items", []):
                 item_pipeline = [
                     {"$match": {"_id": item_id}},
@@ -3528,15 +3542,19 @@ def profitLossExportXl(request):
         margin = (net_profit / gross_revenue_amt * 100) if gross_revenue_amt else 0
 
         return {
+            "Marketplace":m_name,
+            "Date and Time":start_date,
             "Gross Revenue": round(gross_revenue_amt, 2),
             "Expenses": round((other_price + total_cogs) , 2),
+            "Estimated Payout":0,
             "Net Profit": round(net_profit, 2),
-            "ROI (%)": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
+            # "ROI (%)": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
             "Units Sold": total_units,
-            "SKU Count": len(sku_set),
-            "Tax Collected": round(tax_price, 2),
-            "Total COGS": round(total_cogs, 2),
-            "Profit Margin (%)": round(margin, 2)
+            # "SKU Count": len(sku_set),
+            # "Tax Collected": round(tax_price, 2),
+            # "Total COGS": round(total_cogs, 2),
+            # "Profit Margin (%)": round(margin, 2)
+            "PPC Sales": 0 
         }
 
     def generate_month_keys(start_year, start_month, end_year, end_month):
@@ -3574,22 +3592,35 @@ def profitLossExportXl(request):
     ws = wb.active
     ws.title = "Profit Loss Report"
 
-    headers = ["Date", "Gross Revenue", "Expenses", "Net Profit", "ROI (%)", "Units Sold", "SKU Count", "Tax Collected", "Total COGS", "Profit Margin (%)"]
+    headers = ["Marketplace", "Date and Time", "Gross Revenue", "Expenses", "Estimated Payout", "Net Profit", "Units", "PPC Sales"]
     ws.append(headers)
 
     for key in interval_keys:
         if interval_type == "hour":
             start = datetime.strptime(key, "%Y-%m-%d %H:00:00")
             end = start + timedelta(hours=1) - timedelta(seconds=1)
+            time_label = start.strftime("%Y-%m-%d %H:00:00")
         elif interval_type == "day":
             start = datetime.strptime(key, "%Y-%m-%d")
             end = start + timedelta(days=1) - timedelta(seconds=1)
+            time_label = start.strftime("%Y-%m-%d")
         else:
             year, month = int(key[:4]), int(key[5:7])
             start, end = get_month_range(year, month)
+            time_label = f"{year}-{month:02d}"
 
         row_data = calculate_metrics(start, end)
-        ws.append([key] + list(row_data.values()))
+
+        ws.append([
+            row_data.get("Marketplace", ""),
+            time_label,
+            row_data.get("Gross Revenue", 0),
+            row_data.get("Expenses", 0),
+            row_data.get("Estimated Payout", 0),
+            row_data.get("Net Profit", 0),
+            row_data.get("Units Sold", 0),
+            row_data.get("PPC Sales", 0),
+        ])
 
     # Save to BytesIO stream
     output = io.BytesIO()
@@ -3641,13 +3672,99 @@ def profitLossChartCsv(request):
         elif preset == "Last 90 days":
             return today - timedelta(days=89), today + timedelta(hours=23, minutes=59, seconds=59)
         return today, today
+    def gross_revenue(start_date, end_date):
+        pipeline = [
+            {
+                "$match": {
+                    "order_date": {"$gte": start_date, "$lte": end_date},
+                    "order_status": {"$in": ['Shipped', 'Delivered']}
+                }
+            },
+            {
+                "$project": {
+                    "order_items": 1,
+                    "order_total": 1,
+                    "marketplace_id": 1,
 
-    def dummy_calculate_metrics(start, end):
+                }
+            }
+        ]
+        return list(Order.objects.aggregate(*pipeline))
+    def dummy_calculate_metrics(start_date, end_date):
+        gross_revenue_amt = 0
+        total_cogs = 0
+        refund = 0
+        net_profit = 0
+        margin = 0
+        total_units = 0
+        sku_set = set()
+        order_total = 0
+        other_price = 0
+        tax_price = 0
+        temp_price = 0
+        m_name = ""
+        result = gross_revenue(start_date, end_date)
+        for order in result:
+            gross_revenue_amt += order.get("order_total", 0)
+            order_total = order.get("order_total", 0)
+            temp_price = 0
+            tax_price = 0
+            marketplace_id = order.get("marketplace_id", "")
+            Marketplace_obj = Marketplace.objects.filter(id = marketplace_id).first()
+            m_name = ""
+            if Marketplace_obj:
+                m_name = Marketplace_obj.name
+            for item_id in order.get("order_items", []):
+                item_pipeline = [
+                    {"$match": {"_id": item_id}},
+                    {
+                        "$lookup": {
+                            "from": "product",
+                            "localField": "ProductDetails.product_id",
+                            "foreignField": "_id",
+                            "as": "product_ins"
+                        }
+                    },
+                    {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                    {
+                        "$project": {
+                            "price": "$Pricing.ItemPrice.Amount",
+                            "tax_price": "$Pricing.ItemTax.Amount",
+                            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                            "sku": "$product_ins.sku"
+                        }
+                    }
+                ]
+                item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                if item_result:
+                    item = item_result[0]
+                    temp_price += item.get("price", 0)
+                    tax_price += item.get("tax_price", 0)
+                    total_cogs += item.get("cogs", 0)
+                    total_units += 1
+                    sku = item.get("sku")
+                    if sku:
+                        sku_set.add(sku)
+
+            other_price += order_total - temp_price - tax_price
+
+        net_profit = gross_revenue_amt - (other_price + total_cogs)
+        margin = (net_profit / gross_revenue_amt * 100) if gross_revenue_amt else 0
+
         return {
-            "grossRevenue": 1000,
-            "expenses": 300,
-            "netProfit": 700,
-            "unitsSold": 20,
+            "Marketplace":m_name,
+            "Date and Time":start_date,
+            "Gross Revenue": round(gross_revenue_amt, 2),
+            "Expenses": round((other_price + total_cogs) , 2),
+            "Estimated Payout":0,
+            "Net Profit": round(net_profit, 2),
+            # "ROI (%)": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
+            "Units Sold": total_units,
+            # "SKU Count": len(sku_set),
+            # "Tax Collected": round(tax_price, 2),
+            # "Total COGS": round(total_cogs, 2),
+            # "Profit Margin (%)": round(margin, 2)
+            "PPC Sales": 0 
         }
 
     preset = request.GET.get('preset', 'Last 7 days')
@@ -3673,7 +3790,7 @@ def profitLossChartCsv(request):
     response['Content-Disposition'] = f'attachment; filename="profit_loss_{preset.replace(" ", "_").lower()}.csv"'
 
     writer = csv.writer(response)
-    writer.writerow(["Date", "Gross Revenue", "Expenses", "Net Profit", "Units Sold"])
+    writer.writerow(["Marketplace", "Date and Time", "Gross Revenue", "Expenses", "Estimated Payout", "Net Profit", "Units", "PPC Sales"])
 
     for key in interval_keys:
         if interval_type == "hour":
@@ -3687,12 +3804,17 @@ def profitLossChartCsv(request):
             start, end = get_month_range(year, month)
 
         data = dummy_calculate_metrics(start, end)
+        print(data)
+
         writer.writerow([
-            key,
-            round(data["grossRevenue"], 2),
-            round(data["expenses"], 2),
-            round(data["netProfit"], 2),
-            data["unitsSold"]
+            data.get("Marketplace", ""),
+            data.get("Date and Time", "").strftime("%Y-%m-%d %H:%M:%S") if isinstance(data.get("Date and Time"), datetime) else data.get("Date and Time"),
+            data.get("Gross Revenue", 0),
+            data.get("Expenses", 0),
+            data.get("Estimated Payout", 0),
+            data.get("Net Profit", 0),
+            data.get("Units Sold", 0),
+            data.get("PPC Sales", 0),
         ])
 
     return response
