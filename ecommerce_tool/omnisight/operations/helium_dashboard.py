@@ -17,6 +17,7 @@ import io
 from pytz import timezone
 from bson import ObjectId
 from calendar import monthrange
+from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
 
 
 def get_date_range(preset):
@@ -821,6 +822,7 @@ def RevenueWidgetAPIView(request):
         "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
         }
         data['compare_total'] = difference
+        data['previous_total'] = compare_total
         data['compare_graph'] = get_graph_data(compare_startdate, compare_enddate, initial,marketplace_id)
     return data
 
@@ -1177,7 +1179,7 @@ def getPeriodWiseDataXl(request):
             "pageViews": 0,
             "unitSessionPercentage": 0,
             "margin": round(margin, 2),
-            "seller":"",
+            "seller":SELLER_ID,
             "marketplace":marketplace_name
         }
 
@@ -1324,7 +1326,7 @@ def exportPeriodWiseCSV(request):
             "pageViews": 0,
             "unitSessionPercentage": 0,
             "margin": round(margin, 2),
-            "seller":"",
+            "seller":SELLER_ID,
             "marketplace":marketplace_name
         }
 
@@ -1491,7 +1493,7 @@ def getPeriodWiseDataCustom(request):
             }
         return {
             "dateRanges": {
-                "current": {"from": cur_from.isoformat() + "Z", "to": cur_to.isoformat() + "Z"},
+                "current": {"from": cur_from.isoformat() + "Z","to": (cur_to - timedelta(days=1)).isoformat() + "Z"},
                 "previous": {"from": prev_from.isoformat() + "Z", "to": prev_to.isoformat() + "Z"}
             },
             "summary": {
@@ -1545,8 +1547,7 @@ def getPeriodWiseDataCustom(request):
     yesterday_start = today_start - timedelta(days=1)
     yesterday_end = today_start - timedelta(seconds=1)
     last_7_start = today_start - timedelta(days=7)
-    last_7_prev_start = today_start - timedelta(days=14)
-    last_7_prev_end = last_7_start - timedelta(seconds=1)
+    
     preset = request.GET.get('preset')
     from_date, to_date = get_date_range(preset)
     custom_duration = to_date - from_date
@@ -1554,12 +1555,15 @@ def getPeriodWiseDataCustom(request):
     prev_to_date = to_date - custom_duration
     today_start, today_end = get_date_range('Today')
     yesterday_start, yesterday_end = get_date_range('Yesterday')
+    last_7_start, last_7_end = get_date_range('Last 7 days')
+    last_7_prev_start = today_start - timedelta(days=14)
+    last_7_prev_end = last_7_start - timedelta(seconds=1)
     print(today_start,today_end)
     print(from_date,to_date)
     response_data = {
         "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end),
         "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1)),
-        "last7Days": create_period_response("Last 7 Days", last_7_start, today_end, last_7_prev_start, last_7_prev_end),
+        "last7Days": create_period_response("Last 7 Days", last_7_start, last_7_end , last_7_prev_start, last_7_prev_end),
         "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
     }
  
@@ -1777,6 +1781,8 @@ def allMarketplaceData(request):
 
     response_data = {
         "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
+        "from_date":from_date,
+        "to_date":to_date
     }
 
     return JsonResponse(response_data, safe=False)
@@ -2022,7 +2028,7 @@ def downloadProductPerformanceSummary(request):
  
     # Headers
     headers = [
-         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold",
+         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold","Trend"
     ]
     ws.append(headers)
  
@@ -2039,6 +2045,8 @@ def downloadProductPerformanceSummary(request):
             round(data["grossRevenue"], 2),
             round(data["netProfit"], 2),
             data["unitsSold"],
+            data["Trend"],
+
         ])
  
     # Auto width
@@ -2060,7 +2068,8 @@ def downloadProductPerformanceSummary(request):
  
 def downloadProductPerformanceCSV(request):
     from_date, to_date = get_date_range('Yesterday')
- 
+    action = request.GET.get('action', '').lower()
+    
     order_pipeline = [
         {
             "$match": {
@@ -2171,7 +2180,6 @@ def downloadProductPerformanceCSV(request):
             elif action == "least":
                 sku_summary[sku]["Trend"] = "Decreasing"
     # Get action parameter to determine top or least
-    action = request.GET.get('action', '').lower()
  
     # Sort and pick top 3 or least 3 based on netProfit
     sorted_summary = sorted(
@@ -2189,7 +2197,7 @@ def downloadProductPerformanceCSV(request):
     writer = csv.writer(response)
     # CSV headers
     writer.writerow([
-         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold",
+         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold","Trend"
     ])
  
     # CSV rows
@@ -2205,6 +2213,8 @@ def downloadProductPerformanceCSV(request):
             round(data["grossRevenue"], 2),
             round(data["netProfit"], 2),
             data["unitsSold"],
+            data["Trend"],
+
         ])
  
     return response
@@ -2213,14 +2223,18 @@ def downloadProductPerformanceCSV(request):
 
 
 def allMarketplaceDataxl(request):
-    from_str = request.GET.get("from_date")
-    to_str = request.GET.get("to_date")
-    try:
-        from_date = datetime.strptime(from_str, "%Y-%m-%d")
-        to_date = datetime.strptime(to_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
-    except:
-        to_date = datetime.now()
-        from_date = to_date - timedelta(days=30)
+    # from_str = request.GET.get("from_date")
+    # to_str = request.GET.get("to_date")
+
+    preset = request.GET.get("preset")
+    from_date,to_date = get_date_range(preset)
+
+    # try:
+    #     from_date = datetime.strptime(from_str, "%Y-%m-%d")
+    #     to_date = datetime.strptime(to_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+    # except:
+    #     to_date = datetime.now()
+    #     from_date = to_date - timedelta(days=30)
 
     def grouped_marketplace_metrics(start_date, end_date):
         orders = grossRevenue(start_date, end_date)
@@ -2353,14 +2367,10 @@ def allMarketplaceDataxl(request):
 
 
 def downloadMarketplaceDataCSV(request):
-    from_str = request.GET.get("from_date")
-    to_str = request.GET.get("to_date")
-    try:
-        from_date = datetime.strptime(from_str, "%Y-%m-%d")
-        to_date = datetime.strptime(to_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
-    except:
-        to_date = datetime.now()
-        from_date = to_date - timedelta(days=30)
+
+    preset = request.GET.get("preset")
+    from_date,to_date = get_date_range(preset)
+    
 
     def grouped_marketplace_metrics(start_date, end_date):
         orders = grossRevenue(start_date, end_date)
@@ -2435,7 +2445,7 @@ def downloadMarketplaceDataCSV(request):
                 "Marketplace": marketplace,
                 "Currency": currency,
                 "Start Date": from_date.date(),
-                "End Date": to_date.date.date(),
+                "End Date": to_date.date(),
                 "Gross Revenue": round(gross_revenue, 2),
                 "Expenses": round(expenses, 2),
                 # "SKU Count": len(sku_set),
@@ -3877,52 +3887,61 @@ def createNotes(self, request):
     except :
         return JsonResponse({"error": ""}, status=500)
     
-
+import re
 def ListingOptimizationView(request):
-    try:
-        product_id = request.GET.get('product_id')
+    all_products = Product.objects()
+    optimized_count = 0
+    total_products = all_products.count()
 
-        # if not product_id or not isinstance(target_keywords, list):
-        #     return JsonResponse({"error": "product_id and target_keywords (list) are required."}, status=400)
-
-        product = Product.objects(id=product_id).first()
-        if not product:
-            return JsonResponse({"error": "Product not found."}, status=404)
-
-        # Extract fields
+    def is_optimized(product):
+        # Title check
         title = product.product_title or ""
+        if len(title) < 100 or re.search(r'(?i)(best|free|deal|offer|discount)', title):
+            return False
+
+        # Bullet check
         bullets = product.features or []
+        if len(bullets) < 5:
+            return False
+        if any(re.search(r'<|>|🔥|👍|😁|[A-Z]{4,}', b) for b in bullets):
+            return False
+
+        # Description check
         description = product.product_description or ""
+        if len(description) <= 300:
+            return False
+        words = re.findall(r'\b\w+\b', description)
+        if len(words) != len(set(words)):
+            return False
+
+        # Image check
         images = product.image_urls or []
+        if not images:
+            return False
+        if any(
+            not img.endswith(('.jpg', '.jpeg', '.png')) or 'watermark' in img.lower()
+            for img in images
+        ):
+            return False
 
-        # Compute Scores
-        def keyword_score(text, keywords):
-            used = [kw for kw in keywords if kw.lower() in text.lower()]
-            missing = list(set(keywords) - set(used))
-            return used, missing
+        # UPC check
+        upc = product.upc or ""
+        if not re.fullmatch(r'\d{12,14}', upc):
+            return False
 
-        title_score = min(len(title), 200) / 2
-        bullet_score = 100 if len(bullets) >= 5 else len(bullets) * 20
-        description_score = 100 if len(description) > 300 else len(description) / 3
-        image_score = min(len(images), 5) * 20
+        # Category check
+        category = product.category or ""
+        if ">" not in category:
+            return False
 
-        full_text = f"{title} {' '.join(bullets)} {description}"
-        used, missing = keyword_score(full_text, [])
+        return True
 
-        overall_score = round((title_score + bullet_score + description_score + image_score) / 4, 2)
+    for product in all_products:
+        if is_optimized(product):
+            optimized_count += 1
 
-        return JsonResponse({
-            "product_id": product_id,
-            "title_score": int(title_score),
-            "bullet_score": int(bullet_score),
-            "description_score": int(description_score),
-            "image_score": int(image_score),
-            "seo_suggestions": {
-                "missing_keywords": missing,
-                "used_keywords": used
-            },
-            "overall_score": overall_score
-        })
-
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+    return JsonResponse({
+        "total_products": total_products,
+        "optimized_products": optimized_count,
+        "not_optimized_products": total_products - optimized_count
+    })
