@@ -1231,8 +1231,11 @@ def getPeriodWiseDataXl(request):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Period Metrics"
-
-    ws.append(headers)
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.value = header
+        cell.font = Font(bold=True)
+    # ws.append(headers)
     for row in period_rows:
         ws.append(row)
 
@@ -2018,9 +2021,12 @@ def downloadProductPerformanceSummary(request):
  
     # Headers
     headers = [
-         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold","Trend"
+         "Product Title","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold","Trend"
     ]
-    ws.append(headers)
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.value = header
+        cell.font = Font(bold=True)
  
     # Rows
     for data in final_summary:
@@ -2190,7 +2196,7 @@ def downloadProductPerformanceCSV(request):
     writer = csv.writer(response)
     # CSV headers
     writer.writerow([
-         "Product Name","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold","Trend"
+         "Product Title","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold","Trend"
     ])
  
     # CSV rows
@@ -2754,7 +2760,11 @@ def exportCitywiseSalesExcel(request):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Sales Data"
-    ws.append(headers)
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.value = header
+        cell.font = Font(bold=True)
+    # ws.append(headers)
     for row in data_rows:
         ws.append(row)
 
@@ -3596,7 +3606,11 @@ def profitLossExportXl(request):
     ws.title = "Profit Loss Report"
 
     headers = ["Marketplace", "Date and Time", "Gross Revenue", "Expenses", "Estimated Payout", "Net Profit", "Units", "PPC Sales"]
-    ws.append(headers)
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.value = header
+        cell.font = Font(bold=True)
+    # ws.append(headers)
 
     for key in interval_keys:
         if interval_type == "hour":
@@ -3937,4 +3951,67 @@ def ListingOptimizationView(request):
         "total_products": total_products,
         "optimized_products": optimized_count,
         "not_optimized_products": total_products - optimized_count
+    })
+
+
+
+def obtainChooseMatrix(request):
+    name = request.GET.get('name')
+    item_pipeline = [
+                        { "$match": { "name": name } },
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "name" :1,
+                                "select_all":1,
+                                "gross_revenue" :1,
+                                "units_sold" :1,
+                                "acos" :1,
+                                "tacos" :1,
+                                "refund_quantity" :1,
+                                "net_profit":1,
+                                "profit_margin" :1,
+                                "refund_amount":1,
+                                "roas" :1,
+                                "orders" :1,
+                                "ppc_spend" :1
+                            }
+                        }
+                    ]
+    item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
+    if item_result:
+        item_result = item_result[0]
+        return JsonResponse(item_result,safe=False)
+    return JsonResponse({},safe=False)
+
+
+from django.http import JsonResponse
+from mongoengine.queryset.visitor import Q
+
+def ProductPerformanceView(request):
+    all_products = Product.objects()
+    high_performance = 0
+    medium_performance = 0
+    low_performance = 0
+    total_products = all_products.count()
+
+    for product in all_products:
+        revenue = getattr(product, 'gross_revenue', 0)
+        profit = getattr(product, 'net_profit', 0)
+        units = getattr(product, 'units_sold', 0)
+        trend = (getattr(product, 'trend', '') or '').lower()
+
+        # Adjust these thresholds based on your business needs
+        if revenue >= 1000 and profit >= 200 and units >= 50 and trend in ['rising', 'stable']:
+            high_performance += 1
+        elif revenue >= 500 and profit >= 100 and units >= 20:
+            medium_performance += 1
+        else:
+            low_performance += 1
+
+    return JsonResponse({
+        "total_products": total_products,
+        "high_performance": high_performance,
+        "medium_performance": medium_performance,
+        "low_performance": low_performance
     })
