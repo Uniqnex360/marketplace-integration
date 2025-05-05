@@ -47,7 +47,8 @@ class Manufacturer(Document):
 class Product(Document):
     # General Product Details
     product_title = StringField()
-    page_views = IntField(default=0)
+    page_views = IntField(default=0) #dummy data
+    refund = IntField(default=0) #dummy data
     product_description = StringField()
     product_id = StringField()  # Can store ASIN, UPC, GTIN, WPID
     product_id_type = StringField()
@@ -398,10 +399,25 @@ class chooseMatrix(Document):
     roas =  BooleanField()
     orders =  BooleanField()
     ppc_spend =  BooleanField()
-
+    total_cogs = BooleanField()
+    business_value = BooleanField()
 
 class notes_data(Document):
     product_id = ReferenceField(Product)
     date_f = DateTimeField(default=datetime.now())
     notes = StringField()
     user_id = ReferenceField(user)
+
+
+class Fee(Document):
+    marketplace = StringField()
+    fee_type = StringField()
+    amount = FloatField()
+    date =  DateTimeField(default=datetime.now())
+
+
+class Refund(Document):
+    product_id = ReferenceField(Product)
+    date =  DateTimeField(default=datetime.now())
+    reason  = StringField()
+

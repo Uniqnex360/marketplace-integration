@@ -1,5 +1,5 @@
 from mongoengine import Q
-from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix
+from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund
 from mongoengine.queryset.visitor import Q
 from dateutil.relativedelta import relativedelta
 from django.views.decorators.csrf import csrf_exempt
@@ -314,6 +314,7 @@ def get_metrics_by_date_range(request):
             "total_orders": round(total_orders, 2),
             "total_units": round(total_units, 2)
         }
+
     difference = {
         "gross_revenue": round(metrics["targeted"]["gross_revenue"] - metrics["previous"]["gross_revenue"],2),
         "total_cogs": round(metrics["targeted"]["total_cogs"] - metrics["previous"]["total_cogs"],2),
@@ -324,6 +325,36 @@ def get_metrics_by_date_range(request):
         "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"],2),
     }
     metrics['targeted']["business_value"] = AnnualizedRevenueAPIView(target_date)
+    name = "Today Snapshot"
+    item_pipeline = [
+                        { "$match": { "name": name } }
+                    ]
+    item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
+    if item_result:
+        item_result = item_result[0]
+        if item_result['select_all']:
+            pass
+        if item_result['gross_revenue'] == False:
+            del metrics['targeted']["gross_revenue"]
+            del metrics['previous']["gross_revenue"]
+        if item_result['units_sold'] == False:
+            del metrics['targeted']["total_units"]
+            del metrics['previous']["total_units"]
+        if item_result['total_cogs'] == False:
+            del metrics['targeted']["total_cogs"]
+            del metrics['previous']["total_cogs"]
+        if item_result['business_value'] == False:
+            del metrics['targeted']["business_value"]
+            # del metrics['previous']["business_value"]
+        if item_result['orders'] == False:
+            del metrics['targeted']["total_orders"]
+            del metrics['previous']["total_orders"]
+        if item_result['refund_quantity'] == False:
+            del metrics['targeted']["refund"]
+            del metrics['previous']["refund"]
+        if item_result['profit_margin'] == False:
+            del metrics['targeted']["margin"]
+            del metrics['previous']["margin"]
     metrics["difference"] = difference
     return metrics
 
@@ -824,6 +855,38 @@ def RevenueWidgetAPIView(request):
         data['compare_total'] = difference
         data['previous_total'] = compare_total
         data['compare_graph'] = get_graph_data(compare_startdate, compare_enddate, initial,marketplace_id)
+    name = "Revenue"
+    item_pipeline = [
+                        { "$match": { "name": name } }
+                    ]
+    item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
+    if item_result:
+        item_result = item_result[0]
+    
+        if item_result['select_all']:
+            pass
+        if item_result['gross_revenue'] == False:
+            del data['total']["gross_revenue"]
+        if item_result['units_sold'] == False:
+            del data['total']["units_sold"]
+        # if item_result['acos'] == False:
+        #     del data['total']["acos"]
+        # if item_result['tacos'] == False:
+        #     del data['total']["tacos"]
+        if item_result['refund_quantity'] == False:
+            del data['total']["refund_quantity"]
+        if item_result['refund_amount'] == False:
+            del data['total']["refund_amount"]
+        if item_result['net_profit'] == False:
+            del data['total']["net_profit"]
+        if item_result['profit_margin'] == False:
+            del data['total']["profit_margin"]
+        # if item_result['roas'] == False:
+        #     del data['total']["roas"]
+        if item_result['orders'] == False:
+            del data['total']["orders"]
+        # if item_result['ppc_spend'] == False:
+        #     del data['total']["ppc_spend"]
     return data
 
 
@@ -3837,13 +3900,30 @@ def profitLossChartCsv(request):
     return response
 
 from rest_framework.parsers import JSONParser # type: ignore
-def updateChooseMatrix(request):
-    try:
-        json_req = JSONParser().parse(request)
-        name = json_req['name']
 
+@csrf_exempt
+def updateChooseMatrix(request):
+    json_req = JSONParser().parse(request)
+    name = json_req['name']
+    if 'select_all' in json_req and json_req['select_all'] == True:
         update_fields = {
-            'select_all': json_req['select_all'],
+        'select_all': json_req['select_all']}
+
+    else:
+        if name == "Today Snapshot":
+            update_fields = {
+                'select_all': False,
+            'gross_revenue': json_req['gross_revenue'],
+            'total_cogs': json_req['total_cogs'],
+            'profit_margin': json_req['profit_margin'],
+            'orders': json_req['orders'],
+            'units_sold': json_req['units_sold'],
+            'business_value': json_req['business_value'],
+            'refund_quantity': json_req['refund_quantity'],
+            }
+        elif name == "Revenue":
+            update_fields = {
+            'select_all': False,
             'gross_revenue': json_req['gross_revenue'],
             'units_sold': json_req['units_sold'],
             'acos': json_req['acos'],
@@ -3855,16 +3935,13 @@ def updateChooseMatrix(request):
             'roas': json_req['roas'],
             'orders': json_req['orders'],
             'ppc_spend': json_req['ppc_spend']
-        }
-        updated_count = chooseMatrix.objects.filter(name=name).update(**update_fields)
+            }
+    updated_count = chooseMatrix.objects.filter(name=name).update(**update_fields)
 
-        if updated_count == 0:
-            return JsonResponse({'status': 'not found', 'message': f'No entry found with name: {name}'}, status=404)
+    if updated_count == 0:
+        return JsonResponse({'status': 'not found', 'message': f'No entry found with name: {name}'}, status=404)
 
-        return JsonResponse({'status': 'success', 'updated_records': updated_count}, status=200)
-
-    except Exception as e:
-        return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
+    return JsonResponse({'status': 'success', 'updated_records': updated_count}, status=200)
 
 
 
@@ -3959,59 +4036,130 @@ def obtainChooseMatrix(request):
     name = request.GET.get('name')
     item_pipeline = [
                         { "$match": { "name": name } },
-                        {
-                            "$project": {
-                                "_id": 0,
-                                "name" :1,
-                                "select_all":1,
-                                "gross_revenue" :1,
-                                "units_sold" :1,
-                                "acos" :1,
-                                "tacos" :1,
-                                "refund_quantity" :1,
-                                "net_profit":1,
-                                "profit_margin" :1,
-                                "refund_amount":1,
-                                "roas" :1,
-                                "orders" :1,
-                                "ppc_spend" :1
-                            }
-                        }
                     ]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
     if item_result:
+        del item_result[0]['_id']
         item_result = item_result[0]
         return JsonResponse(item_result,safe=False)
     return JsonResponse({},safe=False)
 
 
-from django.http import JsonResponse
-from mongoengine.queryset.visitor import Q
+def InsightsDashboardView(request):
 
-def ProductPerformanceView(request):
     all_products = Product.objects()
-    high_performance = 0
-    medium_performance = 0
-    low_performance = 0
     total_products = all_products.count()
+    optimized_count = 0
+    refund_alerts = []
+    fee_alerts = []
 
-    for product in all_products:
-        revenue = getattr(product, 'gross_revenue', 0)
-        profit = getattr(product, 'net_profit', 0)
-        units = getattr(product, 'units_sold', 0)
-        trend = (getattr(product, 'trend', '') or '').lower()
+    def is_optimized(product):
+        title = product.product_title or ""
+        if len(title) < 100 or re.search(r'(?i)(best|free|deal|offer|discount)', title):
+            return False
 
-        # Adjust these thresholds based on your business needs
-        if revenue >= 1000 and profit >= 200 and units >= 50 and trend in ['rising', 'stable']:
-            high_performance += 1
-        elif revenue >= 500 and profit >= 100 and units >= 20:
-            medium_performance += 1
-        else:
-            low_performance += 1
+        bullets = product.features or []
+        if len(bullets) < 5 or any(re.search(r'<|>|🔥|👍|😁|[A-Z]{4,}', b) for b in bullets):
+            return False
+
+        description = product.product_description or ""
+        if len(description) <= 300:
+            return False
+        words = re.findall(r'\b\w+\b', description)
+        if len(words) != len(set(words)):
+            return False
+
+        images = product.image_urls or []
+        if not images or any(not img.endswith(('.jpg', '.jpeg', '.png')) or 'watermark' in img.lower() for img in images):
+            return False
+
+        upc = product.upc or ""
+        if not re.fullmatch(r'\d{12,14}', upc):
+            return False
+
+        category = product.category or ""
+        if ">" not in category:
+            return False
+
+        return True
+
+    Refund_obj = Refund.objects()
+    refunded_product_ids = list(set([i.product_id.id for i in Refund_obj]))
+    print(refunded_product_ids)
+    for product_id in refunded_product_ids:
+        product = Product.objects(id=product_id).first()
+        if not product:
+            continue
+
+        if is_optimized(product):
+            optimized_count += 1
+
+        # Count orders using aggregation
+        pipeline = [
+            {
+                "$lookup": {
+                    "from": "order_items",
+                    "localField": "order_items",
+                    "foreignField": "_id",
+                    "as": "order_items"
+                }
+            },
+            {"$unwind": "$order_items"},
+            {
+                "$match": {
+                    "order_items.ProductDetails.product_id": ObjectId(str(product.id))
+                }
+            }
+        ]
+        orders = list(Order.objects.aggregate(*pipeline))
+        total_orders = len(orders)
+        refund_count = Refund.objects(product_id=product.id).count()
+
+        if total_orders > 0:
+            refund_rate = (refund_count / total_orders) * 100
+            if refund_rate > 6:
+                refund_alerts.append({
+                    "product_id": str(product.id),
+                    "title": product.product_title,
+                    "refund_rate": round(refund_rate, 2),
+                    "message": f"{product.product_title} has exceeded a 6% refund rate. Refund rates are soaring, impacting your profits. Review, analyze, and revise now."
+                })
+
+    # Amazon Fee Analysis
+    today = datetime.utcnow()
+    start_of_this_month = today.replace(day=1)
+    start_of_last_month = (start_of_this_month - timedelta(days=1)).replace(day=1)
+
+    this_month_fees = Fee.objects(
+        marketplace="amazon.com",
+        fee_type="storage",
+        date__gte=start_of_this_month,
+        date__lt=today
+    ).sum('amount') or 0.0
+
+    last_month_fees = Fee.objects(
+        marketplace="amazon.com",
+        fee_type="storage",
+        date__gte=start_of_last_month,
+        date__lt=start_of_this_month
+    ).sum('amount') or 0.0
+
+    if this_month_fees > last_month_fees:
+        increase = round(this_month_fees - last_month_fees, 2)
+        fee_alerts.append({
+            "marketplace": "amazon.com",
+            "increase_amount": increase,
+            "message": f"Amazon Storage fees have increased by ${increase} for the amazon.com. Storage fees have increased, cutting into your profit margins. Consider optimizing your inventory or fulfillment strategies now."
+        })
 
     return JsonResponse({
         "total_products": total_products,
-        "high_performance": high_performance,
-        "medium_performance": medium_performance,
-        "low_performance": low_performance
+        "listing_optimization": {
+            "optimized_products": optimized_count,
+            "not_optimized_products": total_products - optimized_count
+        },
+        "alerts": {
+            "storage_fee_alerts": fee_alerts,
+            "refund_alerts": refund_alerts
+        }
     })
