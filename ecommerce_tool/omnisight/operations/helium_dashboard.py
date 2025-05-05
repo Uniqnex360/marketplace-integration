@@ -4085,7 +4085,6 @@ def InsightsDashboardView(request):
 
     Refund_obj = Refund.objects()
     refunded_product_ids = list(set([i.product_id.id for i in Refund_obj]))
-    print(refunded_product_ids)
     for product_id in refunded_product_ids:
         product = Product.objects(id=product_id).first()
         if not product:
@@ -4114,7 +4113,7 @@ def InsightsDashboardView(request):
         orders = list(Order.objects.aggregate(*pipeline))
         total_orders = len(orders)
         refund_count = Refund.objects(product_id=product.id).count()
-
+        # total_orders = 8
         if total_orders > 0:
             refund_rate = (refund_count / total_orders) * 100
             if refund_rate > 6:
@@ -4143,7 +4142,7 @@ def InsightsDashboardView(request):
         date__gte=start_of_last_month,
         date__lt=start_of_this_month
     ).sum('amount') or 0.0
-
+    print(this_month_fees,last_month_fees)
     if this_month_fees > last_month_fees:
         increase = round(this_month_fees - last_month_fees, 2)
         fee_alerts.append({
