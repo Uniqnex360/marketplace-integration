@@ -469,7 +469,7 @@ def update_product_images_from_csv(file_path):
 
 from datetime import datetime
 
-def process_walmart_order(json_data):
+def process_walmart_order(json_data,order_date=None):
     """Processes a single Walmart order item and saves it to the OrderItems collection."""
     try:
         product = DatabaseModel.get_document(Product.objects, {"product_title": json_data.get("item", {}).get("productName", "")}, ["id"])
@@ -506,6 +506,7 @@ def process_walmart_order(json_data):
 
     order_item = OrderItems(
         OrderId=json_data.get("lineNumber", ""),
+        created_date=order_date if order_date else datetime.now(),
         Platform="Walmart",
         ProductDetails=ProductDetails(
             product_id= product_id,
@@ -597,6 +598,9 @@ def syncRecentWalmartOrders():
                 print(f"Order with purchase order ID {row['purchaseOrderId']} already exists. Skipping...")
             else:
                 print(f"Creating order with purchase order ID {row['purchaseOrderId']}...")
+                order_date = row.get('orderDate', "")
+                if order_date:
+                    order_date = datetime.fromtimestamp(int(order_date) / 1000)
                 order_items = list()
                 shipNode = eval(str(row['shipNode'])) if row.get('shipNode') else {}
                 order_details = eval(str(row['orderLines'])) if row.get('orderLines') else []
@@ -610,13 +614,11 @@ def syncRecentWalmartOrders():
                             tax = float(charge_ins['tax']['taxAmount']['amount'])
                         order_total += float(charge_ins['chargeAmount']['amount']) + tax
                         currency = charge_ins['chargeAmount']['currency']
-                    order_items.append(process_walmart_order(order_line_ins))
+                    order_items.append(process_walmart_order(order_line_ins,order_date))
 
                 order_status = order_line_ins.get('orderLineStatuses', {}).get('orderLineStatus', [{}])[0].get('status', "")
 
-                order_date = row.get('orderDate', "")
-                if order_date:
-                    order_date = datetime.fromtimestamp(int(order_date) / 1000)
+                
                 order = Order(
                     marketplace_id=marketplace_id,
                     purchase_order_id=str(row.get('purchaseOrderId', "")),

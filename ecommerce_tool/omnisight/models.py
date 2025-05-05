@@ -47,7 +47,8 @@ class Manufacturer(Document):
 class Product(Document):
     # General Product Details
     product_title = StringField()
-    page_views = IntField(default=0)
+    page_views = IntField(default=0) #dummy data
+    refund = IntField(default=0) #dummy data
     product_description = StringField()
     product_id = StringField()  # Can store ASIN, UPC, GTIN, WPID
     product_id_type = StringField()
@@ -214,6 +215,8 @@ class OrderItems(Document):
     TaxCollection = EmbeddedDocumentField(TaxCollection, required=True)
     IsGift = BooleanField(required=True)
     BuyerInfo = EmbeddedDocumentField(BuyerInfo, default=None)
+    created_date = DateTimeField()
+    document_created_date = DateTimeField(default=datetime.now())
 
 
 
@@ -398,10 +401,73 @@ class chooseMatrix(Document):
     roas =  BooleanField()
     orders =  BooleanField()
     ppc_spend =  BooleanField()
-
+    total_cogs = BooleanField()
+    business_value = BooleanField()
 
 class notes_data(Document):
     product_id = ReferenceField(Product)
     date_f = DateTimeField(default=datetime.now())
     notes = StringField()
     user_id = ReferenceField(user)
+
+
+class Fee(Document):
+    marketplace = StringField()
+    fee_type = StringField()
+    amount = FloatField()
+    date =  DateTimeField(default=datetime.now())
+
+
+class Refund(Document):
+    product_id = ReferenceField(Product)
+    date =  DateTimeField(default=datetime.now())
+    reason  = StringField()
+
+
+# import random
+# from datetime import datetime, timedelta
+
+# # Fetch 20 random orders
+# random_orders = list(Order.objects.aggregate([{"$sample": {"size": 20}}]))
+# i=1
+# # Duplicate orders with updated order_date
+# for order_dict in random_orders:
+#     print("1111111111",i)
+#     i+=1
+#     order_dict.pop('_id', None)  # Remove the original ID to create a new document
+#     # random_time = (datetime.now()).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59), microsecond=0)
+#     random_time = (datetime.now() - timedelta(days=1)).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59), microsecond=0)
+
+#     order_dict['order_date'] = random_time  # Set order_date to a random time today
+#     # Ensure payment_method_details is a string
+#     if 'payment_method_details' in order_dict and not isinstance(order_dict['payment_method_details'], str):
+#         order_dict['payment_method_details'] = str(order_dict['payment_method_details'])
+#     new_order = Order(**order_dict)
+#     new_order.save()
+
+# print("20 random orders duplicated with updated order_date set to random times today.")
+
+
+# Update page_views for all products with a random integer between 500 and 10000
+# def update_page_views(products):
+#     for product in products:
+#         product.page_views = random.randint(500, 10000)
+#         product.save()
+
+# # Split products into chunks of 100
+# products = list(Product.objects)
+# chunk_size = 100
+# chunks = [products[i:i + chunk_size] for i in range(0, len(products), chunk_size)]
+
+# threads = []
+# for i, chunk in enumerate(chunks):
+#     print(f"Starting thread {i+1}")
+#     thread = threading.Thread(target=update_page_views, args=(chunk,))
+#     threads.append(thread)
+#     thread.start()
+
+# # Wait for all threads to complete
+# for thread in threads:
+#     thread.join()
+
+# print("Updated page_views for all products.")

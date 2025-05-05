@@ -429,7 +429,7 @@ file_path2 = "/home/lexicon/walmart/Amazonorders.xlsx"
 # process_excel_for_amazonOrders(file_path2)
 
 
-def process_amazon_order(json_data):
+def process_amazon_order(json_data,order_date=None):
     """Processes a single Amazon order item and saves it to the OrderItems collection."""
     try:
         product = DatabaseModel.get_document(Product.objects, {"product_title": json_data.get("Title", "")}, ["id"])
@@ -447,6 +447,7 @@ def process_amazon_order(json_data):
     order_item = OrderItems(
         OrderId=json_data.get("OrderItemId", ""),
         Platform="Amazon",
+        created_date=order_date if order_date else datetime.now(),
         ProductDetails=ProductDetails(
             product_id = product_id,
             Title=json_data.get("Title", "Unknown Product"),
@@ -555,11 +556,13 @@ def syncRecentAmazonOrders():
                 }
 
                 response = requests.get(url, headers=headers)
+                order_date = converttime(row.get('PurchaseDate', "")) if row.get('PurchaseDate') else ""
                 if response.status_code == 200:
                     report_url = response.json().get("payload", {})
                     order_details =  report_url.get('OrderItems', [])
                     for order_ins in order_details:
-                        order_items.append(process_amazon_order(order_ins))
+                        order_items.append(process_amazon_order(order_ins),order_date)
+
 
                 order = Order(
                     marketplace_id=marketplace_id,
@@ -578,7 +581,7 @@ def syncRecentAmazonOrders():
                     is_sold_by_ab=row.get('IsSoldByAB', False),
                     latest_ship_date=converttime(row.get('LatestShipDate', "")) if row.get('LatestShipDate') else "",
                     ship_service_level=str(row.get('ShipServiceLevel', "")),
-                    order_date=converttime(row.get('PurchaseDate', "")) if row.get('PurchaseDate') else "",
+                    order_date=order_date,
                     is_ispu=row.get('IsISPU', False),
                     order_status=str(row.get('OrderStatus', "")),
                     shipping_information=row.get('ShippingAddress', {}),
