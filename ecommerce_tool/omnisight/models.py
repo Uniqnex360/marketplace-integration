@@ -47,6 +47,7 @@ class Manufacturer(Document):
 class Product(Document):
     # General Product Details
     product_title = StringField()
+    page_views = IntField(default=0)
     product_description = StringField()
     product_id = StringField()  # Can store ASIN, UPC, GTIN, WPID
     product_id_type = StringField()
