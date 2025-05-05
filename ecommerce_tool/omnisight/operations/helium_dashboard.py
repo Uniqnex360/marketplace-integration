@@ -18,6 +18,8 @@ from pytz import timezone
 from bson import ObjectId
 from calendar import monthrange
 from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
+from django.db.models import Sum, Q
+
 
 
 def get_date_range(preset):
@@ -4162,3 +4164,148 @@ def InsightsDashboardView(request):
             "refund_alerts": refund_alerts
         }
     })
+
+
+
+###########################-----MY Products APIS-----##############################
+
+
+def productsDetailsPageSummary(request):
+    product_id = request.GET.get('product_id')
+    pipeline = [
+        {
+            "$match": {
+                "_id": product_id
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "sku": "$sku",
+                "asin" : {"$ifNull" : ["$product_id",""]},
+                "product_title" : {"$ifNull" : ["$product_title",""]},
+                "image_url" : {"$ifNull" : ["$image_url",""]},
+
+                "price" : {"$ifNull" : ["$price",0.0]},
+                "stock" : {"$ifNull" : ["$quantity",0]},
+                "review_count" : {"$ifNull" : ["$review_count",0]},
+                "age" : {"$ifNull" : ["$age",0]},
+                "listing_quality_score" : {"$ifNull" : ["$listing_quality_score",0.0]},
+            }
+        }
+    ]
+    item_result = list(Product.objects.aggregate(*pipeline))
+    if item_result:
+        item_result = item_result[0]
+        return item_result
+    return {}
+
+
+def productsSalesOverview(request):
+    product_id = request.GET.get('product_id')
+    # Get date ranges
+    today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    yesterday = today - timedelta(days=1)
+    previous_day = yesterday - timedelta(days=1)
+    seven_days_ago = today - timedelta(days=7)
+    thirty_days_ago = today - timedelta(days=30)
+    
+    # Helper function to calculate percentage change
+    def get_change(current, previous):
+        if previous == 0:
+            return "∞" if current > 0 else "-"
+        change = ((current - previous) / previous) * 100
+        return f"{change:.0f}%"
+
+    print("111111111111")
+    # 1. Get summary data (yesterday, previous day, last 7 days)
+    # Assuming you have Order and OrderItem models
+    yesterday_data = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=yesterday,
+        order__order_date__lt=today
+    ).aggregate(
+        units=Sum('quantity'),
+        revenue=Sum('price')
+    )
+    
+    previous_day_data = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=previous_day,
+        order__order_date__lt=yesterday
+    ).aggregate(
+        units=Sum('quantity'),
+        revenue=Sum('price')
+    )
+    
+    last_7_days_data = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=seven_days_ago,
+        order__order_date__lt=today
+    ).aggregate(
+        units=Sum('quantity'),
+        revenue=Sum('price')
+    )
+    
+    # 2. Get 30-day graph data
+    graph_data = []
+    date_dict = defaultdict(lambda: {'units': 0, 'revenue': 0.0})
+    
+    # Query all order items in the last 30 days
+    order_items = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=thirty_days_ago,
+        order__order_date__lt=today
+    ).values('order__order_date__date', 'quantity', 'price')
+    
+    # Aggregate data by day
+    for item in order_items:
+        date = item['order__order_date__date']
+        date_dict[date]['units'] += item['quantity']
+        date_dict[date]['revenue'] += item['price'] * item['quantity']
+    
+    # Convert to sorted list of dates
+    for day in (today - timedelta(days=n) for n in range(30)):
+        day_date = day.date()
+        graph_data.append({
+            'date': day_date.strftime('%b %d, %Y'),
+            'units': date_dict.get(day_date, {}).get('units', 0),
+            'revenue': round(date_dict.get(day_date, {}).get('revenue', 0.0), 2)
+        })
+    
+    # Prepare response
+    response_data = {
+        'summary': {
+            'date_range': f"{thirty_days_ago.strftime('%b %d, %Y')} – {today.strftime('%b %d, %Y')}",
+            'yesterday': {
+                'units': yesterday_data.get('units', 0),
+                'revenue': round(yesterday_data.get('revenue', 0.0), 2),
+                'change': get_change(
+                    yesterday_data.get('revenue', 0.0),
+                    previous_day_data.get('revenue', 0.0)
+                )
+            },
+            'previous_day': {
+                'units': previous_day_data.get('units', 0),
+                'revenue': round(previous_day_data.get('revenue', 0.0), 2),
+                'change': '-'
+            },
+            'last_7_days': {
+                'units': last_7_days_data.get('units', 0),
+                'revenue': round(last_7_days_data.get('revenue', 0.0), 2),
+                'change': get_change(
+                    last_7_days_data.get('revenue', 0.0),
+                    # Compare with previous 7-day period
+                    OrderItems.objects.filter(
+                        product_id=product_id,
+                        order__order_date__gte=thirty_days_ago,
+                        order__order_date__lt=seven_days_ago
+                    ).aggregate(revenue=Sum('price')).get('revenue', 0.0)
+                )
+            }
+        },
+        'graph_data': graph_data
+    }
+
+    return JsonResponse(response_data, safe=False)
