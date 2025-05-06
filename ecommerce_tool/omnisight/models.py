@@ -47,8 +47,6 @@ class Manufacturer(Document):
 class Product(Document):
     # General Product Details
     product_title = StringField()
-    page_views = IntField(default=0) #dummy data
-    refund = IntField(default=0) #dummy data
     product_description = StringField()
     product_id = StringField()  # Can store ASIN, UPC, GTIN, WPID
     product_id_type = StringField()
@@ -117,7 +115,9 @@ class Product(Document):
     updated_at = DateTimeField(default=datetime.now())  # Timestamp when the product was last updated
     cogs = FloatField(default=0.0)  # Cost of Goods Sold
     shipping_cost = FloatField(default=0.0)  # Shipping cost
-
+    page_views = IntField(default=0) #dummy data
+    refund = IntField(default=0) #dummy data
+    sessions = IntField(default=0) #dummy data
 
 class ignore_api_functions(Document):
     name = StringField()

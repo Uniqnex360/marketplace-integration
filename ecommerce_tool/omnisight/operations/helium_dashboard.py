@@ -1049,6 +1049,9 @@ def calculate_metricss(start_date, end_date,marketplace_id):
     order_total = 0
     other_price = 0
     tax_price = 0
+    page_views = 0
+    sessions = 0
+    unitSessionPercentage = 0
     if result:
         for order in result:
             gross_revenue += order['order_total']
@@ -1073,7 +1076,9 @@ def calculate_metricss(start_date, end_date,marketplace_id):
                             "price": "$Pricing.ItemPrice.Amount",
                             "tax_price": "$Pricing.ItemTax.Amount",
                             "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
-                            "sku": "$product_ins.sku"
+                            "sku": "$product_ins.sku",
+                            "page_views": "$product_ins.page_views",
+                            "sessions": "$product_ins.sessions"
                         }
                     }
                 ]
@@ -1082,7 +1087,9 @@ def calculate_metricss(start_date, end_date,marketplace_id):
                     item_data = item_result[0]
                     temp_price += item_data['price']
                     tax_price += item_data['tax_price']
-
+                    if item_data.get('page_views') and item_data.get('sessions'):
+                        page_views = item_data['page_views']
+                        sessions = item_data['sessions']
                     total_cogs += item_data['cogs']
                     total_units += 1
                     if item_data.get('sku'):
@@ -1094,6 +1101,7 @@ def calculate_metricss(start_date, end_date,marketplace_id):
 
         
         margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+        unitSessionPercentage = (total_units/sessions )*100
     return {
         "grossRevenue": round(gross_revenue, 2),
         "expenses": round((other_price + total_cogs) , 2),
@@ -1102,9 +1110,9 @@ def calculate_metricss(start_date, end_date,marketplace_id):
         "unitsSold": total_units,
         "refunds": refund,  
         "skuCount": len(sku_set),
-        "sessions": 0,
-        "pageViews": 0,
-        "unitSessionPercentage": 0,
+        "sessions": sessions,
+        "pageViews": page_views,
+        "unitSessionPercentage": unitSessionPercentage,
         "margin": round(margin, 2)
     }
 
@@ -1189,6 +1197,9 @@ def getPeriodWiseDataXl(request):
         result = grossRevenue(start_date, end_date,marketplace_id)
         order_total = 0
         other_price = 0
+        page_views = 0
+        sessions = 0
+        unitSessionPercentage = 0
         marketplace_name = ""
         if result:
             for order in result:
@@ -1215,7 +1226,9 @@ def getPeriodWiseDataXl(request):
                                 "price": "$Pricing.ItemPrice.Amount",
                                 "tax_price": "$Pricing.ItemTax.Amount",
                                 "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
-                                "sku": "$product_ins.sku"
+                                "sku": "$product_ins.sku",
+                                 "page_views": "$product_ins.page_views",
+                            "sessions": "$product_ins.sessions"
                             }
                         }
                     ]
@@ -1225,6 +1238,9 @@ def getPeriodWiseDataXl(request):
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
                         total_cogs += item_data['cogs']
+                        if item_data.get('page_views') and item_data.get('sessions'):
+                            page_views = item_data['page_views']
+                            sessions = item_data['sessions']
                         total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
@@ -1232,6 +1248,7 @@ def getPeriodWiseDataXl(request):
             other_price += order_total - temp_price - tax_price
             net_profit = gross_revenue - (other_price + total_cogs)
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+            unitSessionPercentage = (total_units/sessions )*100
             
         return {
             "grossRevenue": round(gross_revenue, 2),
@@ -1241,9 +1258,9 @@ def getPeriodWiseDataXl(request):
             "unitsSold": total_units,
             "refunds": refund,  
             "skuCount": len(sku_set),
-            "sessions": 0,
-            "pageViews": 0,
-            "unitSessionPercentage": 0,
+            "sessions": sessions,
+            "pageViews": page_views,
+            "unitSessionPercentage": unitSessionPercentage,
             "margin": round(margin, 2),
             "seller":SELLER_ID,
             "marketplace":marketplace_name
@@ -1339,6 +1356,9 @@ def exportPeriodWiseCSV(request):
         order_total = 0
         other_price = 0
         marketplace_name = ""
+        page_views = 0
+        sessions = 0
+        unitSessionPercentage = 0
         if result:
             for order in result:
                 marketplace_name = order['marketplace_name']
@@ -1366,7 +1386,10 @@ def exportPeriodWiseCSV(request):
                                 "tax_price": "$Pricing.ItemTax.Amount",
 
                                 "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
-                                "sku": "$product_ins.sku"
+                                "sku": "$product_ins.sku",
+                                "page_views": "$product_ins.page_views",
+                            "sessions": "$product_ins.sessions"
+                                
                             }
                         }
                     ]
@@ -1376,6 +1399,9 @@ def exportPeriodWiseCSV(request):
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
                         total_cogs += item_data['cogs']
+                        if item_data.get('page_views') and item_data.get('sessions'):
+                            page_views = item_data['page_views']
+                            sessions = item_data['sessions']
                         total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
@@ -1383,6 +1409,7 @@ def exportPeriodWiseCSV(request):
             other_price += order_total - temp_price - tax_price
             net_profit = gross_revenue - (other_price + total_cogs)
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+            unitSessionPercentage = (total_units/sessions )*100
             
         return {
             "grossRevenue": round(gross_revenue, 2),
@@ -1392,9 +1419,9 @@ def exportPeriodWiseCSV(request):
             "unitsSold": total_units,
             "refunds": refund,  
             "skuCount": len(sku_set),
-            "sessions": 0,
-            "pageViews": 0,
-            "unitSessionPercentage": 0,
+            "sessions": sessions,
+            "pageViews": page_views,
+            "unitSessionPercentage": unitSessionPercentage,
             "margin": round(margin, 2),
             "seller":SELLER_ID,
             "marketplace":marketplace_name
@@ -4054,6 +4081,8 @@ def InsightsDashboardView(request):
     optimized_count = 0
     refund_alerts = []
     fee_alerts = []
+    listing_optimization_alerts = []
+    product_performance_alerts = []  # New alert list for Product Performance
 
     def is_optimized(product):
         title = product.product_title or ""
@@ -4085,6 +4114,21 @@ def InsightsDashboardView(request):
 
         return True
 
+    def get_image_alerts(product):
+        alerts = []
+        images = product.image_urls or []
+        if not images:
+            alerts.append("No main image found. Please upload a clear product image with a white background.")
+        else:
+            main_image = images[0]
+            if not (main_image.endswith('.jpg') or main_image.endswith('.jpeg') or main_image.endswith('.png')):
+                alerts.append("Main image format should be JPG or PNG for better clarity and compatibility.")
+            if 'white' not in main_image.lower():
+                alerts.append("Update your main image background to white. This enhances your product's visual appeal and professionalism while meeting Amazon's requirements.")
+            if 'small' in main_image.lower() or 'thumbnail' in main_image.lower():
+                alerts.append("Update your main image size so that it is clear and of high quality for your potential customers.")
+        return alerts
+
     Refund_obj = Refund.objects()
     refunded_product_ids = list(set([i.product_id.id for i in Refund_obj]))
     for product_id in refunded_product_ids:
@@ -4094,6 +4138,14 @@ def InsightsDashboardView(request):
 
         if is_optimized(product):
             optimized_count += 1
+
+        alerts = get_image_alerts(product)
+        if alerts:
+            listing_optimization_alerts.append({
+                "product_id": str(product.id),
+                "title": product.product_title,
+                "messages": alerts
+            })
 
         # Count orders using aggregation
         pipeline = [
@@ -4126,6 +4178,15 @@ def InsightsDashboardView(request):
                     "message": f"{product.product_title} has exceeded a 6% refund rate. Refund rates are soaring, impacting your profits. Review, analyze, and revise now."
                 })
 
+            # **New alert for Product Performance if refund rate has decreased by 6% or more**
+            if refund_rate <= 6:
+                product_performance_alerts.append({
+                    "product_id": str(product.id),
+                    "title": product.product_title,
+                    "refund_rate": round(refund_rate, 2),
+                    "message": f"Refund rates for {product.product_title} have decreased by an impressive 6% or more. Your dedication is driving results, it’s time to take a closer look at your strategy."
+                })
+
     # Amazon Fee Analysis
     today = datetime.utcnow()
     start_of_this_month = today.replace(day=1)
@@ -4144,14 +4205,38 @@ def InsightsDashboardView(request):
         date__gte=start_of_last_month,
         date__lt=start_of_this_month
     ).sum('amount') or 0.0
-    print(this_month_fees,last_month_fees)
+
     if this_month_fees > last_month_fees:
         increase = round(this_month_fees - last_month_fees, 2)
         fee_alerts.append({
             "marketplace": "amazon.com",
             "increase_amount": increase,
-            "message": f"Amazon Storage fees have increased by ${increase} for the amazon.com. Storage fees have increased, cutting into your profit margins. Consider optimizing your inventory or fulfillment strategies now."
+            "message": f"Amazon Storage fees have increased by ${increase} for amazon.com. Storage fees have increased, cutting into your profit margins. Consider optimizing your inventory or fulfillment strategies now."
         })
+
+    inventory_alerts = []
+
+    for product in all_products:
+        # Safely access the attribute using getattr
+        days_remaining = getattr(product, 'days_of_inventory_remaining', 999)
+
+        if days_remaining <= 45:
+            reorder_by_date = datetime.date.today() + datetime.timedelta(days=days_remaining)
+
+            if days_remaining <= 38:
+                alert_message = f"Order more inventory now to avoid running out of stock. You have {days_remaining} days of inventory remaining."
+            else:
+                alert_message = f"Order more inventory by {reorder_by_date.strftime('%B %d, %Y')} to avoid running out of stock. You have {days_remaining} days of inventory remaining."
+
+            inventory_alerts.append({
+                "title": getattr(product, 'title', ''),
+                "asin": getattr(product, 'asin', ''),
+                "sku": getattr(product, 'sku', ''),
+                "fulfillment_channel": getattr(product, 'fulfillment_channel', ''),
+                "days_left": days_remaining,
+                "reorder_by": reorder_by_date.isoformat(),
+                "inventory_alert": alert_message
+            })
 
     return JsonResponse({
         "total_products": total_products,
@@ -4161,7 +4246,17 @@ def InsightsDashboardView(request):
         },
         "alerts": {
             "storage_fee_alerts": fee_alerts,
-            "refund_alerts": refund_alerts
+            "refund_alerts": refund_alerts,
+            "listing_optimization_alerts": listing_optimization_alerts,
+            "inventory_alerts": inventory_alerts,
+            "product_performance_alerts": product_performance_alerts 
+        },
+        "insights_by_category": {
+            "Listing Optimization": len(listing_optimization_alerts),
+            "Product Performance": len(refund_alerts) + len(product_performance_alerts), 
+            "Inventory": len(fee_alerts) + len(inventory_alerts),
+            "Refunds": Refund.objects.count(),
+            "Keyword": 42  
         }
     })
 
