@@ -26,6 +26,8 @@ from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_
 def get_metrics_by_date_range(request):
     marketplace_id = request.GET.get('marketplace_id',None)
     target_date_str = request.GET.get('target_date')
+    brand_id = request.GET.get('brand_id',None)
+    product_id = request.GET.get('product_id',None)
     # Parse target date and previous day
     target_date = datetime.strptime(target_date_str, "%d/%m/%Y")
     previous_date = target_date - timedelta(days=1)
@@ -58,7 +60,7 @@ def get_metrics_by_date_range(request):
 
     for key, date_range in last_8_days_filter.items():
         gross_revenue = 0
-        result = grossRevenue(date_range["start"], date_range["end"])
+        result = grossRevenue(date_range["start"], date_range["end"],marketplace_id,brand_id,product_id)
         if result != []:            
             for ins in result:
                 gross_revenue += ins['order_total']
@@ -77,8 +79,8 @@ def get_metrics_by_date_range(request):
         total_orders = 0
         tax_price = 0
 
-        result = grossRevenue(date_range["start"], date_range["end"],marketplace_id)
-        refund_ins = refundOrder(date_range["start"], date_range["end"],marketplace_id)
+        result = grossRevenue(date_range["start"], date_range["end"],marketplace_id,brand_id,product_id)
+        refund_ins = refundOrder(date_range["start"], date_range["end"],marketplace_id,brand_id,product_id)
         if refund_ins != []:
             for ins in refund_ins:
                 refund += len(ins['order_items'])
@@ -147,7 +149,7 @@ def get_metrics_by_date_range(request):
         "total_orders": round(metrics["targeted"]["total_orders"] - metrics["previous"]["total_orders"],2),
         "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"],2),
     }
-    metrics['targeted']["business_value"] = AnnualizedRevenueAPIView(target_date)
+    # metrics['targeted']["business_value"] = AnnualizedRevenueAPIView(target_date)
     name = "Today Snapshot"
     item_pipeline = [
                         { "$match": { "name": name } }
