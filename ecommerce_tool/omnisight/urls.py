@@ -21,7 +21,7 @@ from omnisight.operations.general_functions import getMarketplaceList, getProduc
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders
 
-from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView
+from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist
 
 
 
@@ -87,6 +87,10 @@ urlpatterns = [
     path("listUsers/",listUsers,name="listUsers"),
     path("fetchUserDetails/",fetchUserDetails,name="fetchUserDetails"),
     path("fetchRoles/",fetchRoles,name="fetchRoles"),
+
+    #####Dashboard FIlters#######
+    path("getSKUlist/",getSKUlist,name="getSKUlist"),
+    path("getproductIdlist/",getproductIdlist,name="getproductIdlist"),
 
     #Helium 10 Dashboard
     path("get_metrics_by_date_range/",get_metrics_by_date_range,name="get_metrics_by_date_range"),
