@@ -2446,16 +2446,14 @@ def CityCSVUploadView(request):
 def getCitywiseSales(request):
     level = request.GET.get("type", "city").lower()  
     action = request.GET.get("action", "all").lower()  
-
-    today = datetime.utcnow()
-    one_year_ago = today - timedelta(days=30)
-
+    preset = request.GET.get("preset", "Yesterday")
+    yesterday_start, yesterday_end = get_date_range(preset)
     pipeline = [
         {
             "$match": {
                 "order_date": {
-                    "$gte": one_year_ago,
-                    "$lt": today
+                    "$gte": yesterday_start,
+                    "$lt": yesterday_end
                 },
                 "order_status": {"$in": ['Shipped', 'Delivered']}
             }
@@ -2576,8 +2574,12 @@ def getCitywiseSales(request):
     return JsonResponse({"items": items}, safe=False)
 
 def exportCitywiseSalesExcel(request):
-    today = datetime.utcnow()
-    one_year_ago = today - timedelta(days=365)
+    # today = datetime.utcnow()
+    # one_year_ago = today - timedelta(days=365)
+    preset = request.GET.get("preset", "Yesterday")
+
+    yesterday_start, yesterday_end = get_date_range(preset)
+
     action = request.GET.get("action", "all").lower()  
 
     level = request.GET.get("type", "city").lower()  
@@ -2586,8 +2588,8 @@ def exportCitywiseSalesExcel(request):
         {
             "$match": {
                 "order_date": {
-                    "$gte": one_year_ago,
-                    "$lt": today
+                    "$gte": yesterday_start,
+                    "$lt": yesterday_end
                 }
             }
         },
@@ -2648,7 +2650,7 @@ def exportCitywiseSalesExcel(request):
                     country_population['USA'] += geo.population
     data_rows = []
     for key, values in grouped_data.items():
-        row = [one_year_ago.strftime("%b %d, %Y"), today.strftime("%b %d, %Y")]
+        row = [yesterday_end.strftime("%b %d, %Y"), yesterday_start.strftime("%b %d, %Y")]
 
         if level == "city":
             row.extend([values["country"], values["state"], values["city"]])
@@ -2701,8 +2703,12 @@ def exportCitywiseSalesExcel(request):
 
 
 def downloadCitywiseSalesCSV(request):
-    today = datetime.utcnow()
-    one_year_ago = today - timedelta(days=365)
+    # today = datetime.utcnow()
+    # one_year_ago = today - timedelta(days=365)
+    preset = request.GET.get("preset", "Yesterday")
+
+    yesterday_start, yesterday_end = get_date_range(preset)
+
     action = request.GET.get("action", "all").lower()  # 'all' or 'percapita'
     level = request.GET.get("type", "city").lower()  # 'city', 'state', 'country'
 
@@ -2710,8 +2716,8 @@ def downloadCitywiseSalesCSV(request):
         {
             "$match": {
                 "order_date": {
-                    "$gte": one_year_ago,
-                    "$lt": today
+                    "$gte": yesterday_start,
+                    "$lt": yesterday_end
                 }
             }
         },
@@ -2766,7 +2772,7 @@ def downloadCitywiseSalesCSV(request):
 
     data_rows = []
     for key, values in grouped_data.items():
-        row = [one_year_ago.strftime("%b %d, %Y"), today.strftime("%b %d, %Y")]
+        row = [yesterday_end.strftime("%b %d, %Y"), yesterday_start.strftime("%b %d, %Y")]
 
         if level == "city":
             row.extend([values["country"], values["state"], values["city"]])
@@ -3109,7 +3115,7 @@ def getProfitAndLossDetails(request):
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
-            "refunds": refund,  
+            "refunds": refund,   
             "skuCount": len(sku_set),
             "sessions": 0,
             "pageViews": 0,
@@ -4060,26 +4066,82 @@ def InsightsDashboardView(request):
             })
 
     return JsonResponse({
-        "total_products": total_products,
-        "listing_optimization": {
-            "optimized_products": optimized_count,
-            "not_optimized_products": total_products - optimized_count
-        },
-        "alerts": {
-            "storage_fee_alerts": fee_alerts,
-            "refund_alerts": refund_alerts,
-            "listing_optimization_alerts": listing_optimization_alerts,
-            "inventory_alerts": inventory_alerts,
-            "product_performance_alerts": product_performance_alerts 
-        },
-        "insights_by_category": {
-            "Listing Optimization": len(listing_optimization_alerts),
-            "Product Performance": len(refund_alerts) + len(product_performance_alerts), 
-            "Inventory": len(fee_alerts) + len(inventory_alerts),
-            "Refunds": Refund.objects.count(),
-            "Keyword": 42  
-        }
-    })
+    "total_products": total_products,
+    "listing_optimization": {
+        "optimized_products": optimized_count,
+        "not_optimized_products": total_products - optimized_count
+    },
+    "insights_by_category": {
+        "Listing Optimization": len(listing_optimization_alerts),
+        "Product Performance": len(refund_alerts) + len(product_performance_alerts),
+        "Inventory": len(fee_alerts) + len(inventory_alerts),
+        "Refunds": len(refund_alerts),
+        "Keyword": 42  # Placeholder until real keyword logic is added
+    },
+    "alerts_feed": [  # 🆕 Unified feed-style list for UI rendering
+        *[
+            {
+                "type": "Listing Optimization",
+                "title": alert["title"],
+                "date": datetime.today(),  # Optional: Add if you track creation date
+                "message": msg
+            }
+            for alert in listing_optimization_alerts
+            for msg in alert["messages"]
+        ],
+        *[
+            {
+                "type": "Refunds",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in refund_alerts
+        ],
+        *[
+            {
+                "type": "Product Performance",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in product_performance_alerts
+        ],
+        *[
+            {
+                "type": "Inventory",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["inventory_alert"]
+            }
+            for alert in inventory_alerts
+        ],
+        *[
+            {
+                "type": "Inventory",
+                "title": "Storage Fee Alert",
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in fee_alerts
+        ],
+        *[
+            # {
+            #     "type": "Keyword",
+            #     "title": "Keyword Ranking",
+            #     "date": "2024-11-30",
+            #     "message": "Your keyword “nuriva memory pill” went from page 1, position 8, to position 13 over the past 4 days. Review the listing for issues or review your PPC campaigns."
+            # },
+            # {
+            #     "type": "Keyword",
+            #     "title": "Keyword Ranking",
+            #     "date": "2024-11-24",
+            #     "message": "Your keyword “neuriva brain supplement” went from page 1, position 9, to position 11 over the past 4 days. Review the listing for issues or review your PPC campaigns."
+            # }
+        ]
+    ]
+})
+
 
 
 
@@ -4487,3 +4549,233 @@ def getproductIdlist(request):
     ])
     asin_list = list(Product.objects.aggregate(*pipeline))
     return asin_list
+
+
+
+
+
+def InsightsProductWise(request):
+    product_id = request.GET.get('product_id')
+    optimized_count = 0
+    refund_alerts = []
+    fee_alerts = []
+    listing_optimization_alerts = []
+    product_performance_alerts = []  # New alert list for Product Performance
+
+    def is_optimized(product):
+        title = product.product_title or ""
+        if len(title) < 100 or re.search(r'(?i)(best|free|deal|offer|discount)', title):
+            return False
+
+        bullets = product.features or []
+        if len(bullets) < 5 or any(re.search(r'<|>|🔥|👍|😁|[A-Z]{4,}', b) for b in bullets):
+            return False
+
+        description = product.product_description or ""
+        if len(description) <= 300:
+            return False
+        words = re.findall(r'\b\w+\b', description)
+        if len(words) != len(set(words)):
+            return False
+
+        images = product.image_urls or []
+        if not images or any(not img.endswith(('.jpg', '.jpeg', '.png')) or 'watermark' in img.lower() for img in images):
+            return False
+
+        upc = product.upc or ""
+        if not re.fullmatch(r'\d{12,14}', upc):
+            return False
+
+        category = product.category or ""
+        if ">" not in category:
+            return False
+
+        return True
+
+    def get_image_alerts(product):
+        alerts = []
+        images = product.image_urls or []
+        if not images:
+            alerts.append("No main image found. Please upload a clear product image with a white background.")
+        else:
+            main_image = images[0]
+            if not (main_image.endswith('.jpg') or main_image.endswith('.jpeg') or main_image.endswith('.png')):
+                alerts.append("Main image format should be JPG or PNG for better clarity and compatibility.")
+            if 'white' not in main_image.lower():
+                alerts.append("Update your main image background to white. This enhances your product's visual appeal and professionalism while meeting Amazon's requirements.")
+            if 'small' in main_image.lower() or 'thumbnail' in main_image.lower():
+                alerts.append("Update your main image size so that it is clear and of high quality for your potential customers.")
+        return alerts
+
+    Refund_obj = Refund.objects(product_id=product_id)
+    refunded_product_ids = list(set([i.product_id.id for i in Refund_obj]))
+    for product_id in refunded_product_ids:
+        product = Product.objects(id=product_id).first()
+        if not product:
+            continue
+
+        if is_optimized(product):
+            optimized_count += 1
+
+        alerts = get_image_alerts(product)
+        if alerts:
+            listing_optimization_alerts.append({
+                "product_id": str(product.id),
+                "title": product.product_title,
+                "messages": alerts
+            })
+
+        # Count orders using aggregation
+        pipeline = [
+            {
+                "$lookup": {
+                    "from": "order_items",
+                    "localField": "order_items",
+                    "foreignField": "_id",
+                    "as": "order_items"
+                }
+            },
+            {"$unwind": "$order_items"},
+            {
+                "$match": {
+                    "order_items.ProductDetails.product_id": ObjectId(str(product.id))
+                }
+            }
+        ]
+        orders = list(Order.objects.aggregate(*pipeline))
+        total_orders = len(orders)
+        refund_count = Refund.objects(product_id=product.id).count()
+        # total_orders = 8
+        if total_orders > 0:
+            refund_rate = (refund_count / total_orders) * 100
+            if refund_rate > 6:
+                refund_alerts.append({
+                    "product_id": str(product.id),
+                    "title": product.product_title,
+                    "refund_rate": round(refund_rate, 2),
+                    "message": f"{product.product_title} has exceeded a 6% refund rate. Refund rates are soaring, impacting your profits. Review, analyze, and revise now."
+                })
+
+            # **New alert for Product Performance if refund rate has decreased by 6% or more**
+            if refund_rate <= 6:
+                product_performance_alerts.append({
+                    "product_id": str(product.id),
+                    "title": product.product_title,
+                    "refund_rate": round(refund_rate, 2),
+                    "message": f"Refund rates for {product.product_title} have decreased by an impressive 6% or more. Your dedication is driving results, it’s time to take a closer look at your strategy."
+                })
+
+    # Amazon Fee Analysis
+    today = datetime.utcnow()
+    start_of_this_month = today.replace(day=1)
+    start_of_last_month = (start_of_this_month - timedelta(days=1)).replace(day=1)
+
+    this_month_fees = Fee.objects(
+        marketplace="amazon.com",
+        fee_type="storage",
+        date__gte=start_of_this_month,
+        date__lt=today
+    ).sum('amount') or 0.0
+
+    last_month_fees = Fee.objects(
+        marketplace="amazon.com",
+        fee_type="storage",
+        date__gte=start_of_last_month,
+        date__lt=start_of_this_month
+    ).sum('amount') or 0.0
+
+    if this_month_fees > last_month_fees:
+        increase = round(this_month_fees - last_month_fees, 2)
+        fee_alerts.append({
+            "marketplace": "amazon.com",
+            "increase_amount": increase,
+            "message": f"Amazon Storage fees have increased by ${increase} for amazon.com. Storage fees have increased, cutting into your profit margins. Consider optimizing your inventory or fulfillment strategies now."
+        })
+
+    inventory_alerts = []
+    product_obj = Product.objects(id=product_id).first()
+
+    days_remaining = getattr(product_obj, 'days_of_inventory_remaining', 999)
+
+    if days_remaining <= 45:
+        reorder_by_date = datetime.date.today() + datetime.timedelta(days=days_remaining)
+
+        if days_remaining <= 38:
+            alert_message = f"Order more inventory now to avoid running out of stock. You have {days_remaining} days of inventory remaining."
+        else:
+            alert_message = f"Order more inventory by {reorder_by_date.strftime('%B %d, %Y')} to avoid running out of stock. You have {days_remaining} days of inventory remaining."
+
+        inventory_alerts.append({
+            "title": getattr(product_obj, 'title', ''),
+            "asin": getattr(product_obj, 'asin', ''),
+            "sku": getattr(product_obj, 'sku', ''),
+            "fulfillment_channel": getattr(product_obj, 'fulfillment_channel', ''),
+            "days_left": days_remaining,
+            "reorder_by": reorder_by_date.isoformat(),
+            "inventory_alert": alert_message
+        })
+
+    return JsonResponse({
+    "alerts_feed": [
+        *[
+            {
+                "type": "Listing Optimization",
+                "title": alert["title"],
+                "date": datetime.today(),
+                "message": msg
+            }
+            for alert in listing_optimization_alerts
+            for msg in alert["messages"]
+        ],
+        *[
+            {
+                "type": "Refunds",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in refund_alerts
+        ],
+        *[
+            {
+                "type": "Product Performance",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in product_performance_alerts
+        ],
+        *[
+            {
+                "type": "Inventory",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["inventory_alert"]
+            }
+            for alert in inventory_alerts
+        ],
+        *[
+            {
+                "type": "Inventory",
+                "title": "Storage Fee Alert",
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in fee_alerts
+        ],
+        *[
+            # {
+            #     "type": "Keyword",
+            #     "title": "Keyword Ranking",
+            #     "date": "2024-11-30",
+            #     "message": "Your keyword “nuriva memory pill” went from page 1, position 8, to position 13 over the past 4 days. Review the listing for issues or review your PPC campaigns."
+            # },
+            # {
+            #     "type": "Keyword",
+            #     "title": "Keyword Ranking",
+            #     "date": "2024-11-24",
+            #     "message": "Your keyword “neuriva brain supplement” went from page 1, position 9, to position 11 over the past 4 days. Review the listing for issues or review your PPC campaigns."
+            # }
+        ]
+    ]
+})
