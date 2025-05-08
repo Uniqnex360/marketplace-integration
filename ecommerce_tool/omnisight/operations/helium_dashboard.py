@@ -860,7 +860,7 @@ def get_top_products(request):
 
 #########################SELVA WORKING APIS##########
 
-def calculate_metricss(start_date, end_date,marketplace_id):
+def calculate_metricss(start_date, end_date,marketplace_id=[],brand_id=[],product_id=[]):
     gross_revenue = 0
     total_cogs = 0
     refund = 0
@@ -868,7 +868,7 @@ def calculate_metricss(start_date, end_date,marketplace_id):
     margin = 0
     total_units = 0
     sku_set = set()
-    result = grossRevenue(start_date, end_date,marketplace_id)
+    result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id)
     order_total = 0
     other_price = 0
     tax_price = 0
@@ -941,14 +941,14 @@ def calculate_metricss(start_date, end_date,marketplace_id):
 
 
 def getPeriodWiseData(request):
-    target_date = datetime.today() - timedelta(days=1)
-    marketplace_id = request.GET.get('marketplace_id', None)
+    marketplace_id = request.GET.get('marketplace_id',None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    def format_period_metrics(label, current_start, current_end, prev_start, prev_end,marketplace_id):
-        current_metrics = calculate_metricss(current_start, current_end,marketplace_id)
-        previous_metrics = calculate_metricss(prev_start, prev_end,marketplace_id)
+    def format_period_metrics(label, current_start, current_end, prev_start, prev_end,marketplace_id=[],brand_id=[],product_id=[]):
+        current_metrics = calculate_metricss(current_start, current_end,marketplace_id,brand_id,product_id)
+        previous_metrics = calculate_metricss(prev_start, prev_end,marketplace_id,brand_id,product_id)
 
         output = {
             "label": label,
@@ -974,41 +974,44 @@ def getPeriodWiseData(request):
         return output
 
     # Yesterday
-    y_current_start, y_current_end = get_date_range("Yesterday")
-    y_previous_start = y_current_start - timedelta(days=1)
-    y_previous_end = y_previous_start + timedelta(hours=23, minutes=59, seconds=59)
+    yes_current_start, yes_current_end = get_date_range("Yesterday")
+    
+    
+    yes_previous_start = yes_current_start - timedelta(days=1)
+    yes_previous_end = yes_current_end + timedelta(hours=23, minutes=59, seconds=59)
 
-    # Last 7 Days
-    l7_current_start = y_current_start - timedelta(days=6)
-    l7_current_end = y_current_end
+    l7_current_start, l7_current_end = get_date_range("Last 7 days")
     l7_previous_start = l7_current_start - timedelta(days=7)
     l7_previous_end = l7_current_start - timedelta(seconds=1)
 
-    # Last 30 Days
-    l30_current_start = y_current_start - timedelta(days=29)
-    l30_current_end = y_current_end
+    l30_current_start, l30_current_end = get_date_range("Last 30 days")
+
     l30_previous_start = l30_current_start - timedelta(days=30)
     l30_previous_end = l30_current_start - timedelta(seconds=1)
 
-    ytd_current_start = datetime(y_current_start.year, 1, 1)
-    ytd_current_end = y_current_end
-    last_year = y_current_start.year - 1
-    ytd_previous_start = datetime(last_year, 1, 1)
-    ytd_previous_end = datetime(last_year, y_current_start.month, y_current_start.day, 23, 59, 59)
+    l30_current_start, l30_current_end = get_date_range("Last 30 days")
+
+    y_current_start, y_current_end = get_date_range("This Year")
+    ly_current_start, ly_current_end = get_date_range("Last Year")
+
+    # ytd_previous_start = datetime(y_current_end, 1, 1)
+    # ytd_previous_end = datetime(last_year, y_current_start.month, y_current_start.day, 23, 59, 59)
     
     response_data = {
-        "yesterday": format_period_metrics("Yesterday", y_current_start, y_current_end, y_previous_start, y_previous_end,marketplace_id),
-        "last7Days": format_period_metrics("Last 7 Days", l7_current_start, l7_current_end, l7_previous_start, l7_previous_end,marketplace_id),
-        "last30Days": format_period_metrics("Last 30 Days", l30_current_start, l30_current_end, l30_previous_start, l30_previous_end,marketplace_id),
-        "yearToDate": format_period_metrics("Year to Date", ytd_current_start, ytd_current_end, ytd_previous_start, ytd_previous_end,marketplace_id),
+        "yesterday": format_period_metrics("Yesterday", yes_current_start, yes_current_end, yes_previous_start, yes_previous_end,marketplace_id,brand_id,product_id),
+        "last7Days": format_period_metrics("Last 7 Days", l7_current_start, l7_current_end, l7_previous_start, l7_previous_end,marketplace_id,brand_id,product_id),
+        "last30Days": format_period_metrics("Last 30 Days", l30_current_start, l30_current_end, l30_previous_start, l30_previous_end,marketplace_id,brand_id,product_id),
+        "yearToDate": format_period_metrics("Year to Date", y_current_start, y_current_end, ly_current_start, ly_current_end,marketplace_id,brand_id,product_id),
     }
     return JsonResponse(response_data, safe=False)
 
 
 def getPeriodWiseDataXl(request):
     marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
     current_date = datetime.today() - timedelta(days=1)
-    def calculate_metrics(start_date, end_date,marketplace_id):
+    def calculate_metrics(start_date, end_date,marketplace_id=[],brand_id=[],product_id=[]):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
@@ -1017,7 +1020,7 @@ def getPeriodWiseDataXl(request):
         total_units = 0
         sku_set = set()
         tax_price = 0
-        result = grossRevenue(start_date, end_date,marketplace_id)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id)
         order_total = 0
         other_price = 0
         page_views = 0
@@ -1089,8 +1092,8 @@ def getPeriodWiseDataXl(request):
             "marketplace":marketplace_name
         }
 
-    def create_period_row(label, start, end,marketplace_id):
-        data = calculate_metrics(start, end,marketplace_id)
+    def create_period_row(label, start, end,marketplace_id,brand_id,product_id):
+        data = calculate_metrics(start, end,marketplace_id,brand_id,product_id)
         return [
             label,
             data["seller"],
@@ -1110,19 +1113,20 @@ def getPeriodWiseDataXl(request):
             data["margin"]
         ]
 
-    today, y_current_end = get_date_range("Today")
-    yesterday = today - timedelta(days=1)
-    last_7_start = today - timedelta(days=7)
-    last_30_start = today - timedelta(days=30)
-    month_start = today.replace(day=1)
-    year_start = today.replace(month=1, day=1)
+    yesterday, yesterday_end = get_date_range("Yesterday")
+    l7_current_start, l7_current_end = get_date_range("Last 7 days")
+
+    l30_current_start, l30_current_end = get_date_range("Last 30 days")
+
+    m30_current_start, m30_current_end = get_date_range("This Month")
+    y_current_start, y_current_end = get_date_range("This Year")
 
     period_rows = [
-        create_period_row("Yesterday", yesterday, today,marketplace_id),
-        create_period_row("Last 7 Days", last_7_start, today - timedelta(seconds=1),marketplace_id),
-        create_period_row("Last 30 Days", last_30_start, today - timedelta(seconds=1),marketplace_id),
-        create_period_row("Month to Date", month_start, today,marketplace_id),
-        create_period_row("Year to Date", year_start, today,marketplace_id),
+        create_period_row("Yesterday", yesterday, yesterday_end,marketplace_id,brand_id,product_id),
+        create_period_row("Last 7 Days", l7_current_start, l7_current_end ,marketplace_id,brand_id,product_id),
+        create_period_row("Last 30 Days", l30_current_start,l30_current_end,marketplace_id,brand_id,product_id),
+        create_period_row("Month to Date", m30_current_start, m30_current_end,marketplace_id,brand_id,product_id),
+        create_period_row("Year to Date", y_current_start, y_current_end,marketplace_id,brand_id,product_id),
     ]
 
     headers = [
@@ -1164,9 +1168,11 @@ def getPeriodWiseDataXl(request):
 
 def exportPeriodWiseCSV(request):
     marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
     current_date = datetime.today() - timedelta(days=1)
     
-    def calculate_metrics(start_date, end_date,marketplace_id):
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id=[],product_id=[]):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
@@ -1175,7 +1181,7 @@ def exportPeriodWiseCSV(request):
         total_units = 0
         sku_set = set()
         tax_price = 0
-        result = grossRevenue(start_date, end_date,marketplace_id)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id)
         order_total = 0
         other_price = 0
         marketplace_name = ""
@@ -1250,8 +1256,9 @@ def exportPeriodWiseCSV(request):
             "marketplace":marketplace_name
         }
 
-    def create_period_row(label, start, end,marketplace_id):
-        data = calculate_metrics(start, end,marketplace_id)
+    def create_period_row(label, start, end,marketplace_id,brand_id,product_id):
+        data = calculate_metrics(start, end,marketplace_id,brand_id,product_id)
+        
         return [
             label,
             data["seller"],
@@ -1271,20 +1278,20 @@ def exportPeriodWiseCSV(request):
             str(data["margin"])      # Ensuring the value is converted to string
         ]
 
-    today, y_current_end = get_date_range("Today")
+    yesterday, yesterday_end = get_date_range("Yesterday")
+    l7_current_start, l7_current_end = get_date_range("Last 7 days")
 
-    yesterday = today - timedelta(days=1)
-    last_7_start = today - timedelta(days=7)
-    last_30_start = today - timedelta(days=30)
-    month_start = today.replace(day=1)
-    year_start = today.replace(month=1, day=1)
+    l30_current_start, l30_current_end = get_date_range("Last 30 days")
+
+    m30_current_start, m30_current_end = get_date_range("This Month")
+    y_current_start, y_current_end = get_date_range("This Year")
 
     period_rows = [
-        create_period_row("Yesterday", yesterday, yesterday,marketplace_id),
-        create_period_row("Last 7 Days", last_7_start, today - timedelta(seconds=1),marketplace_id),
-        create_period_row("Last 30 Days", last_30_start, today - timedelta(seconds=1),marketplace_id),
-        create_period_row("Month to Date", month_start, today,marketplace_id),
-        create_period_row("Year to Date", year_start, today,marketplace_id),
+        create_period_row("Yesterday", yesterday, yesterday_end,marketplace_id,brand_id,product_id),
+        create_period_row("Last 7 Days", l7_current_start, l7_current_end,marketplace_id,brand_id,product_id),
+        create_period_row("Last 30 Days", l30_current_start, l30_current_end,marketplace_id,brand_id,product_id),
+        create_period_row("Month to Date", m30_current_start, m30_current_end,marketplace_id,brand_id,product_id),
+        create_period_row("Year to Date", y_current_start,y_current_end,marketplace_id,brand_id,product_id),
     ]
 
     headers = [
@@ -1307,8 +1314,9 @@ def exportPeriodWiseCSV(request):
 def getPeriodWiseDataCustom(request):
     current_date = datetime.utcnow()
     marketplace_id = request.GET.get('marketplace_id', None)
-    
-    def calculate_metrics(start_date, end_date,marketplace_id):
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
@@ -1317,7 +1325,7 @@ def getPeriodWiseDataCustom(request):
         total_units = 0
         sku_set = set()
  
-        result = grossRevenue(start_date, end_date,marketplace_id)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id)
         order_total = 0
         other_price = 0
         tax_price = 0
@@ -1385,9 +1393,9 @@ def getPeriodWiseDataCustom(request):
             'orders':len(result)
         }
  
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id):
-        current = calculate_metrics(cur_from, cur_to,marketplace_id)
-        previous = calculate_metrics(prev_from, prev_to,marketplace_id)
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id):
+        current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id)
+        previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id)
         def with_delta(metric):
             return {
                 "current": current[metric],
@@ -1461,15 +1469,12 @@ def getPeriodWiseDataCustom(request):
     last_7_start, last_7_end = get_date_range('Last 7 days')
     last_7_prev_start = today_start - timedelta(days=14)
     last_7_prev_end = last_7_start - timedelta(seconds=1)
-    print(today_start,today_end)
-    print(from_date,to_date)
     response_data = {
-        "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end,marketplace_id),
-        "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1),marketplace_id),
-        "last7Days": create_period_response("Last 7 Days", last_7_start, last_7_end , last_7_prev_start, last_7_prev_end,marketplace_id),
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id),
+        "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end,marketplace_id,brand_id,product_id),
+        "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1),marketplace_id,brand_id,product_id),
+        "last7Days": create_period_response("Last 7 Days", last_7_start, last_7_end , last_7_prev_start, last_7_prev_end,marketplace_id,brand_id,product_id),
+        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id),
     }
- 
     return JsonResponse(response_data, safe=False)
  
 
