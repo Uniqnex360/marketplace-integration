@@ -64,7 +64,7 @@ def get_metrics_by_date_range(request):
 
     for key, date_range in last_8_days_filter.items():
         gross_revenue = 0
-        result = grossRevenue(date_range["start"], date_range["end"],marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,fulfillment_channel)
+        result = grossRevenue(date_range["start"], date_range["end"],marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         if result != []:            
             for ins in result:
                 gross_revenue += ins['order_total']
@@ -1087,7 +1087,7 @@ def getPeriodWiseData(request):
 
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    def format_period_metrics(label, current_start, current_end, prev_start, prev_end,marketplace_id=[],brand_id=[],product_id=[],manufacturer_name=None):
+    def format_period_metrics(label, current_start, current_end, prev_start, prev_end,marketplace_id=[],brand_id=[],product_id=[],manufacturer_name=None,fulfillment_channel=None):
         current_metrics = calculate_metricss(current_start, current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         previous_metrics = calculate_metricss(prev_start, prev_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
@@ -1319,7 +1319,7 @@ def exportPeriodWiseCSV(request):
 
     current_date = datetime.today() - timedelta(days=1)
     
-    def calculate_metrics(start_date, end_date,marketplace_id,brand_id=[],product_id=[],manufacturer_name=None):
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id=[],product_id=[],manufacturer_name=None,fulfillment_channel=None):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
