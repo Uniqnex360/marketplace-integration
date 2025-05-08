@@ -85,6 +85,40 @@ def getproductIdListBasedonbrand(brandIds):
     return orders
 
 
+def getproductIdListBasedonManufacture(manufactureName = []):
+    """
+    Fetches the list of product IDs based on the provided brand ID using a pipeline aggregation.
+
+    Args:
+        productId (str): The ID of the brand for which to fetch product IDs.
+
+    Returns:
+        list: A list of dictionaries containing product details.
+    """
+    orders = []
+    pipeline = [
+        {
+            "$match": {
+                "manufacturer_name": {"$in":manufactureName }
+            }
+        },
+        {
+            "$group" : {
+                "_id" : None,
+                "productIds" : { "$addToSet": "$_id" }
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "productIds": 1
+            }
+        }
+    ]
+    products = list(Product.objects.aggregate(*pipeline))
+    if products != []:
+        orders = getOrdersListBasedonProductId(products[0]['productIds'])
+    return orders
 
 def get_date_range(preset):
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -131,15 +165,20 @@ def get_date_range(preset):
 
 
 
-def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None):
+def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacuture_name=[],fulfillment_channel=None):
     match=dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
     match['order_status'] = {"$in": ['Shipped', 'Delivered']}
+    if fulfillment_channel:
+        match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
 
-
-    if product_id != None and product_id != "" and product_id != []:
+    if manufacuture_name != None and manufacuture_name != "" and manufacuture_name != []:
+        ids = getproductIdListBasedonManufacture(manufacuture_name)
+        match["_id"] = {"$in": ids}
+    
+    elif product_id != None and product_id != "" and product_id != []:
         product_id = [ObjectId(pid) for pid in product_id]
         ids = getOrdersListBasedonProductId(product_id)
         match["_id"] = {"$in": ids}
@@ -175,7 +214,9 @@ def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product
                     "order_total": 1,
                     "marketplace_name": "$marketplace_ins.name",
                     "marketplace_id": 1,
-                    "currency": 1
+                    "currency": 1,
+                    "shipping_address": 1,
+                    "shipping_information": 1
                 }
             },
         ]
@@ -221,14 +262,20 @@ def get_previous_periods(current_start, current_end):
     return response_data
 
 
-def refundOrder(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None):
+def refundOrder(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacuture_name=[],fulfillment_channel=None):
     match=dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
     match['order_status'] = "Refunded"
+    if fulfillment_channel:
+        match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
 
-    if product_id != None and product_id != "" and product_id != []:
+    if manufacuture_name != None and manufacuture_name != "" and manufacuture_name != []:
+        ids = getproductIdListBasedonManufacture(manufacuture_name)
+        match["_id"] = {"$in": ids}
+
+    elif product_id != None and product_id != "" and product_id != []:
         product_id = [ObjectId(pid) for pid in product_id]
         ids = getOrdersListBasedonProductId(product_id)
         match["_id"] = {"$in": ids}
