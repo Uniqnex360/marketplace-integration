@@ -19,7 +19,8 @@ from bson import ObjectId
 from calendar import monthrange
 from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
 from django.db.models import Sum, Q
-from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView
+from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand
+from ecommerce_tool.crud import DatabaseModel
 
 
 
@@ -186,6 +187,8 @@ def get_metrics_by_date_range(request):
 
 def LatestOrdersTodayAPIView(request):
     marketplace_id = request.GET.get('marketplace_id', None)
+    product_id = request.GET.get('product_id', None)
+    brand_id = request.GET.get('brand_id', None)
     today = datetime.utcnow().date()
     start_of_day = datetime.combine(today, datetime.min.time())
     end_of_day = datetime.combine(today, datetime.max.time())
@@ -195,6 +198,16 @@ def LatestOrdersTodayAPIView(request):
     match['order_status'] = {"$in": ['Shipped', 'Delivered']}
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
+
+    if product_id != None and product_id != "" and product_id != []:
+        product_id = [ObjectId(pid) for pid in product_id]
+        ids = getOrdersListBasedonProductId(product_id)
+        match["_id"] = {"$in": ids}
+
+    elif brand_id != None and brand_id != "" and brand_id != []:
+        brand_id = [ObjectId(bid) for bid in brand_id]
+        ids = getproductIdListBasedonbrand(brand_id)
+        match["_id"] = {"$in": ids}
 
     # 1️⃣ Hourly aggregation: Use order-level date for bucket, sum quantities from items
     hourly_pipeline = [
@@ -329,6 +342,8 @@ def LatestOrdersTodayAPIView(request):
 
 def LatestOrdersTodayAPIView(request):
     marketplace_id = request.GET.get('marketplace_id', None)
+    product_id = request.GET.get('product_id', None)
+    brand_id = request.GET.get('brand_id', None)
     # 1️⃣ Compute bounds for "today" based on the user's local timezone
     user_timezone = request.GET.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
     local_tz = timezone(user_timezone)
@@ -339,19 +354,24 @@ def LatestOrdersTodayAPIView(request):
     end_of_day = now
 
     # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
+    match = dict()
+    match['order_date__gte'] = start_of_day
+    match['order_date__lte'] = end_of_day
+    match['order_status__in'] = ['Shipped', 'Delivered']
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        qs = Order.objects.filter(
-            order_date__gte=start_of_day,
-            order_date__lte=end_of_day,
-            order_status__in=["Shipped", "Delivered"],
-            marketplace_id=ObjectId(marketplace_id)
-        )
-    else:
-        qs = Order.objects.filter(
-            order_date__gte=start_of_day,
-            order_date__lte=end_of_day,
-            order_status__in=["Shipped", "Delivered"]
-        )
+        match['marketplace_id'] = ObjectId(marketplace_id)
+
+    if product_id != None and product_id != "" and product_id != []:
+        product_id = [ObjectId(pid) for pid in product_id]
+        ids = getOrdersListBasedonProductId(product_id)
+        match["id__in"] = ids
+
+    elif brand_id != None and brand_id != "" and brand_id != []:
+        brand_id = [ObjectId(bid) for bid in brand_id]
+        ids = getproductIdListBasedonbrand(brand_id)
+        match["id__in"] = ids
+
+    qs = DatabaseModel.list_documents(Order.objects,match)
 
     # 3️⃣ Pre-fill a 24-slot OrderedDict for every hour in the time range
     chart = OrderedDict()
@@ -415,11 +435,7 @@ def LatestOrdersTodayAPIView(request):
 
 
 
-def get_graph_data(start_date, end_date, preset,marketplace_id):
-    marketplace_boolean = False
-    # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        marketplace_boolean = True
+def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,product_id=None):
     now = datetime.utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
@@ -459,24 +475,32 @@ def get_graph_data(start_date, end_date, preset,marketplace_id):
 
     # Get all orders grouped by time bucket
     orders_by_bucket = {}
+    match = dict()
+    match['order_status__in'] = ['Shipped', 'Delivered']
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+
+    if product_id != None and product_id != "" and product_id != []:
+        product_id = [ObjectId(pid) for pid in product_id]
+        ids = getOrdersListBasedonProductId(product_id)
+        match["id__in"] = ids
+
+    elif brand_id != None and brand_id != "" and brand_id != []:
+        brand_id = [ObjectId(bid) for bid in brand_id]
+        ids = getproductIdListBasedonbrand(brand_id)
+        match["id__in"] = ids
     for dt in time_buckets:
         bucket_start = dt
         if preset in ["Today", "Yesterday"]:
             bucket_end = dt + timedelta(hours=1)
         else:
             bucket_end = dt + timedelta(days=1)
+        # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
+        
+        match['order_date__gte'] = bucket_start
+        match['order_date__lte'] = bucket_end
 
-        if marketplace_boolean:
-            orders = Order.objects.filter(
-                order_date__gte=bucket_start,
-                order_date__lt=bucket_end,
-                marketplace_id=ObjectId(marketplace_id)
-            )
-        else:
-            orders = Order.objects.filter(
-                order_date__gte=bucket_start,
-                order_date__lt=bucket_end
-            )
+        orders = DatabaseModel.list_documents(Order.objects,match)
         orders_by_bucket[dt.strftime(time_format)] = list(orders)
 
     # Process each time bucket
@@ -495,7 +519,7 @@ def get_graph_data(start_date, end_date, preset,marketplace_id):
         else:
             bucket_end = bucket_start.replace(hour=23, minute=59, second=59)
         # Calculate refunds first (same as your total calculation)
-        refund_ins = refundOrder(bucket_start, bucket_end,marketplace_id)
+        refund_ins = refundOrder(bucket_start, bucket_end,marketplace_id,brand_id,product_id)
         if refund_ins:
             for ins in refund_ins:
                 if ins['order_date'] >= bucket_start and ins['order_date'] < bucket_end:
@@ -566,7 +590,7 @@ def get_graph_data(start_date, end_date, preset,marketplace_id):
     return graph_data
 
 
-def totalRevenueCalculation(start_date, end_date, marketplace_id=None):
+def totalRevenueCalculation(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None):
     total = dict()
     gross_revenue = 0
     total_cogs = 0
@@ -575,8 +599,8 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None):
     total_units = 0
     total_orders = 0
 
-    result = grossRevenue(start_date, end_date,marketplace_id)
-    refund_ins = refundOrder(start_date, end_date,marketplace_id)
+    result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id)
+    refund_ins = refundOrder(start_date, end_date,marketplace_id,brand_id,product_id)
     refund_quantity_ins = 0
     if refund_ins != []:
         for ins in refund_ins:
@@ -646,11 +670,13 @@ def RevenueWidgetAPIView(request):
     compare_startdate = request.GET.get("compare_startdate")
     compare_enddate = request.GET.get("compare_enddate")
     marketplace_id = request.GET.get("marketplace_id", None)
+    product_id = request.GET.get("product_id", None)
+    brand_id = request.GET.get("brand_id", None)
 
     start_date, end_date = get_date_range(preset)
     comapre_past = get_previous_periods(start_date, end_date)
-    total = totalRevenueCalculation(start_date, end_date,marketplace_id)
-    graph_data = get_graph_data(start_date, end_date, preset,marketplace_id)
+    total = totalRevenueCalculation(start_date, end_date,marketplace_id,brand_id,product_id)
+    graph_data = get_graph_data(start_date, end_date, preset,marketplace_id,brand_id,product_id)
     
     data = dict()
     data = {
@@ -663,7 +689,7 @@ def RevenueWidgetAPIView(request):
         compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
         compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
 
-        compare_total = totalRevenueCalculation(compare_startdate, compare_enddate,marketplace_id)
+        compare_total = totalRevenueCalculation(compare_startdate, compare_enddate,marketplace_id,brand_id,product_id)
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
         
 
@@ -679,7 +705,7 @@ def RevenueWidgetAPIView(request):
         }
         data['compare_total'] = difference
         data['previous_total'] = compare_total
-        data['compare_graph'] = get_graph_data(compare_startdate, compare_enddate, initial,marketplace_id)
+        data['compare_graph'] = get_graph_data(compare_startdate, compare_enddate, initial,marketplace_id,brand_id,product_id)
     name = "Revenue"
     item_pipeline = [
                         { "$match": { "name": name } }
@@ -718,6 +744,8 @@ def RevenueWidgetAPIView(request):
 
 def get_top_products(request):
     marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.get('brand_id', None)
+    product_id = request.GET.get('product_id', None)
     metric = request.GET.get("sortBy", "units_sold")  # 'price', 'refund', etc.
     preset = request.GET.get("preset", "Today")  # today, yesterday, last_7_days
     start_date, end_date = get_date_range(preset)
@@ -747,6 +775,15 @@ def get_top_products(request):
         match['marketplace_id'] = ObjectId(marketplace_id)
     if metric == "refund":
         match['order_status'] = "Refunded"
+    if product_id != None and product_id != "" and product_id != []:
+        product_id = [ObjectId(pid) for pid in product_id]
+        ids = getOrdersListBasedonProductId(product_id)
+        match["_id"] = {"$in": ids}
+
+    elif brand_id != None and brand_id != "" and brand_id != []:
+        brand_id = [ObjectId(bid) for bid in brand_id]
+        ids = getproductIdListBasedonbrand(brand_id)
+        match["_id"] = {"$in": ids}
     
 
     pipeline = [
@@ -855,6 +892,97 @@ def get_top_products(request):
     result = list(Order.objects.aggregate(pipeline))
     data = {"results": {"items": result}}
     return data
+
+def get_products_with_pagination(request):
+    page = int(request.GET.get("page", 1))
+    page_size = 10
+
+    # Define the pipeline for pagination and data fetching
+    pipeline = [
+        {
+            "$facet": {
+                "total_count": [{"$count": "count"}],
+                "products": [
+                    {"$skip": (page - 1) * page_size},
+                    {"$limit": page_size},
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "id": {"$toString":"$_id"},
+                            "AmazonToken_id": {"$ifNull": ["$AmazonToken_id", "N/A"]},
+                            "asin": {"$ifNull": ["$product_id", "N/A"]},
+                            "sellerSku": {"$ifNull": ["$sku", "N/A"]},
+                            "marketplace": {"$ifNull": ["$marketplace", "N/A"]},
+                            "inventoryStatus": {"$ifNull": ["$inventoryStatus", "N/A"]},
+                            "fulfillmentChannel": {"$ifNull": ["$fulfillmentChannel", "N/A"]},
+                            "price": {"$ifNull": ["$price", "N/A"]},
+                            "priceDraft": {"$ifNull": ["$priceDraft", "N/A"]},
+                            "title": {"$ifNull": ["$product_title", "N/A"]},
+                            "totalRatingsCount": {"$ifNull": ["$totalRatingsCount", "N/A"]},
+                            "reviewRating": {"$ifNull": ["$reviewRating", "N/A"]},
+                            "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
+                            "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
+                            "parentAsin": {"$ifNull": ["$parentAsin", "N/A"]},
+                            "buyBoxWinnerId": {"$ifNull": ["$buyBoxWinnerId", "N/A"]},
+                            "newInsightsCount": {"$ifNull": ["$newInsightsCount", "N/A"]},
+                            "newInsightsGrouped": {"$ifNull": ["$newInsightsGrouped", "N/A"]},
+                            "category": {"$ifNull": ["$category", "N/A"]},
+                            "categoryTitle": {"$ifNull": ["$categoryTitle", "N/A"]},
+                            "amazonLink": {"$ifNull": ["$amazonLink", "N/A"]},
+                            "bsr": {"$ifNull": ["$bsr", "N/A"]},
+                            "subcategoriesBsr": {"$ifNull": ["$subcategoriesBsr", "N/A"]},
+                            "salesForToday": {"$ifNull": ["$salesForToday", 0]},
+                            "unitsSoldForToday": {"$ifNull": ["$unitsSoldForToday", 0]},
+                            "unitsSoldForPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
+                            "refunds": {"$ifNull": ["$refunds", 0]},
+                            "refundsAmount": {"$ifNull": ["$refundsAmount", 0]},
+                            "refundRate": {"$ifNull": ["$refundRate", "0%"]},
+                            "pageViews": {"$ifNull": ["$page_views", 0]},
+                            "pageViewsPercentage": {"$ifNull": ["$pageViewsPercentage", "0%"]},
+                            "conversionRate": {"$ifNull": ["$conversionRate", "N/A"]},
+                            "grossProfit": {"$ifNull": ["$grossProfit", 0]},
+                            "netProfit": {"$ifNull": ["$netProfit", 0]},
+                            "margin": {"$ifNull": ["$margin", "0%"]},
+                            "totalAmazonFees": {"$ifNull": ["$totalAmazonFees", "N/A"]},
+                            "roi": {"$ifNull": ["$roi", "0%"]},
+                            "cogs": {"$round" : [{"$ifNull": ["$cogs", 0]},2]},
+                            "fbaPerOrderFulfillmentFee": {"$ifNull": ["$fbaPerOrderFulfillmentFee", "N/A"]},
+                            "fbaPerUnitFulfillmentFee": {"$ifNull": ["$fbaPerUnitFulfillmentFee", "N/A"]},
+                            "fbaWeightBasedFee": {"$ifNull": ["$fbaWeightBasedFee", "N/A"]},
+                            "variableClosingFee": {"$ifNull": ["$variableClosingFee", "N/A"]},
+                            "commission": {"$ifNull": ["$commission", "N/A"]},
+                            "fixedClosingFee": {"$ifNull": ["$fixedClosingFee", "N/A"]},
+                            "salesTaxCollectionFee": {"$ifNull": ["$salesTaxCollectionFee", "N/A"]},
+                            "shippingHbFee": {"$ifNull": ["$shippingHbFee", "N/A"]},
+                            "isFavorite": {"$ifNull": ["$isFavorite", "N/A"]},
+                            "trafficSessions": {"$ifNull": ["$trafficSessions", "N/A"]},
+                            "trafficSessionPercentage": {"$ifNull": ["$trafficSessionPercentage", "0%"]},
+                            # "deltas": {"$ifNull": ["$deltas", None]},
+                            "competitorsProducts": {"$ifNull": ["$competitorsProducts", 0]},
+                            "tags": {"$ifNull": ["$tags", []]},
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+
+    # Execute the pipeline
+    result = list(Product.objects.aggregate(*pipeline))
+
+    # Extract total count and products
+    total_products = result[0]["total_count"][0]["count"] if result[0]["total_count"] else 0
+    products = result[0]["products"]
+
+    # Prepare response data
+    response_data = {
+        "total_products": total_products,
+        "page": page,
+        "page_size": page_size,
+        "products": products,
+    }
+
+    return JsonResponse(response_data, safe=False)
 
 
 
@@ -2928,97 +3056,6 @@ def calculate_metrics(start_date, end_date):
         "productCompleteness": product_completeness  # Product completeness
     }
 
-
-def get_products_with_pagination(request):
-    page = int(request.GET.get("page", 1))
-    page_size = 10
-
-    # Define the pipeline for pagination and data fetching
-    pipeline = [
-        {
-            "$facet": {
-                "total_count": [{"$count": "count"}],
-                "products": [
-                    {"$skip": (page - 1) * page_size},
-                    {"$limit": page_size},
-                    {
-                        "$project": {
-                            "_id": 0,
-                            "id": {"$toString":"$_id"},
-                            "AmazonToken_id": {"$ifNull": ["$AmazonToken_id", "N/A"]},
-                            "asin": {"$ifNull": ["$product_id", "N/A"]},
-                            "sellerSku": {"$ifNull": ["$sku", "N/A"]},
-                            "marketplace": {"$ifNull": ["$marketplace", "N/A"]},
-                            "inventoryStatus": {"$ifNull": ["$inventoryStatus", "N/A"]},
-                            "fulfillmentChannel": {"$ifNull": ["$fulfillmentChannel", "N/A"]},
-                            "price": {"$ifNull": ["$price", "N/A"]},
-                            "priceDraft": {"$ifNull": ["$priceDraft", "N/A"]},
-                            "title": {"$ifNull": ["$product_title", "N/A"]},
-                            "totalRatingsCount": {"$ifNull": ["$totalRatingsCount", "N/A"]},
-                            "reviewRating": {"$ifNull": ["$reviewRating", "N/A"]},
-                            "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
-                            "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
-                            "parentAsin": {"$ifNull": ["$parentAsin", "N/A"]},
-                            "buyBoxWinnerId": {"$ifNull": ["$buyBoxWinnerId", "N/A"]},
-                            "newInsightsCount": {"$ifNull": ["$newInsightsCount", "N/A"]},
-                            "newInsightsGrouped": {"$ifNull": ["$newInsightsGrouped", "N/A"]},
-                            "category": {"$ifNull": ["$category", "N/A"]},
-                            "categoryTitle": {"$ifNull": ["$categoryTitle", "N/A"]},
-                            "amazonLink": {"$ifNull": ["$amazonLink", "N/A"]},
-                            "bsr": {"$ifNull": ["$bsr", "N/A"]},
-                            "subcategoriesBsr": {"$ifNull": ["$subcategoriesBsr", "N/A"]},
-                            "salesForToday": {"$ifNull": ["$salesForToday", 0]},
-                            "unitsSoldForToday": {"$ifNull": ["$unitsSoldForToday", 0]},
-                            "unitsSoldForPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
-                            "refunds": {"$ifNull": ["$refunds", 0]},
-                            "refundsAmount": {"$ifNull": ["$refundsAmount", 0]},
-                            "refundRate": {"$ifNull": ["$refundRate", "0%"]},
-                            "pageViews": {"$ifNull": ["$pageViews", 0]},
-                            "pageViewsPercentage": {"$ifNull": ["$pageViewsPercentage", "0%"]},
-                            "conversionRate": {"$ifNull": ["$conversionRate", "N/A"]},
-                            "grossProfit": {"$ifNull": ["$grossProfit", 0]},
-                            "netProfit": {"$ifNull": ["$netProfit", 0]},
-                            "margin": {"$ifNull": ["$margin", "0%"]},
-                            "totalAmazonFees": {"$ifNull": ["$totalAmazonFees", "N/A"]},
-                            "roi": {"$ifNull": ["$roi", "0%"]},
-                            "cogs": {"$ifNull": ["$cogs", 0]},
-                            "fbaPerOrderFulfillmentFee": {"$ifNull": ["$fbaPerOrderFulfillmentFee", "N/A"]},
-                            "fbaPerUnitFulfillmentFee": {"$ifNull": ["$fbaPerUnitFulfillmentFee", "N/A"]},
-                            "fbaWeightBasedFee": {"$ifNull": ["$fbaWeightBasedFee", "N/A"]},
-                            "variableClosingFee": {"$ifNull": ["$variableClosingFee", "N/A"]},
-                            "commission": {"$ifNull": ["$commission", "N/A"]},
-                            "fixedClosingFee": {"$ifNull": ["$fixedClosingFee", "N/A"]},
-                            "salesTaxCollectionFee": {"$ifNull": ["$salesTaxCollectionFee", "N/A"]},
-                            "shippingHbFee": {"$ifNull": ["$shippingHbFee", "N/A"]},
-                            "isFavorite": {"$ifNull": ["$isFavorite", "N/A"]},
-                            "trafficSessions": {"$ifNull": ["$trafficSessions", "N/A"]},
-                            "trafficSessionPercentage": {"$ifNull": ["$trafficSessionPercentage", "0%"]},
-                            # "deltas": {"$ifNull": ["$deltas", None]},
-                            "competitorsProducts": {"$ifNull": ["$competitorsProducts", 0]},
-                            "tags": {"$ifNull": ["$tags", []]},
-                        }
-                    }
-                ]
-            }
-        }
-    ]
-
-    # Execute the pipeline
-    result = list(Product.objects.aggregate(*pipeline))
-
-    # Extract total count and products
-    total_products = result[0]["total_count"][0]["count"] if result[0]["total_count"] else 0
-    products = result[0]["products"]
-
-    # Prepare response data
-    response_data = {
-        "total_products": total_products,
-        "page": page,
-        "page_size": page_size,
-        "products": products,
-    }
-
-    return JsonResponse(response_data, safe=False)
 
 
 
