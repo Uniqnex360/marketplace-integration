@@ -4699,9 +4699,19 @@ def getBrandList(request):
 
 def obtainManufactureNames(request):
     marketplace_id = request.GET.get('marketplace_id')
+    search_query = request.GET.get('search_query')
+    match =dict()
     pipeline = []
+
+    if search_query != None and search_query != "":
+        search_query = search_query.strip() 
+        match["$manufacturer_name"] = {"$regex": search_query, "$options": "i"}
+
+    
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        pipeline.append({"$match": {"marketplace_id": ObjectId(marketplace_id)}})
+        match['marketplace_id'] = ObjectId(marketplace_id)
+    if match != {}:
+        pipeline.append({"$match": match})
     pipeline.extend([
         {
             "$group" : {
