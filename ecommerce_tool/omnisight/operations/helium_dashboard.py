@@ -443,7 +443,7 @@ def LatestOrdersTodayAPIView(request):
 
 
 
-def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,product_id=None):
+def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,product_id=None,manufacturer_name=None,fulfillment_channel=None):
     now = datetime.utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
@@ -926,6 +926,7 @@ def get_products_with_pagination(request):
                             "inventoryStatus": {"$ifNull": ["$inventoryStatus", "N/A"]},
                             "fulfillmentChannel": {"$ifNull": ["$fulfillmentChannel", "N/A"]},
                             "price": {"$ifNull": ["$price", "N/A"]},
+                            "stock" : {"$ifNull": ["$quantity", 0]},
                             "priceDraft": {"$ifNull": ["$priceDraft", "N/A"]},
                             "title": {"$ifNull": ["$product_title", "N/A"]},
                             "totalRatingsCount": {"$ifNull": ["$totalRatingsCount", "N/A"]},
@@ -1835,7 +1836,7 @@ def allMarketplaceData(request):
                 "margin": with_delta("margin"),
                 "roi": with_delta("roi")
             },
-            "marketplace_list": grouped_marketplace_metrics(cur_from, cur_to)
+            "marketplace_list": grouped_marketplace_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         }
 
     current_date = datetime.now()
