@@ -3844,12 +3844,17 @@ from rest_framework.parsers import JSONParser # type: ignore
 def updateChooseMatrix(request):
     json_req = JSONParser().parse(request)
     name = json_req['name']
-    if 'select_all' in json_req and json_req['select_all'] == True:
-        update_fields = {
-        'select_all': json_req['select_all']}
-
-    else:
-        if name == "Today Snapshot":
+    
+    if name == "Today Snapshot":
+        if 'select_all' in json_req and json_req['select_all'] == True:
+            update_fields = {
+            'select_all': json_req['select_all'], 'gross_revenue': True,
+                'total_cogs': True,
+                'profit_margin': True,
+                'orders': True,
+                'units_sold': True,
+                'refund_quantity': True,}
+        else:
             update_fields = {
                 'select_all': False,
             'gross_revenue': json_req['gross_revenue'],
@@ -3857,10 +3862,24 @@ def updateChooseMatrix(request):
             'profit_margin': json_req['profit_margin'],
             'orders': json_req['orders'],
             'units_sold': json_req['units_sold'],
-            'business_value': json_req['business_value'],
             'refund_quantity': json_req['refund_quantity'],
             }
-        elif name == "Revenue":
+    elif name == "Revenue":
+        if 'select_all' in json_req and json_req['select_all'] == True:
+            update_fields = {
+                'select_all': json_req['select_all'], 'gross_revenue': True,
+                'units_sold': True,
+                'acos': True,
+                'tacos': True,
+                'refund_quantity': True,
+                'net_profit': True,
+                'profit_margin': True,
+                'refund_amount': True,
+                'roas': True,
+                'orders': True,
+                'ppc_spend': True
+            }
+        else:
             update_fields = {
             'select_all': False,
             'gross_revenue': json_req['gross_revenue'],
