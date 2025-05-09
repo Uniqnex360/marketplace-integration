@@ -129,23 +129,27 @@ def get_date_range(preset):
         return today - timedelta(days=1), today
     elif preset == "This Week":
         start = today - timedelta(days=today.weekday())
-        return start, start + timedelta(days=7)
+        return start, today
+    elif preset == "This Month":
+        start = today.replace(day=1)
+        return start, today
+    elif preset == "This Year":
+        return today.replace(month=1, day=1), today
+    
     elif preset == "Last Week":
         start = today - timedelta(days=today.weekday() + 7)
         return start, start + timedelta(days=7)
     elif preset == "Last 7 days":
-        return today - timedelta(days=6), today - timedelta(days=1)
+        return today - timedelta(days=7), today - timedelta(days=1)
     elif preset == "Last 14 days":
-        return today - timedelta(days=13), today - timedelta(days=1)
+        return today - timedelta(days=14), today - timedelta(days=1)
     elif preset == "Last 30 days":
-        return today - timedelta(days=29), today - timedelta(days=1)
+        return today - timedelta(days=30), today - timedelta(days=1)
     elif preset == "Last 60 days":
-        return today - timedelta(days=59), today - timedelta(days=1)
+        return today - timedelta(days=60), today - timedelta(days=1)
     elif preset == "Last 90 days":
-        return today - timedelta(days=89), today - timedelta(days=1)
-    elif preset == "This Month":
-        start = today.replace(day=1)
-        return start, (start + relativedelta(months=1))
+        return today - timedelta(days=90), today - timedelta(days=1)
+    
     elif preset == "Last Month":
         start = (today.replace(day=1) - relativedelta(months=1))
         return start, today.replace(day=1)
@@ -157,8 +161,7 @@ def get_date_range(preset):
         quarter = ((today.month - 1) // 3) - 1
         start = today.replace(month=quarter * 3 + 1, day=1)
         return start, start + relativedelta(months=3)
-    elif preset == "This Year":
-        return today.replace(month=1, day=1), today.replace(year=today.year + 1, month=1, day=1)
+    
     elif preset == "Last Year":
         return today.replace(year=today.year - 1, month=1, day=1), today.replace(month=1, day=1)
     return today, today + timedelta(days=1)
