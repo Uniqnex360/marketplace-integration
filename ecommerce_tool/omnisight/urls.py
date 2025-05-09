@@ -19,7 +19,7 @@ from omnisight.operations.common_operations import checkEmailExistOrNot, signupU
 from omnisight.operations.walmart_operations import updateOrdersItemsDetails, fetchAllorders1, syncRecentWalmartOrders
 from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary, salesAnalytics, mostSellingProducts, fetchTopSellingCategories, updateManualOrder, fetchInventryList, exportOrderReport, createUser, updateUser, listUsers,fetchUserDetails, fetchRoles
 
-from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders
+from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders,ShipStationShippingCostAPIView
 
 from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist,InsightsProductWise,getCitywiseSales,exportCitywiseSalesExcel,downloadCitywiseSalesCSV,obtainManufactureNames
 
@@ -127,7 +127,8 @@ urlpatterns = [
     path("getCitywiseSales/",getCitywiseSales,name="getCitywiseSales"),
     path("exportCitywiseSalesExcel/",exportCitywiseSalesExcel,name="exportCitywiseSalesExcel"),
     path("downloadCitywiseSalesCSV/",downloadCitywiseSalesCSV,name="downloadCitywiseSalesCSV"),
-    path("obtainManufactureNames/",obtainManufactureNames,name="obtainManufactureNames")
+    path("obtainManufactureNames/",obtainManufactureNames,name="obtainManufactureNames"),
+    path('api/shipstation/shipping-cost/', ShipStationShippingCostAPIView.as_view(), name='shipstation-shipping-cost'),
 ]
 
 

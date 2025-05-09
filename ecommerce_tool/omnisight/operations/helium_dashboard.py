@@ -1847,7 +1847,7 @@ def allMarketplaceData(request):
     response_data = {
         "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
         "from_date":from_date,
-        "to_date":to_date
+        "to_date":to_date  - timedelta(days=1)
     }
 
     return JsonResponse(response_data, safe=False)
@@ -3122,7 +3122,7 @@ def getProfitAndLossDetails(request):
 
         return {
             "dateRanges": {
-                "current": {"from": cur_from.isoformat() + "Z", "to": cur_to.isoformat() + "Z"},
+                 "current": {"from": cur_from.isoformat() + "Z","to": (cur_to - timedelta(days=1)).isoformat() + "Z"},
                 "previous": {"from": prev_from.isoformat() + "Z", "to": prev_to.isoformat() + "Z"}
             },
             "summary": {
