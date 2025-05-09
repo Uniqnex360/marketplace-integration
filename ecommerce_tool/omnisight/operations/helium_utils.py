@@ -134,15 +134,15 @@ def get_date_range(preset):
         start = today - timedelta(days=today.weekday() + 7)
         return start, start + timedelta(days=7)
     elif preset == "Last 7 days":
-        return today - timedelta(days=6), today + timedelta(days=1)
+        return today - timedelta(days=6), today - timedelta(days=1)
     elif preset == "Last 14 days":
-        return today - timedelta(days=13), today + timedelta(days=1)
+        return today - timedelta(days=13), today - timedelta(days=1)
     elif preset == "Last 30 days":
-        return today - timedelta(days=29), today + timedelta(days=1)
+        return today - timedelta(days=29), today - timedelta(days=1)
     elif preset == "Last 60 days":
-        return today - timedelta(days=59), today + timedelta(days=1)
+        return today - timedelta(days=59), today - timedelta(days=1)
     elif preset == "Last 90 days":
-        return today - timedelta(days=89), today + timedelta(days=1)
+        return today - timedelta(days=89), today - timedelta(days=1)
     elif preset == "This Month":
         start = today.replace(day=1)
         return start, (start + relativedelta(months=1))
