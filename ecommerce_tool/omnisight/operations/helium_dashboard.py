@@ -3857,7 +3857,6 @@ def updateChooseMatrix(request):
             'profit_margin': json_req['profit_margin'],
             'orders': json_req['orders'],
             'units_sold': json_req['units_sold'],
-            'business_value': json_req['business_value'],
             'refund_quantity': json_req['refund_quantity'],
             }
         elif name == "Revenue":
