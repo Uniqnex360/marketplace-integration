@@ -1716,7 +1716,14 @@ def allMarketplaceData(request):
             grouped_orders[key].append(order)
 
         marketplace_metrics = defaultdict(lambda: {"currency_list": []})
-
+        m_obj = Marketplace.objects(id=mp_id)
+        marketplace = m_obj[0].name if m_obj else ""
+        print(marketplace)
+        image = ""
+        if marketplace == "Amazon":
+            image = "https://i.pinimg.com/originals/01/ca/da/01cada77a0a7d326d85b7969fe26a728.jpg"
+        if marketplace == "wallmart":   
+            image = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRzjtf8dzq48TtkzeRYx2-_li3gTCkstX2juA&s"
         for (mp_id, currency), orders in grouped_orders.items():
             gross_revenue = 0
             total_cogs = 0
@@ -1729,7 +1736,13 @@ def allMarketplaceData(request):
 
             m_obj = Marketplace.objects(id=mp_id)
             marketplace = m_obj[0].name if m_obj else ""
-
+            print(marketplace)
+            image = ""
+            if marketplace == "Amazon":
+                image = "https://i.pinimg.com/originals/01/ca/da/01cada77a0a7d326d85b7969fe26a728.jpg"
+            if marketplace == "wallmart":   
+                image = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRzjtf8dzq48TtkzeRYx2-_li3gTCkstX2juA&s"
+    
             for order in orders:
                 gross_revenue += order["order_total"]
                 order_total = order["order_total"]
@@ -1800,7 +1813,7 @@ def allMarketplaceData(request):
             marketplace_metrics[marketplace]["currency_list"].append(currency_data)
 
         # Convert the grouped dictionary to a list of marketplace data
-        return [{"marketplace": marketplace, "currency_list": data["currency_list"]} 
+        return [{"image":image,"marketplace": marketplace, "currency_list": data["currency_list"]} 
                 for marketplace, data in marketplace_metrics.items()]
 
     def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
