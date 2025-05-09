@@ -637,4 +637,48 @@ def ProcessAmazonProductAttributes():
         DatabaseModel.update_documents(Product.objects,{"id" : product_ins['_id']},{"attributes" : new_dict,"old_attributes" : product_ins['attributes']})
 
 
+
+import requests
+from requests.auth import HTTPBasicAuth  # ✅ This is the missing import
+from django.conf import settings
 # ProcessAmazonProductAttributes()
+def get_order_shipping_cost_by_order_number(order_number):
+    url = f"https://ssapi.shipstation.com/orders?orderNumber={order_number}"
+
+    response = requests.get(
+        url,
+        auth=HTTPBasicAuth(settings.SHIPSTATION_API_KEY, settings.SHIPSTATION_API_SECRET)
+    )
+
+    if response.status_code == 200:
+        data = response.json()
+        orders = data.get("orders", [])
+        if not orders:
+            return {"error": "No order found with this order number"}
+        
+        order = orders[0]  # Assuming orderNumber is unique
+        return {
+    "orderId": order.get("orderId"),
+    "orderNumber": order.get("orderNumber"),
+    "shippingAmount": order.get("shippingAmount", 0.0),
+    "currency": order.get("advancedOptions", {}).get("storeCurrencyCode", "USD")  # fallback for currency
+}
+    else:
+        raise Exception(f"ShipStation Error: {response.status_code} - {response.text}")
+
+# views.py
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+class ShipStationShippingCostAPIView(APIView):
+    def get(self, request):
+        order_number = request.query_params.get("order_number")
+        if not order_number:
+            return Response({"error": "Missing 'order_number' parameter"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            cost_info = get_order_shipping_cost_by_order_number(order_number)
+            return Response(cost_info, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
