@@ -4663,7 +4663,7 @@ def getproductIdlist(request):
     return asin_list
 
 
-def getBrandList(request):
+def getBrandListforfilter(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')
