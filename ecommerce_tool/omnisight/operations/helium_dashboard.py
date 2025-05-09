@@ -1091,20 +1091,32 @@ def getPeriodWiseData(request):
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end,marketplace_id=[],brand_id=[],product_id=[],manufacturer_name=None,fulfillment_channel=None):
         current_metrics = calculate_metricss(current_start, current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         previous_metrics = calculate_metricss(prev_start, prev_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-
-        output = {
-            "label": label,
-            "period": {
-                "current": {
-                    "from": to_utc_format(current_start),
-                    "to": to_utc_format(current_end)
-                },
-                "previous": {
-                    "from": to_utc_format(prev_start),
-                    "to": to_utc_format(prev_end)
+        if label in ['Today', 'Yesterday']:
+            output = {
+                "label": label,
+                "period": {
+                    "current": {
+                        "from": to_utc_format(current_start)
+                    },
+                    "previous": {
+                        "from": to_utc_format(prev_start)
+                    }
                 }
             }
-        }
+        else:
+            output = {
+                "label": label,
+                "period": {
+                    "current": {
+                        "from": to_utc_format(current_start),
+                        "to": to_utc_format(current_end)
+                    },
+                    "previous": {
+                        "from": to_utc_format(prev_start),
+                        "to": to_utc_format(prev_end)
+                    }
+                }
+            }
 
         for key in current_metrics:
             output[key] = {
@@ -1553,7 +1565,59 @@ def getPeriodWiseDataCustom(request):
                 "previous": previous[metric],
                 "delta": round(current[metric] - previous[metric], 2)
             }
-        return {
+        if label in ['Today', 'Yesterday']:
+            return {
+            "dateRanges": {
+                "current": {"from": cur_from.isoformat() + "Z",},
+                "previous": {"from": prev_from.isoformat() + "Z",}
+            },
+            "summary": {
+                "grossRevenue": with_delta("grossRevenue"),
+                "netProfit": with_delta("netProfit"),
+                "expenses": with_delta("expenses"),
+                "unitsSold": with_delta("unitsSold"),
+                "refunds": with_delta("refunds"),
+                "skuCount": with_delta("skuCount"),
+                "sessions": with_delta("sessions"),
+                "pageViews": with_delta("pageViews"),
+                "unitSessionPercentage": with_delta("unitSessionPercentage"),
+                "margin": with_delta("margin"),
+                "roi": with_delta("roi"),
+                "orders": with_delta("orders"),
+            },
+            "netProfitCalculation": {
+                "current": {
+                    "gross": current["grossRevenue"],
+                    "totalCosts": current["expenses"],
+                    "productRefunds": current["refunds"],
+                    "totalTax": current["tax_price"] if 'tax_price' in current else 0,
+                    "totalTaxWithheld": 0,
+                    "ppcProductCost": 0,
+                    "ppcBrandsCost": 0,
+                    "ppcDisplayCost": 0,
+                    "ppcStCost": 0,
+                    "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
+                    "product_cost": current["product_cost"] ,
+                    "shipping_cost": current["shipping_cost"] ,
+                },
+                "previous": {
+                    "gross": previous["grossRevenue"],
+                    "totalCosts": previous["expenses"],
+                    "productRefunds": previous["refunds"],
+                    "totalTax": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                    "totalTaxWithheld": 0,
+                    "ppcProductCost": 0,
+                    "ppcBrandsCost": 0,
+                    "ppcDisplayCost": 0,
+                    "ppcStCost": 0,
+                    "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                    "product_cost": previous["product_cost"] ,
+                    "shipping_cost": previous["shipping_cost"] ,
+                }
+            }
+        }
+        else:
+            return {
             "dateRanges": {
                 "current": {"from": cur_from.isoformat() + "Z","to": (cur_to - timedelta(days=1)).isoformat() + "Z"},
                 "previous": {"from": prev_from.isoformat() + "Z", "to": prev_to.isoformat() + "Z"}
@@ -3106,7 +3170,8 @@ def getProfitAndLossDetails(request):
             "product_cost":order_total,
             "shipping_cost":0,
             "productCategories": product_categories,  # Added product distribution data
-            "productCompleteness": product_completeness  # Added product completeness data
+            "productCompleteness": product_completeness,  # Added product completeness data
+            'base_price':temp_price,
         }
 
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
@@ -3151,6 +3216,7 @@ def getProfitAndLossDetails(request):
                     "ppcStCost": 0,
                     "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
                     "product_cost": current["product_cost"],
+                    "base_price": current["base_price"],
                     "shipping_cost": current["shipping_cost"],
                 },
                 "previous": {
@@ -3165,6 +3231,7 @@ def getProfitAndLossDetails(request):
                     "ppcStCost": 0,
                     "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
                     "product_cost": previous["product_cost"],
+                    "base_price": current["base_price"],
                     "shipping_cost": previous["shipping_cost"],
                 }
             },
