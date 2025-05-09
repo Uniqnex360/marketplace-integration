@@ -172,8 +172,8 @@ def get_metrics_by_date_range(request):
         if item_result['total_cogs'] == False:
             del metrics['targeted']["total_cogs"]
             del metrics['previous']["total_cogs"]
-        if item_result['business_value'] == False:
-            del metrics['targeted']["business_value"]
+        # if item_result['business_value'] == False:
+        #     del metrics['targeted']["business_value"]
             # del metrics['previous']["business_value"]
         if item_result['orders'] == False:
             del metrics['targeted']["total_orders"]
