@@ -1470,7 +1470,8 @@ def exportPeriodWiseCSV(request):
 
     return response
 
-
+def to_utc_format(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 def getPeriodWiseDataCustom(request):
     current_date = datetime.utcnow()
     marketplace_id = request.GET.get('marketplace_id', None)
@@ -1555,10 +1556,11 @@ def getPeriodWiseDataCustom(request):
             "shipping_cost":0,
             'orders':len(result)
         }
- 
+    
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
         current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+
         def with_delta(metric):
             return {
                 "current": current[metric],
@@ -1568,8 +1570,8 @@ def getPeriodWiseDataCustom(request):
         if label in ['Today', 'Yesterday']:
             return {
             "dateRanges": {
-                "current": {"from": cur_from.isoformat() + "Z",},
-                "previous": {"from": prev_from.isoformat() + "Z",}
+                "current": {"from": to_utc_format(cur_from),},
+                "previous": {"from": to_utc_format(prev_from)}
             },
             "summary": {
                 "grossRevenue": with_delta("grossRevenue"),
@@ -1619,8 +1621,8 @@ def getPeriodWiseDataCustom(request):
         else:
             return {
             "dateRanges": {
-                "current": {"from": cur_from.isoformat() + "Z","to": (cur_to - timedelta(days=1)).isoformat() + "Z"},
-                "previous": {"from": prev_from.isoformat() + "Z", "to": prev_to.isoformat() + "Z"}
+                "current": {"from": to_utc_format(cur_from),"to": to_utc_format(cur_to)},
+                "previous": {"from": to_utc_format(prev_from), "to": to_utc_format(prev_to) }
             },
             "summary": {
                 "grossRevenue": with_delta("grossRevenue"),
@@ -3174,7 +3176,7 @@ def getProfitAndLossDetails(request):
             'base_price':temp_price,
         }
 
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,preset):
         current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
@@ -3184,63 +3186,118 @@ def getProfitAndLossDetails(request):
                 "previous": previous[metric],
                 "delta": round(current[metric] - previous[metric], 2)
             }
-
-        return {
-            "dateRanges": {
-                 "current": {"from": cur_from.isoformat() + "Z","to": (cur_to - timedelta(days=1)).isoformat() + "Z"},
-                "previous": {"from": prev_from.isoformat() + "Z", "to": prev_to.isoformat() + "Z"}
-            },
-            "summary": {
-                "grossRevenue": with_delta("grossRevenue"),
-                "netProfit": with_delta("netProfit"),
-                "expenses": with_delta("expenses"),
-                "unitsSold": with_delta("unitsSold"),
-                "refunds": with_delta("refunds"),
-                "skuCount": with_delta("skuCount"),
-                "sessions": with_delta("sessions"),
-                "pageViews": with_delta("pageViews"),
-                "unitSessionPercentage": with_delta("unitSessionPercentage"),
-                "margin": with_delta("margin"),
-                "roi": with_delta("roi")
-            },
-            "netProfitCalculation": {
-                "current": {
-                    "gross": current["grossRevenue"],
-                    "totalCosts": current["expenses"],
-                    "productRefunds": current["refunds"],
-                    "totalTax": current["tax_price"] if 'tax_price' in current else 0,
-                    "totalTaxWithheld": 0,
-                    "ppcProductCost": 0,
-                    "ppcBrandsCost": 0,
-                    "ppcDisplayCost": 0,
-                    "ppcStCost": 0,
-                    "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
-                    "product_cost": current["product_cost"],
-                    "base_price": current["base_price"],
-                    "shipping_cost": current["shipping_cost"],
+        if preset in ['Today', 'Yesterday']:
+            return {
+                "dateRanges": {
+                    "current": {"from": to_utc_format(cur_from),},
+                    "previous": {"from": to_utc_format(prev_from),}
                 },
-                "previous": {
-                    "gross": previous["grossRevenue"],
-                    "totalCosts": previous["expenses"],
-                    "productRefunds": previous["refunds"],
-                    "totalTax": previous["total_cogs"] if 'total_cogs' in previous else 0,
-                    "totalTaxWithheld": 0,
-                    "ppcProductCost": 0,
-                    "ppcBrandsCost": 0,
-                    "ppcDisplayCost": 0,
-                    "ppcStCost": 0,
-                    "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
-                    "product_cost": previous["product_cost"],
-                    "base_price": current["base_price"],
-                    "shipping_cost": previous["shipping_cost"],
+                "summary": {
+                    "grossRevenue": with_delta("grossRevenue"),
+                    "netProfit": with_delta("netProfit"),
+                    "expenses": with_delta("expenses"),
+                    "unitsSold": with_delta("unitsSold"),
+                    "refunds": with_delta("refunds"),
+                    "skuCount": with_delta("skuCount"),
+                    "sessions": with_delta("sessions"),
+                    "pageViews": with_delta("pageViews"),
+                    "unitSessionPercentage": with_delta("unitSessionPercentage"),
+                    "margin": with_delta("margin"),
+                    "roi": with_delta("roi")
+                },
+                "netProfitCalculation": {
+                    "current": {
+                        "gross": current["grossRevenue"],
+                        "totalCosts": current["expenses"],
+                        "productRefunds": current["refunds"],
+                        "totalTax": current["tax_price"] if 'tax_price' in current else 0,
+                        "totalTaxWithheld": 0,
+                        "ppcProductCost": 0,
+                        "ppcBrandsCost": 0,
+                        "ppcDisplayCost": 0,
+                        "ppcStCost": 0,
+                        "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
+                        "product_cost": current["product_cost"],
+                        "base_price": current["base_price"],
+                        "shipping_cost": current["shipping_cost"],
+                    },
+                    "previous": {
+                        "gross": previous["grossRevenue"],
+                        "totalCosts": previous["expenses"],
+                        "productRefunds": previous["refunds"],
+                        "totalTax": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                        "totalTaxWithheld": 0,
+                        "ppcProductCost": 0,
+                        "ppcBrandsCost": 0,
+                        "ppcDisplayCost": 0,
+                        "ppcStCost": 0,
+                        "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                        "product_cost": previous["product_cost"],
+                        "base_price": current["base_price"],
+                        "shipping_cost": previous["shipping_cost"],
+                    }
+                },
+                "charts": {
+                    "productDistribution": current["productCategories"],  # Bar chart data
+                    "productCompleteness": current["productCompleteness"]  # Pie chart data
                 }
-            },
-            "charts": {
-                "productDistribution": current["productCategories"],  # Bar chart data
-                "productCompleteness": current["productCompleteness"]  # Pie chart data
             }
-        }
-
+        else:
+            return {
+                "dateRanges": {
+                    "current": {"from": to_utc_format(cur_from),"to": to_utc_format(cur_to)},
+                    "previous": {"from": to_utc_format(prev_from),"to": to_utc_format(prev_to)}
+                },
+                "summary": {
+                    "grossRevenue": with_delta("grossRevenue"),
+                    "netProfit": with_delta("netProfit"),
+                    "expenses": with_delta("expenses"),
+                    "unitsSold": with_delta("unitsSold"),
+                    "refunds": with_delta("refunds"),
+                    "skuCount": with_delta("skuCount"),
+                    "sessions": with_delta("sessions"),
+                    "pageViews": with_delta("pageViews"),
+                    "unitSessionPercentage": with_delta("unitSessionPercentage"),
+                    "margin": with_delta("margin"),
+                    "roi": with_delta("roi")
+                },
+                "netProfitCalculation": {
+                    "current": {
+                        "gross": current["grossRevenue"],
+                        "totalCosts": current["expenses"],
+                        "productRefunds": current["refunds"],
+                        "totalTax": current["tax_price"] if 'tax_price' in current else 0,
+                        "totalTaxWithheld": 0,
+                        "ppcProductCost": 0,
+                        "ppcBrandsCost": 0,
+                        "ppcDisplayCost": 0,
+                        "ppcStCost": 0,
+                        "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
+                        "product_cost": current["product_cost"],
+                        "base_price": current["base_price"],
+                        "shipping_cost": current["shipping_cost"],
+                    },
+                    "previous": {
+                        "gross": previous["grossRevenue"],
+                        "totalCosts": previous["expenses"],
+                        "productRefunds": previous["refunds"],
+                        "totalTax": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                        "totalTaxWithheld": 0,
+                        "ppcProductCost": 0,
+                        "ppcBrandsCost": 0,
+                        "ppcDisplayCost": 0,
+                        "ppcStCost": 0,
+                        "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                        "product_cost": previous["product_cost"],
+                        "base_price": current["base_price"],
+                        "shipping_cost": previous["shipping_cost"],
+                    }
+                },
+                "charts": {
+                    "productDistribution": current["productCategories"],  # Bar chart data
+                    "productCompleteness": current["productCompleteness"]  # Pie chart data
+                }
+            }
     # current_date = datetime.now()
     # today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
     # now = current_date
@@ -3253,7 +3310,7 @@ def getProfitAndLossDetails(request):
     prev_to_date = to_date - custom_duration
 
     response_data = {
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,preset),
     }
 
     return JsonResponse(response_data, safe=False)
