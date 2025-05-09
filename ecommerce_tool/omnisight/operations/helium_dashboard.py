@@ -4723,7 +4723,11 @@ def InsightsProductWise(request):
 })
 
 def obtainManufactureNames(request):
-    pipeline = [
+    marketplace_id = request.GET.get('marketplace_id')
+    pipeline = []
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        pipeline.append({"$match": {"marketplace_id": ObjectId(marketplace_id)}})
+    pipeline.extend([
         {
             "$group" : {
                 "_id" : None,
@@ -4736,7 +4740,7 @@ def obtainManufactureNames(request):
                 "manufacturer_name_list": 1
             }
         }
-    ]
+    ])
     Product_list = list(Product.objects.aggregate(*pipeline))
     data = dict()
     data['manufacturer_name_list'] = []
