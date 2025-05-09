@@ -1,5 +1,5 @@
 from mongoengine import Q
-from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund
+from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund,Brand
 from mongoengine.queryset.visitor import Q
 from dateutil.relativedelta import relativedelta
 from django.views.decorators.csrf import csrf_exempt
@@ -1693,7 +1693,7 @@ def getPeriodWiseDataCustom(request):
         "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
         "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1),marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
         "last7Days": create_period_response("Last 7 Days", last_7_start, last_7_end , last_7_prev_start, last_7_prev_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        "custom": create_period_response(preset, from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
     }
     return JsonResponse(response_data, safe=False)
  
@@ -1729,7 +1729,9 @@ def allMarketplaceData(request):
 
             m_obj = Marketplace.objects(id=mp_id)
             marketplace = m_obj[0].name if m_obj else ""
-
+            print(marketplace)
+            
+    
             for order in orders:
                 gross_revenue += order["order_total"]
                 order_total = order["order_total"]
@@ -1798,10 +1800,22 @@ def allMarketplaceData(request):
 
             # Append currency data to the appropriate marketplace
             marketplace_metrics[marketplace]["currency_list"].append(currency_data)
-
+        
         # Convert the grouped dictionary to a list of marketplace data
-        return [{"marketplace": marketplace, "currency_list": data["currency_list"]} 
-                for marketplace, data in marketplace_metrics.items()]
+        return [
+                {
+                    "image": (
+                        "https://i.pinimg.com/originals/01/ca/da/01cada77a0a7d326d85b7969fe26a728.jpg"
+                        if marketplace == "Amazon" else
+                        "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRzjtf8dzq48TtkzeRYx2-_li3gTCkstX2juA&s"
+                        if marketplace == "Walmart" else ""
+                    ),
+                    "marketplace": marketplace,
+                    "currency_list": data["currency_list"]
+                }
+                for marketplace, data in marketplace_metrics.items()
+            ]
+
 
     def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
         gross_revenue = 0
@@ -1916,7 +1930,7 @@ def allMarketplaceData(request):
     response_data = {
         "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
         "from_date":from_date,
-        "to_date":to_date  - timedelta(days=1)
+        "to_date":to_date
     }
 
     return JsonResponse(response_data, safe=False)
@@ -4584,28 +4598,53 @@ def productsTrafficandConversions(request):
 
 def getSKUlist(request):
     marketplace_id = request.GET.get('marketplace_id')
+    search_query = request.GET.get('search_query')
+    match =dict()
     pipeline = []
+
+    if search_query != None and search_query != "":
+        search_query = search_query.strip() 
+        match["$sku"] = {"$regex": search_query, "$options": "i"}
+
+    
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        pipeline.append({"$match": {"marketplace_id": ObjectId(marketplace_id)}})
+        match['marketplace_id'] = ObjectId(marketplace_id)
+    if match != {}:
+        pipeline.append({"$match": match})
 
     pipeline.extend([
         {
             "$project": {
                 "_id": 0,
-                "id" : {"$toString": "$_id"},
+                "id": {"$toString": "$_id"},
                 "sku": "$sku",
             }
         }
     ])
+    if match =={}:
+        pipeline.append({
+            "$sample": {"size": 10}  # Randomly select 10 documents
+        })
     sku_list = list(Product.objects.aggregate(*pipeline))
     return sku_list
 
 
 def getproductIdlist(request):
     marketplace_id = request.GET.get('marketplace_id')
+
+    search_query = request.GET.get('search_query')
+    match =dict()
     pipeline = []
+
+    if search_query != None and search_query != "":
+        search_query = search_query.strip() 
+        match["$product_id"] = {"$regex": search_query, "$options": "i"}
+
+    
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        pipeline.append({"$match": {"marketplace_id": ObjectId(marketplace_id)}})
+        match['marketplace_id'] = ObjectId(marketplace_id)
+    if match != {}:
+        pipeline.append({"$match": match})
 
     pipeline.extend([
         {
@@ -4616,10 +4655,83 @@ def getproductIdlist(request):
             }
         }
     ])
+    if match =={}:
+        pipeline.append({
+            "$sample": {"size": 10}  # Randomly select 10 documents
+        })
     asin_list = list(Product.objects.aggregate(*pipeline))
     return asin_list
 
 
+def getBrandListforfilter(request):
+    data = dict()
+    marketplace_id = request.GET.get('marketplace_id')
+    search_query = request.GET.get('search_query')
+    match =dict()
+    pipeline = []
+
+    if search_query != None and search_query != "":
+        search_query = search_query.strip() 
+        match["$name"] = {"$regex": search_query, "$options": "i"}
+
+    
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+    if match != {}:
+        pipeline.append({"$match": match})
+    pipeline.extend([
+        {
+            "$project" : {
+                "_id" : 0,
+                "id" : {"$toString" : "$_id"},
+                "name" : 1,
+                
+            }
+        }
+    ])
+    if match =={}:
+        pipeline.append({
+            "$sample": {"size": 10}  # Randomly select 10 documents
+        })
+    brand_list = list(Brand.objects.aggregate(*(pipeline)))
+    data['brand_list'] = brand_list
+    return data
+
+def obtainManufactureNames(request):
+    marketplace_id = request.GET.get('marketplace_id')
+    search_query = request.GET.get('search_query')
+    match =dict()
+    pipeline = []
+
+    if search_query != None and search_query != "":
+        search_query = search_query.strip() 
+        match["$manufacturer_name"] = {"$regex": search_query, "$options": "i"}
+
+    
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+    if match != {}:
+        pipeline.append({"$match": match})
+    pipeline.extend([
+        {
+            "$group" : {
+                "_id" : None,
+                "manufacturer_name_list" : { "$addToSet": "$manufacturer_name" }
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "manufacturer_name_list": 1
+            }
+        }
+    ])
+    Product_list = list(Product.objects.aggregate(*pipeline))
+    data = dict()
+    data['manufacturer_name_list'] = []
+    if Product_list:
+        data['manufacturer_name_list'] = Product_list[0]['manufacturer_name_list']
+    return  JsonResponse(data,safe=False)
 
 
 
@@ -4849,28 +4961,3 @@ def InsightsProductWise(request):
     ]
 })
 
-def obtainManufactureNames(request):
-    marketplace_id = request.GET.get('marketplace_id')
-    pipeline = []
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        pipeline.append({"$match": {"marketplace_id": ObjectId(marketplace_id)}})
-    pipeline.extend([
-        {
-            "$group" : {
-                "_id" : None,
-                "manufacturer_name_list" : { "$addToSet": "$manufacturer_name" }
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "manufacturer_name_list": 1
-            }
-        }
-    ])
-    Product_list = list(Product.objects.aggregate(*pipeline))
-    data = dict()
-    data['manufacturer_name_list'] = []
-    if Product_list:
-        data['manufacturer_name_list'] = Product_list[0]['manufacturer_name_list']
-    return  JsonResponse(data,safe=False)

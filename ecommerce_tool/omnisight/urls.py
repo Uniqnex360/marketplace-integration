@@ -21,7 +21,7 @@ from omnisight.operations.general_functions import getMarketplaceList, getProduc
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders,ShipStationShippingCostAPIView
 
-from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist,InsightsProductWise,getCitywiseSales,exportCitywiseSalesExcel,downloadCitywiseSalesCSV,obtainManufactureNames
+from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist,InsightsProductWise,getCitywiseSales,exportCitywiseSalesExcel,downloadCitywiseSalesCSV,obtainManufactureNames, getBrandListforfilter
 
 
 
@@ -91,6 +91,9 @@ urlpatterns = [
     #####Dashboard FIlters#######
     path("getSKUlist/",getSKUlist,name="getSKUlist"),
     path("getproductIdlist/",getproductIdlist,name="getproductIdlist"),
+    path("getBrandListforfilter/",getBrandListforfilter,name="getBrandListforfilter"),
+    path("obtainManufactureNames/",obtainManufactureNames,name="obtainManufactureNames"),
+
 
     #Helium 10 Dashboard
     path("get_metrics_by_date_range/",get_metrics_by_date_range,name="get_metrics_by_date_range"),
@@ -127,7 +130,6 @@ urlpatterns = [
     path("getCitywiseSales/",getCitywiseSales,name="getCitywiseSales"),
     path("exportCitywiseSalesExcel/",exportCitywiseSalesExcel,name="exportCitywiseSalesExcel"),
     path("downloadCitywiseSalesCSV/",downloadCitywiseSalesCSV,name="downloadCitywiseSalesCSV"),
-    path("obtainManufactureNames/",obtainManufactureNames,name="obtainManufactureNames"),
     path('api/shipstation/shipping-cost/', ShipStationShippingCostAPIView.as_view(), name='shipstation-shipping-cost'),
 ]
 
