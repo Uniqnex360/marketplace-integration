@@ -30,6 +30,11 @@ def getMarketplaceList(request):
         }
     ]
     marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
+    for marketplace_ins  in marketplace_list:
+        if marketplace_ins['name'] == "Amazon":
+            marketplace_ins['fulfillment_channel'] = ['FBA','FBM']
+        elif marketplace_ins['name'] == "Walmart":
+            marketplace_ins['fulfillment_channel'] = ['FBW','FBM']
     return marketplace_list
 
 #---------------------------------------------PRODUCT APIS---------------------------------------------------

@@ -21,7 +21,7 @@ from omnisight.operations.general_functions import getMarketplaceList, getProduc
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders
 
-from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView
+from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist,InsightsProductWise,getCitywiseSales,exportCitywiseSalesExcel,downloadCitywiseSalesCSV,obtainManufactureNames
 
 
 
@@ -88,6 +88,10 @@ urlpatterns = [
     path("fetchUserDetails/",fetchUserDetails,name="fetchUserDetails"),
     path("fetchRoles/",fetchRoles,name="fetchRoles"),
 
+    #####Dashboard FIlters#######
+    path("getSKUlist/",getSKUlist,name="getSKUlist"),
+    path("getproductIdlist/",getproductIdlist,name="getproductIdlist"),
+
     #Helium 10 Dashboard
     path("get_metrics_by_date_range/",get_metrics_by_date_range,name="get_metrics_by_date_range"),
     path("LatestOrdersTodayAPIView/",LatestOrdersTodayAPIView,name="LatestOrdersTodayAPIView"),
@@ -118,8 +122,12 @@ urlpatterns = [
     path("obtainChooseMatrix/",obtainChooseMatrix,name="obtainChooseMatrix"),
     path("updateChooseMatrix/",updateChooseMatrix,name="updateChooseMatrix"),
     # path("ProductPerformanceView/",ProductPerformanceView,name="ProductPerformanceView"),
-    path("ProductInsightsView/",InsightsDashboardView,name="ProductInsightsView")
-
+    path("ProductInsightsView/",InsightsDashboardView,name="ProductInsightsView"),
+    path("InsightsProductWise/",InsightsProductWise,name="InsightsProductWise"),
+    path("getCitywiseSales/",getCitywiseSales,name="getCitywiseSales"),
+    path("exportCitywiseSalesExcel/",exportCitywiseSalesExcel,name="exportCitywiseSalesExcel"),
+    path("downloadCitywiseSalesCSV/",downloadCitywiseSalesCSV,name="downloadCitywiseSalesCSV"),
+    path("obtainManufactureNames/",obtainManufactureNames,name="obtainManufactureNames")
 ]
 
 

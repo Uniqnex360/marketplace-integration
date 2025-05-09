@@ -19,192 +19,19 @@ from bson import ObjectId
 from calendar import monthrange
 from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
 from django.db.models import Sum, Q
+from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand
+from ecommerce_tool.crud import DatabaseModel
 
 
-
-def get_date_range(preset):
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-
-    if preset == "Today":
-        return today, today + timedelta(days=1)
-    elif preset == "Yesterday":
-        return today - timedelta(days=1), today
-    elif preset == "This Week":
-        start = today - timedelta(days=today.weekday())
-        return start, start + timedelta(days=7)
-    elif preset == "Last Week":
-        start = today - timedelta(days=today.weekday() + 7)
-        return start, start + timedelta(days=7)
-    elif preset == "Last 7 days":
-        return today - timedelta(days=6), today + timedelta(days=1)
-    elif preset == "Last 14 days":
-        return today - timedelta(days=13), today + timedelta(days=1)
-    elif preset == "Last 30 days":
-        return today - timedelta(days=29), today + timedelta(days=1)
-    elif preset == "Last 60 days":
-        return today - timedelta(days=59), today + timedelta(days=1)
-    elif preset == "Last 90 days":
-        return today - timedelta(days=89), today + timedelta(days=1)
-    elif preset == "This Month":
-        start = today.replace(day=1)
-        return start, (start + relativedelta(months=1))
-    elif preset == "Last Month":
-        start = (today.replace(day=1) - relativedelta(months=1))
-        return start, today.replace(day=1)
-    elif preset == "This Quarter":
-        quarter = (today.month - 1) // 3
-        start = today.replace(month=quarter * 3 + 1, day=1)
-        return start, start + relativedelta(months=3)
-    elif preset == "Last Quarter":
-        quarter = ((today.month - 1) // 3) - 1
-        start = today.replace(month=quarter * 3 + 1, day=1)
-        return start, start + relativedelta(months=3)
-    elif preset == "This Year":
-        return today.replace(month=1, day=1), today.replace(year=today.year + 1, month=1, day=1)
-    elif preset == "Last Year":
-        return today.replace(year=today.year - 1, month=1, day=1), today.replace(month=1, day=1)
-    return today, today + timedelta(days=1)
-
-
-
-def grossRevenue(start_date, end_date, marketplace_id=None):
-    match=dict()
-    match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered']}
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
-    pipeline = [
-            {
-                "$match": match
-            },
-            {
-                "$lookup": {
-                    "from": "marketplace",
-                    "localField": "marketplace_id",
-                    "foreignField": "_id",
-                    "as": "marketplace_ins"
-                }
-            },
-            {
-                "$unwind": {
-                    "path": "$marketplace_ins",
-                    "preserveNullAndEmptyArrays": True
-                }
-            },
-            {
-                "$project": {
-                    "_id" : 1,
-                    "order_date": 1,
-                    "order_items": 1,
-                    "order_total": 1,
-                    "marketplace_name": "$marketplace_ins.name",
-                    "marketplace_id": 1,
-                    "currency": 1
-                }
-            },
-        ]
-    return list(Order.objects.aggregate(*pipeline))
-
-
-def get_previous_periods(current_start, current_end):
-    # Calculate the duration of the current period
-    period_duration = current_end - current_start
-    
-    # Calculate previous periods
-    previous_period = {
-        'start': (current_start - period_duration).strftime('%b %d, %Y'),
-        'end': (current_end - period_duration - timedelta(days=1)).strftime('%b %d, %Y')
-    }
-    
-    previous_week = {
-        'start': (current_start - timedelta(weeks=1)).strftime('%b %d, %Y'),
-        'end': (current_end - timedelta(weeks=1) - timedelta(days=1)).strftime('%b %d, %Y')
-    }
-    
-    previous_month = {
-        'start': (current_start - relativedelta(months=1)).strftime('%b %d, %Y'),
-        'end': (current_end - relativedelta(months=1) - timedelta(days=1)).strftime('%b %d, %Y')
-    }
-    
-    previous_year = {
-        'start': (current_start - relativedelta(years=1)).strftime('%b %d, %Y'),
-        'end': (current_end - relativedelta(years=1) - timedelta(days=1)).strftime('%b %d, %Y')
-    }
-    
-    response_data = {
-        'previous_period': previous_period,
-        'previous_week': previous_week,
-        'previous_month': previous_month,
-        'previous_year': previous_year,
-        'current_period': {
-            'start': current_start.strftime('%b %d, %Y'),
-            'end': (current_end - timedelta(days=1)).strftime('%b %d, %Y')
-        }
-    }
-    
-    return response_data
-
-
-def refundOrder(start_date, end_date, marketplace_id=None):
-    match=dict()
-    match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = "Refunded"
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
-    pipeline = [
-            {
-            "$match": match
-            },
-            {
-            "$project": {
-                "_id": 0,
-                "order_items": 1,
-                "order_total" :1,
-                "order_date" : 1
-            }
-            },
-            {
-                "$sort" : {
-                    "_id" : -1
-                }
-            }
-        ]
-
-    result = list(Order.objects.aggregate(*pipeline))
-    return result
-
-
-def AnnualizedRevenueAPIView(target_date):
-    # Calculate date range (last 12 months from today)
-    start_date = target_date - timedelta(days=365)
-    # Initialize variables
-    monthly_revenues = []
-    total_gross_revenue = 0
-    
-    # Calculate revenue for each of the last 12 months
-    for i in range(12):
-        month_start = start_date + timedelta(days=30*i)
-        month_end = month_start + timedelta(days=30)
-        
-        # Get gross revenue for this month (using your existing grossRevenue function)
-        monthly_result = grossRevenue(month_start, month_end)
-        monthly_gross = sum(ins['order_total'] for ins in monthly_result) if monthly_result else 0
-        monthly_revenues.append(monthly_gross)
-        total_gross_revenue += monthly_gross
-    
-    # Calculate average monthly revenue
-    average_monthly = total_gross_revenue / 12 if 12 > 0 else 0
-    
-    # Calculate annualized revenue (average * 12)
-    annualized_revenue = average_monthly * 12
-    
-    # Return just the final value rounded to 2 decimal places
-    annualized_revenue = round(annualized_revenue, 2)
-    return annualized_revenue
 
 def get_metrics_by_date_range(request):
     marketplace_id = request.GET.get('marketplace_id',None)
     target_date_str = request.GET.get('target_date')
+    brand_id = request.GET.get('brand_id',None)
+    product_id = request.GET.get('product_id',None)
+    manufacturer_name = request.GET.get('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+    
     # Parse target date and previous day
     target_date = datetime.strptime(target_date_str, "%d/%m/%Y")
     previous_date = target_date - timedelta(days=1)
@@ -237,7 +64,7 @@ def get_metrics_by_date_range(request):
 
     for key, date_range in last_8_days_filter.items():
         gross_revenue = 0
-        result = grossRevenue(date_range["start"], date_range["end"])
+        result = grossRevenue(date_range["start"], date_range["end"],marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         if result != []:            
             for ins in result:
                 gross_revenue += ins['order_total']
@@ -256,8 +83,8 @@ def get_metrics_by_date_range(request):
         total_orders = 0
         tax_price = 0
 
-        result = grossRevenue(date_range["start"], date_range["end"],marketplace_id)
-        refund_ins = refundOrder(date_range["start"], date_range["end"],marketplace_id)
+        result = grossRevenue(date_range["start"], date_range["end"],marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        refund_ins = refundOrder(date_range["start"], date_range["end"],marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         if refund_ins != []:
             for ins in refund_ins:
                 refund += len(ins['order_items'])
@@ -326,7 +153,7 @@ def get_metrics_by_date_range(request):
         "total_orders": round(metrics["targeted"]["total_orders"] - metrics["previous"]["total_orders"],2),
         "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"],2),
     }
-    metrics['targeted']["business_value"] = AnnualizedRevenueAPIView(target_date)
+    # metrics['targeted']["business_value"] = AnnualizedRevenueAPIView(target_date)
     name = "Today Snapshot"
     item_pipeline = [
                         { "$match": { "name": name } }
@@ -363,6 +190,11 @@ def get_metrics_by_date_range(request):
 
 def LatestOrdersTodayAPIView(request):
     marketplace_id = request.GET.get('marketplace_id', None)
+    product_id = request.GET.get('product_id', None)
+    brand_id = request.GET.get('brand_id', None)
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+
     today = datetime.utcnow().date()
     start_of_day = datetime.combine(today, datetime.min.time())
     end_of_day = datetime.combine(today, datetime.max.time())
@@ -372,6 +204,16 @@ def LatestOrdersTodayAPIView(request):
     match['order_status'] = {"$in": ['Shipped', 'Delivered']}
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
+
+    if product_id != None and product_id != "" and product_id != []:
+        product_id = [ObjectId(pid) for pid in product_id]
+        ids = getOrdersListBasedonProductId(product_id)
+        match["_id"] = {"$in": ids}
+
+    elif brand_id != None and brand_id != "" and brand_id != []:
+        brand_id = [ObjectId(bid) for bid in brand_id]
+        ids = getproductIdListBasedonbrand(brand_id)
+        match["_id"] = {"$in": ids}
 
     # 1️⃣ Hourly aggregation: Use order-level date for bucket, sum quantities from items
     hourly_pipeline = [
@@ -506,6 +348,10 @@ def LatestOrdersTodayAPIView(request):
 
 def LatestOrdersTodayAPIView(request):
     marketplace_id = request.GET.get('marketplace_id', None)
+    product_id = request.GET.get('product_id', None)
+    brand_id = request.GET.get('brand_id', None)
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
     # 1️⃣ Compute bounds for "today" based on the user's local timezone
     user_timezone = request.GET.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
     local_tz = timezone(user_timezone)
@@ -516,19 +362,24 @@ def LatestOrdersTodayAPIView(request):
     end_of_day = now
 
     # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
+    match = dict()
+    match['order_date__gte'] = start_of_day
+    match['order_date__lte'] = end_of_day
+    match['order_status__in'] = ['Shipped', 'Delivered']
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        qs = Order.objects.filter(
-            order_date__gte=start_of_day,
-            order_date__lte=end_of_day,
-            order_status__in=["Shipped", "Delivered"],
-            marketplace_id=ObjectId(marketplace_id)
-        )
-    else:
-        qs = Order.objects.filter(
-            order_date__gte=start_of_day,
-            order_date__lte=end_of_day,
-            order_status__in=["Shipped", "Delivered"]
-        )
+        match['marketplace_id'] = ObjectId(marketplace_id)
+
+    if product_id != None and product_id != "" and product_id != []:
+        product_id = [ObjectId(pid) for pid in product_id]
+        ids = getOrdersListBasedonProductId(product_id)
+        match["id__in"] = ids
+
+    elif brand_id != None and brand_id != "" and brand_id != []:
+        brand_id = [ObjectId(bid) for bid in brand_id]
+        ids = getproductIdListBasedonbrand(brand_id)
+        match["id__in"] = ids
+
+    qs = DatabaseModel.list_documents(Order.objects,match)
 
     # 3️⃣ Pre-fill a 24-slot OrderedDict for every hour in the time range
     chart = OrderedDict()
@@ -592,11 +443,7 @@ def LatestOrdersTodayAPIView(request):
 
 
 
-def get_graph_data(start_date, end_date, preset,marketplace_id):
-    marketplace_boolean = False
-    # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        marketplace_boolean = True
+def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,product_id=None,manufacturer_name=None,fulfillment_channel=None):
     now = datetime.utcnow()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     
@@ -636,24 +483,32 @@ def get_graph_data(start_date, end_date, preset,marketplace_id):
 
     # Get all orders grouped by time bucket
     orders_by_bucket = {}
+    match = dict()
+    match['order_status__in'] = ['Shipped', 'Delivered']
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+
+    if product_id != None and product_id != "" and product_id != []:
+        product_id = [ObjectId(pid) for pid in product_id]
+        ids = getOrdersListBasedonProductId(product_id)
+        match["id__in"] = ids
+
+    elif brand_id != None and brand_id != "" and brand_id != []:
+        brand_id = [ObjectId(bid) for bid in brand_id]
+        ids = getproductIdListBasedonbrand(brand_id)
+        match["id__in"] = ids
     for dt in time_buckets:
         bucket_start = dt
         if preset in ["Today", "Yesterday"]:
             bucket_end = dt + timedelta(hours=1)
         else:
             bucket_end = dt + timedelta(days=1)
+        # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
+        
+        match['order_date__gte'] = bucket_start
+        match['order_date__lte'] = bucket_end
 
-        if marketplace_boolean:
-            orders = Order.objects.filter(
-                order_date__gte=bucket_start,
-                order_date__lt=bucket_end,
-                marketplace_id=ObjectId(marketplace_id)
-            )
-        else:
-            orders = Order.objects.filter(
-                order_date__gte=bucket_start,
-                order_date__lt=bucket_end
-            )
+        orders = DatabaseModel.list_documents(Order.objects,match)
         orders_by_bucket[dt.strftime(time_format)] = list(orders)
 
     # Process each time bucket
@@ -672,7 +527,7 @@ def get_graph_data(start_date, end_date, preset,marketplace_id):
         else:
             bucket_end = bucket_start.replace(hour=23, minute=59, second=59)
         # Calculate refunds first (same as your total calculation)
-        refund_ins = refundOrder(bucket_start, bucket_end,marketplace_id)
+        refund_ins = refundOrder(bucket_start, bucket_end,marketplace_id,brand_id,product_id)
         if refund_ins:
             for ins in refund_ins:
                 if ins['order_date'] >= bucket_start and ins['order_date'] < bucket_end:
@@ -743,7 +598,7 @@ def get_graph_data(start_date, end_date, preset,marketplace_id):
     return graph_data
 
 
-def totalRevenueCalculation(start_date, end_date, marketplace_id=None):
+def totalRevenueCalculation(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacturer_name=None,fulfillment_channel=None):
     total = dict()
     gross_revenue = 0
     total_cogs = 0
@@ -752,8 +607,8 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None):
     total_units = 0
     total_orders = 0
 
-    result = grossRevenue(start_date, end_date,marketplace_id)
-    refund_ins = refundOrder(start_date, end_date,marketplace_id)
+    result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+    refund_ins = refundOrder(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
     refund_quantity_ins = 0
     if refund_ins != []:
         for ins in refund_ins:
@@ -823,11 +678,15 @@ def RevenueWidgetAPIView(request):
     compare_startdate = request.GET.get("compare_startdate")
     compare_enddate = request.GET.get("compare_enddate")
     marketplace_id = request.GET.get("marketplace_id", None)
-
+    product_id = request.GET.get("product_id", None)
+    brand_id = request.GET.get("brand_id", None)
+    manufacturer_name = request.GET.get("manufacturer_name", None)
+    fulfillment_channel = request.GET.get("fulfillment_channel", None)
+    
     start_date, end_date = get_date_range(preset)
     comapre_past = get_previous_periods(start_date, end_date)
-    total = totalRevenueCalculation(start_date, end_date,marketplace_id)
-    graph_data = get_graph_data(start_date, end_date, preset,marketplace_id)
+    total = totalRevenueCalculation(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+    graph_data = get_graph_data(start_date, end_date, preset,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
     
     data = dict()
     data = {
@@ -840,7 +699,7 @@ def RevenueWidgetAPIView(request):
         compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
         compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
 
-        compare_total = totalRevenueCalculation(compare_startdate, compare_enddate,marketplace_id)
+        compare_total = totalRevenueCalculation(compare_startdate, compare_enddate,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
         
 
@@ -856,7 +715,7 @@ def RevenueWidgetAPIView(request):
         }
         data['compare_total'] = difference
         data['previous_total'] = compare_total
-        data['compare_graph'] = get_graph_data(compare_startdate, compare_enddate, initial,marketplace_id)
+        data['compare_graph'] = get_graph_data(compare_startdate, compare_enddate, initial,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
     name = "Revenue"
     item_pipeline = [
                         { "$match": { "name": name } }
@@ -895,6 +754,8 @@ def RevenueWidgetAPIView(request):
 
 def get_top_products(request):
     marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.get('brand_id', None)
+    product_id = request.GET.get('product_id', None)
     metric = request.GET.get("sortBy", "units_sold")  # 'price', 'refund', etc.
     preset = request.GET.get("preset", "Today")  # today, yesterday, last_7_days
     start_date, end_date = get_date_range(preset)
@@ -924,6 +785,15 @@ def get_top_products(request):
         match['marketplace_id'] = ObjectId(marketplace_id)
     if metric == "refund":
         match['order_status'] = "Refunded"
+    if product_id != None and product_id != "" and product_id != []:
+        product_id = [ObjectId(pid) for pid in product_id]
+        ids = getOrdersListBasedonProductId(product_id)
+        match["_id"] = {"$in": ids}
+
+    elif brand_id != None and brand_id != "" and brand_id != []:
+        brand_id = [ObjectId(bid) for bid in brand_id]
+        ids = getproductIdListBasedonbrand(brand_id)
+        match["_id"] = {"$in": ids}
     
 
     pipeline = [
@@ -1033,11 +903,103 @@ def get_top_products(request):
     data = {"results": {"items": result}}
     return data
 
+def get_products_with_pagination(request):
+    page = int(request.GET.get("page", 1))
+    page_size = 10
+
+    # Define the pipeline for pagination and data fetching
+    pipeline = [
+        {
+            "$facet": {
+                "total_count": [{"$count": "count"}],
+                "products": [
+                    {"$skip": (page - 1) * page_size},
+                    {"$limit": page_size},
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "id": {"$toString":"$_id"},
+                            "AmazonToken_id": {"$ifNull": ["$AmazonToken_id", "N/A"]},
+                            "asin": {"$ifNull": ["$product_id", "N/A"]},
+                            "sellerSku": {"$ifNull": ["$sku", "N/A"]},
+                            "marketplace": {"$ifNull": ["$marketplace", "N/A"]},
+                            "inventoryStatus": {"$ifNull": ["$inventoryStatus", "N/A"]},
+                            "fulfillmentChannel": {"$ifNull": ["$fulfillmentChannel", "N/A"]},
+                            "price": {"$ifNull": ["$price", "N/A"]},
+                            "stock" : {"$ifNull": ["$quantity", 0]},
+                            "priceDraft": {"$ifNull": ["$priceDraft", "N/A"]},
+                            "title": {"$ifNull": ["$product_title", "N/A"]},
+                            "totalRatingsCount": {"$ifNull": ["$totalRatingsCount", "N/A"]},
+                            "reviewRating": {"$ifNull": ["$reviewRating", "N/A"]},
+                            "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
+                            "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
+                            "parentAsin": {"$ifNull": ["$parentAsin", "N/A"]},
+                            "buyBoxWinnerId": {"$ifNull": ["$buyBoxWinnerId", "N/A"]},
+                            "newInsightsCount": {"$ifNull": ["$newInsightsCount", "N/A"]},
+                            "newInsightsGrouped": {"$ifNull": ["$newInsightsGrouped", "N/A"]},
+                            "category": {"$ifNull": ["$category", "N/A"]},
+                            "categoryTitle": {"$ifNull": ["$categoryTitle", "N/A"]},
+                            "amazonLink": {"$ifNull": ["$amazonLink", "N/A"]},
+                            "bsr": {"$ifNull": ["$bsr", "N/A"]},
+                            "subcategoriesBsr": {"$ifNull": ["$subcategoriesBsr", "N/A"]},
+                            "salesForToday": {"$ifNull": ["$salesForToday", 0]},
+                            "unitsSoldForToday": {"$ifNull": ["$unitsSoldForToday", 0]},
+                            "unitsSoldForPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
+                            "refunds": {"$ifNull": ["$refunds", 0]},
+                            "refundsAmount": {"$ifNull": ["$refundsAmount", 0]},
+                            "refundRate": {"$ifNull": ["$refundRate", "0%"]},
+                            "pageViews": {"$ifNull": ["$page_views", 0]},
+                            "pageViewsPercentage": {"$ifNull": ["$pageViewsPercentage", "0%"]},
+                            "conversionRate": {"$ifNull": ["$conversionRate", "N/A"]},
+                            "grossProfit": {"$ifNull": ["$grossProfit", 0]},
+                            "netProfit": {"$ifNull": ["$netProfit", 0]},
+                            "margin": {"$ifNull": ["$margin", "0%"]},
+                            "totalAmazonFees": {"$ifNull": ["$totalAmazonFees", "N/A"]},
+                            "roi": {"$ifNull": ["$roi", "0%"]},
+                            "cogs": {"$round" : [{"$ifNull": ["$cogs", 0]},2]},
+                            "fbaPerOrderFulfillmentFee": {"$ifNull": ["$fbaPerOrderFulfillmentFee", "N/A"]},
+                            "fbaPerUnitFulfillmentFee": {"$ifNull": ["$fbaPerUnitFulfillmentFee", "N/A"]},
+                            "fbaWeightBasedFee": {"$ifNull": ["$fbaWeightBasedFee", "N/A"]},
+                            "variableClosingFee": {"$ifNull": ["$variableClosingFee", "N/A"]},
+                            "commission": {"$ifNull": ["$commission", "N/A"]},
+                            "fixedClosingFee": {"$ifNull": ["$fixedClosingFee", "N/A"]},
+                            "salesTaxCollectionFee": {"$ifNull": ["$salesTaxCollectionFee", "N/A"]},
+                            "shippingHbFee": {"$ifNull": ["$shippingHbFee", "N/A"]},
+                            "isFavorite": {"$ifNull": ["$isFavorite", "N/A"]},
+                            "trafficSessions": {"$ifNull": ["$trafficSessions", "N/A"]},
+                            "trafficSessionPercentage": {"$ifNull": ["$trafficSessionPercentage", "0%"]},
+                            # "deltas": {"$ifNull": ["$deltas", None]},
+                            "competitorsProducts": {"$ifNull": ["$competitorsProducts", 0]},
+                            "tags": {"$ifNull": ["$tags", []]},
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+
+    # Execute the pipeline
+    result = list(Product.objects.aggregate(*pipeline))
+
+    # Extract total count and products
+    total_products = result[0]["total_count"][0]["count"] if result[0]["total_count"] else 0
+    products = result[0]["products"]
+
+    # Prepare response data
+    response_data = {
+        "total_products": total_products,
+        "page": page,
+        "page_size": page_size,
+        "products": products,
+    }
+
+    return JsonResponse(response_data, safe=False)
+
 
 
 #########################SELVA WORKING APIS##########
 
-def calculate_metricss(start_date, end_date,marketplace_id):
+def calculate_metricss(start_date, end_date,marketplace_id=[],brand_id=[],product_id=[],manufacturer_name=None,fulfillment_channel=None):
     gross_revenue = 0
     total_cogs = 0
     refund = 0
@@ -1045,7 +1007,7 @@ def calculate_metricss(start_date, end_date,marketplace_id):
     margin = 0
     total_units = 0
     sku_set = set()
-    result = grossRevenue(start_date, end_date,marketplace_id)
+    result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
     order_total = 0
     other_price = 0
     tax_price = 0
@@ -1118,14 +1080,17 @@ def calculate_metricss(start_date, end_date,marketplace_id):
 
 
 def getPeriodWiseData(request):
-    target_date = datetime.today() - timedelta(days=1)
-    marketplace_id = request.GET.get('marketplace_id', None)
+    marketplace_id = request.GET.get('marketplace_id',None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    def format_period_metrics(label, current_start, current_end, prev_start, prev_end,marketplace_id):
-        current_metrics = calculate_metricss(current_start, current_end,marketplace_id)
-        previous_metrics = calculate_metricss(prev_start, prev_end,marketplace_id)
+    def format_period_metrics(label, current_start, current_end, prev_start, prev_end,marketplace_id=[],brand_id=[],product_id=[],manufacturer_name=None,fulfillment_channel=None):
+        current_metrics = calculate_metricss(current_start, current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        previous_metrics = calculate_metricss(prev_start, prev_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
         output = {
             "label": label,
@@ -1151,41 +1116,47 @@ def getPeriodWiseData(request):
         return output
 
     # Yesterday
-    y_current_start, y_current_end = get_date_range("Yesterday")
-    y_previous_start = y_current_start - timedelta(days=1)
-    y_previous_end = y_previous_start + timedelta(hours=23, minutes=59, seconds=59)
+    yes_current_start, yes_current_end = get_date_range("Yesterday")
+    
+    
+    yes_previous_start = yes_current_start - timedelta(days=1)
+    yes_previous_end = yes_current_end + timedelta(hours=23, minutes=59, seconds=59)
 
-    # Last 7 Days
-    l7_current_start = y_current_start - timedelta(days=6)
-    l7_current_end = y_current_end
+    l7_current_start, l7_current_end = get_date_range("Last 7 days")
     l7_previous_start = l7_current_start - timedelta(days=7)
     l7_previous_end = l7_current_start - timedelta(seconds=1)
 
-    # Last 30 Days
-    l30_current_start = y_current_start - timedelta(days=29)
-    l30_current_end = y_current_end
+    l30_current_start, l30_current_end = get_date_range("Last 30 days")
+
     l30_previous_start = l30_current_start - timedelta(days=30)
     l30_previous_end = l30_current_start - timedelta(seconds=1)
 
-    ytd_current_start = datetime(y_current_start.year, 1, 1)
-    ytd_current_end = y_current_end
-    last_year = y_current_start.year - 1
-    ytd_previous_start = datetime(last_year, 1, 1)
-    ytd_previous_end = datetime(last_year, y_current_start.month, y_current_start.day, 23, 59, 59)
+    l30_current_start, l30_current_end = get_date_range("Last 30 days")
+
+    y_current_start, y_current_end = get_date_range("This Year")
+    ly_current_start, ly_current_end = get_date_range("Last Year")
+
+    # ytd_previous_start = datetime(y_current_end, 1, 1)
+    # ytd_previous_end = datetime(last_year, y_current_start.month, y_current_start.day, 23, 59, 59)
     
     response_data = {
-        "yesterday": format_period_metrics("Yesterday", y_current_start, y_current_end, y_previous_start, y_previous_end,marketplace_id),
-        "last7Days": format_period_metrics("Last 7 Days", l7_current_start, l7_current_end, l7_previous_start, l7_previous_end,marketplace_id),
-        "last30Days": format_period_metrics("Last 30 Days", l30_current_start, l30_current_end, l30_previous_start, l30_previous_end,marketplace_id),
-        "yearToDate": format_period_metrics("Year to Date", ytd_current_start, ytd_current_end, ytd_previous_start, ytd_previous_end,marketplace_id),
+        "yesterday": format_period_metrics("Yesterday", yes_current_start, yes_current_end, yes_previous_start, yes_previous_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        "last7Days": format_period_metrics("Last 7 Days", l7_current_start, l7_current_end, l7_previous_start, l7_previous_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        "last30Days": format_period_metrics("Last 30 Days", l30_current_start, l30_current_end, l30_previous_start, l30_previous_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        "yearToDate": format_period_metrics("Year to Date", y_current_start, y_current_end, ly_current_start, ly_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
     }
     return JsonResponse(response_data, safe=False)
 
 
 def getPeriodWiseDataXl(request):
     marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+
     current_date = datetime.today() - timedelta(days=1)
-    def calculate_metrics(start_date, end_date,marketplace_id):
+    def calculate_metrics(start_date, end_date,marketplace_id=[],brand_id=[],product_id=[],manufacturer_name=None,fulfillment_channel=None):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
@@ -1194,7 +1165,7 @@ def getPeriodWiseDataXl(request):
         total_units = 0
         sku_set = set()
         tax_price = 0
-        result = grossRevenue(start_date, end_date,marketplace_id)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         order_total = 0
         other_price = 0
         page_views = 0
@@ -1266,8 +1237,8 @@ def getPeriodWiseDataXl(request):
             "marketplace":marketplace_name
         }
 
-    def create_period_row(label, start, end,marketplace_id):
-        data = calculate_metrics(start, end,marketplace_id)
+    def create_period_row(label, start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+        data = calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         return [
             label,
             data["seller"],
@@ -1287,19 +1258,20 @@ def getPeriodWiseDataXl(request):
             data["margin"]
         ]
 
-    today, y_current_end = get_date_range("Today")
-    yesterday = today - timedelta(days=1)
-    last_7_start = today - timedelta(days=7)
-    last_30_start = today - timedelta(days=30)
-    month_start = today.replace(day=1)
-    year_start = today.replace(month=1, day=1)
+    yesterday, yesterday_end = get_date_range("Yesterday")
+    l7_current_start, l7_current_end = get_date_range("Last 7 days")
+
+    l30_current_start, l30_current_end = get_date_range("Last 30 days")
+
+    m30_current_start, m30_current_end = get_date_range("This Month")
+    y_current_start, y_current_end = get_date_range("This Year")
 
     period_rows = [
-        create_period_row("Yesterday", yesterday, today,marketplace_id),
-        create_period_row("Last 7 Days", last_7_start, today - timedelta(seconds=1),marketplace_id),
-        create_period_row("Last 30 Days", last_30_start, today - timedelta(seconds=1),marketplace_id),
-        create_period_row("Month to Date", month_start, today,marketplace_id),
-        create_period_row("Year to Date", year_start, today,marketplace_id),
+        create_period_row("Yesterday", yesterday, yesterday_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        create_period_row("Last 7 Days", l7_current_start, l7_current_end ,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        create_period_row("Last 30 Days", l30_current_start,l30_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        create_period_row("Month to Date", m30_current_start, m30_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        create_period_row("Year to Date", y_current_start, y_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
     ]
 
     headers = [
@@ -1341,9 +1313,14 @@ def getPeriodWiseDataXl(request):
 
 def exportPeriodWiseCSV(request):
     marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+
     current_date = datetime.today() - timedelta(days=1)
     
-    def calculate_metrics(start_date, end_date,marketplace_id):
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id=[],product_id=[],manufacturer_name=None,fulfillment_channel=None):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
@@ -1352,7 +1329,7 @@ def exportPeriodWiseCSV(request):
         total_units = 0
         sku_set = set()
         tax_price = 0
-        result = grossRevenue(start_date, end_date,marketplace_id)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         order_total = 0
         other_price = 0
         marketplace_name = ""
@@ -1427,8 +1404,9 @@ def exportPeriodWiseCSV(request):
             "marketplace":marketplace_name
         }
 
-    def create_period_row(label, start, end,marketplace_id):
-        data = calculate_metrics(start, end,marketplace_id)
+    def create_period_row(label, start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+        data = calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        
         return [
             label,
             data["seller"],
@@ -1448,20 +1426,20 @@ def exportPeriodWiseCSV(request):
             str(data["margin"])      # Ensuring the value is converted to string
         ]
 
-    today, y_current_end = get_date_range("Today")
+    yesterday, yesterday_end = get_date_range("Yesterday")
+    l7_current_start, l7_current_end = get_date_range("Last 7 days")
 
-    yesterday = today - timedelta(days=1)
-    last_7_start = today - timedelta(days=7)
-    last_30_start = today - timedelta(days=30)
-    month_start = today.replace(day=1)
-    year_start = today.replace(month=1, day=1)
+    l30_current_start, l30_current_end = get_date_range("Last 30 days")
+
+    m30_current_start, m30_current_end = get_date_range("This Month")
+    y_current_start, y_current_end = get_date_range("This Year")
 
     period_rows = [
-        create_period_row("Yesterday", yesterday, yesterday,marketplace_id),
-        create_period_row("Last 7 Days", last_7_start, today - timedelta(seconds=1),marketplace_id),
-        create_period_row("Last 30 Days", last_30_start, today - timedelta(seconds=1),marketplace_id),
-        create_period_row("Month to Date", month_start, today,marketplace_id),
-        create_period_row("Year to Date", year_start, today,marketplace_id),
+        create_period_row("Yesterday", yesterday, yesterday_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        create_period_row("Last 7 Days", l7_current_start, l7_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        create_period_row("Last 30 Days", l30_current_start, l30_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        create_period_row("Month to Date", m30_current_start, m30_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        create_period_row("Year to Date", y_current_start,y_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
     ]
 
     headers = [
@@ -1484,8 +1462,12 @@ def exportPeriodWiseCSV(request):
 def getPeriodWiseDataCustom(request):
     current_date = datetime.utcnow()
     marketplace_id = request.GET.get('marketplace_id', None)
-    
-    def calculate_metrics(start_date, end_date,marketplace_id):
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
@@ -1494,7 +1476,7 @@ def getPeriodWiseDataCustom(request):
         total_units = 0
         sku_set = set()
  
-        result = grossRevenue(start_date, end_date,marketplace_id)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         order_total = 0
         other_price = 0
         tax_price = 0
@@ -1562,9 +1544,9 @@ def getPeriodWiseDataCustom(request):
             'orders':len(result)
         }
  
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id):
-        current = calculate_metrics(cur_from, cur_to,marketplace_id)
-        previous = calculate_metrics(prev_from, prev_to,marketplace_id)
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+        current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         def with_delta(metric):
             return {
                 "current": current[metric],
@@ -1638,23 +1620,26 @@ def getPeriodWiseDataCustom(request):
     last_7_start, last_7_end = get_date_range('Last 7 days')
     last_7_prev_start = today_start - timedelta(days=14)
     last_7_prev_end = last_7_start - timedelta(seconds=1)
-    print(today_start,today_end)
-    print(from_date,to_date)
     response_data = {
-        "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end,marketplace_id),
-        "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1),marketplace_id),
-        "last7Days": create_period_response("Last 7 Days", last_7_start, last_7_end , last_7_prev_start, last_7_prev_end,marketplace_id),
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id),
+        "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1),marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        "last7Days": create_period_response("Last 7 Days", last_7_start, last_7_end , last_7_prev_start, last_7_prev_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
     }
- 
     return JsonResponse(response_data, safe=False)
  
 
 def allMarketplaceData(request):
     preset = request.GET.get("preset")
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+
     from_date,to_date = get_date_range(preset)
-    def grouped_marketplace_metrics(start_date, end_date):
-        orders = grossRevenue(start_date, end_date)
+    def grouped_marketplace_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+        orders = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         grouped_orders = defaultdict(list)
         
         for order in orders:
@@ -1749,7 +1734,7 @@ def allMarketplaceData(request):
         return [{"marketplace": marketplace, "currency_list": data["currency_list"]} 
                 for marketplace, data in marketplace_metrics.items()]
 
-    def calculate_metrics(start_date, end_date):
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
@@ -1758,7 +1743,7 @@ def allMarketplaceData(request):
         total_units = 0
         sku_set = set()
 
-        result = grossRevenue(start_date, end_date)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         order_total = 0
         other_price = 0
         tax_price = 0
@@ -1826,9 +1811,9 @@ def allMarketplaceData(request):
             "shipping_cost": 0
         }
 
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to):
-        current = calculate_metrics(cur_from, cur_to)
-        previous = calculate_metrics(prev_from, prev_to)
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+        current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
         def with_delta(metric):
             return {
@@ -1851,7 +1836,7 @@ def allMarketplaceData(request):
                 "margin": with_delta("margin"),
                 "roi": with_delta("roi")
             },
-            "marketplace_list": grouped_marketplace_metrics(cur_from, cur_to)
+            "marketplace_list": grouped_marketplace_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         }
 
     current_date = datetime.now()
@@ -1860,7 +1845,7 @@ def allMarketplaceData(request):
     prev_to_date = to_date - custom_duration
 
     response_data = {
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
+        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
         "from_date":from_date,
         "to_date":to_date
     }
@@ -1873,28 +1858,14 @@ def getProductPerformanceSummary(request):
     # yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
     # today = yesterday + timedelta(days=1)
     marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+
     from_date, to_date = get_date_range('Yesterday')
-    match=dict()
-    match['order_date'] = {"$gte": from_date, "$lte": to_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered']}
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
-
-    order_pipeline = [
-        {
-            "$match": match
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "order_items": 1,
-                "order_total": 1,
-                "marketplace_name": 1
-            }
-        }
-    ]
-    orders = list(Order.objects.aggregate(*order_pipeline))
-
+    orders = grossRevenue(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+    
     sku_summary = defaultdict(lambda: {
         "sku": "",
         "product_name": "",
@@ -1971,7 +1942,6 @@ def getProductPerformanceSummary(request):
             sku_summary[sku]["margin"] = round(margin, 2)
 
     sorted_skus = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
-    print(len(sorted_skus))
     top_3 = sorted_skus[:3]
     least_3 = sorted_skus[-3:] if len(sorted_skus) >= 3 else sorted_skus
 
@@ -1983,29 +1953,14 @@ def getProductPerformanceSummary(request):
 
 def downloadProductPerformanceSummary(request):
     action = request.GET.get("action", "").lower()
-    marketplace_id = request.GET.get('marketplace_id', None)
     from_date, to_date = get_date_range('Yesterday')
-    match=dict()
-    match['order_date'] = {"$gte": from_date, "$lte": to_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered']}
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
- 
-    order_pipeline = [
-        {
-            "$match": match
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "order_items": 1,
-                "order_total": 1,
-                "marketplace_id": 1,
-                "fulfillment_channel":1
-            }
-        }
-    ]
-    orders = list(Order.objects.aggregate(*order_pipeline))
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+
+    orders = grossRevenue(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
  
     sku_summary = defaultdict(lambda: {
         "sku": "",
@@ -2022,16 +1977,12 @@ def downloadProductPerformanceSummary(request):
     for order in orders:
         order_total = order.get("order_total", 0.0)
         item_ids = order.get("order_items", [])
-        marketplace_id = order.get("marketplace_id", "")
+        m_name = order.get("marketplace_name", "")
         fulfillment_channel = order.get("fulfillment_channel", "")
         temp_price = 0.0
         total_cogs = 0.0
         tax_price = 0
         sku_set = set()
-        Marketplace_obj = Marketplace.objects.filter(id = marketplace_id).first()
-        m_name = ""
-        if Marketplace_obj:
-            m_name = Marketplace_obj.name
         for item_id in item_ids:
             item_pipeline = [
                 {"$match": {"_id": item_id}},
@@ -2157,28 +2108,13 @@ def downloadProductPerformanceSummary(request):
 def downloadProductPerformanceCSV(request):
     action = request.GET.get('action', '').lower()
     marketplace_id = request.GET.get('marketplace_id', None)
-    from_date, to_date = get_date_range('Yesterday')
-    match=dict()
-    match['order_date'] = {"$gte": from_date, "$lte": to_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered']}
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
-    
-    order_pipeline = [
-        {
-            "$match": match
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "order_items": 1,
-                "order_total": 1,
-                "marketplace_id": 1,
-                "fulfillment_channel":1
-            }
-        }
-    ]
-    orders = list(Order.objects.aggregate(*order_pipeline))
+    from_date, to_date = get_date_range('This Month')
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+
+    orders = grossRevenue(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
  
     sku_summary = defaultdict(lambda: {
         "sku": "",
@@ -2200,11 +2136,8 @@ def downloadProductPerformanceCSV(request):
         total_cogs = 0.0
         tax_price = 0
         sku_set = set()
-        marketplace_id = order.get("marketplace_id", "")
-        Marketplace_obj = Marketplace.objects.filter(id = marketplace_id).first()
-        m_name = ""
-        if Marketplace_obj:
-            m_name = Marketplace_obj.name
+        m_name = order.get("marketplace_name", "")
+
         for item_id in item_ids:
             item_pipeline = [
                 {"$match": {"_id": item_id}},
@@ -2319,6 +2252,11 @@ def allMarketplaceDataxl(request):
 
     preset = request.GET.get("preset")
     from_date,to_date = get_date_range(preset)
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
 
     # try:
     #     from_date = datetime.strptime(from_str, "%Y-%m-%d")
@@ -2327,8 +2265,8 @@ def allMarketplaceDataxl(request):
     #     to_date = datetime.now()
     #     from_date = to_date - timedelta(days=30)
 
-    def grouped_marketplace_metrics(start_date, end_date):
-        orders = grossRevenue(start_date, end_date)
+    def grouped_marketplace_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+        orders = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         grouped_orders = defaultdict(list)
         
         for order in orders:
@@ -2429,7 +2367,7 @@ def allMarketplaceDataxl(request):
     sheet.title = "Marketplace Metrics"
 
     # Get data
-    data_rows = grouped_marketplace_metrics(from_date, to_date)
+    data_rows = grouped_marketplace_metrics(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
     # Write headers
     if data_rows:
@@ -2461,10 +2399,15 @@ def downloadMarketplaceDataCSV(request):
 
     preset = request.GET.get("preset")
     from_date,to_date = get_date_range(preset)
-    
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
 
-    def grouped_marketplace_metrics(start_date, end_date):
-        orders = grossRevenue(start_date, end_date)
+
+    def grouped_marketplace_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+        orders = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         grouped_orders = defaultdict(list)
 
         for order in orders:
@@ -2554,7 +2497,7 @@ def downloadMarketplaceDataCSV(request):
         return marketplace_metrics
 
     # Get data
-    metrics = grouped_marketplace_metrics(from_date, to_date)
+    metrics = grouped_marketplace_metrics(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
     # Prepare CSV response
     response = HttpResponse(content_type='text/csv')
@@ -2623,36 +2566,22 @@ def CityCSVUploadView(request):
 
 
 def getCitywiseSales(request):
-    level = request.GET.get("type", "city").lower()  
+    level = request.GET.get("level", "city").lower()  
     action = request.GET.get("action", "all").lower()  
+    preset = request.GET.get("preset", "Yesterday")
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
 
-    today = datetime.utcnow()
-    one_year_ago = today - timedelta(days=30)
+    yesterday_start, yesterday_end = get_date_range(preset)
+    orders = grossRevenue(yesterday_start, yesterday_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
-    pipeline = [
-        {
-            "$match": {
-                "order_date": {
-                    "$gte": one_year_ago,
-                    "$lt": today
-                },
-                "order_status": {"$in": ['Shipped', 'Delivered']}
-            }
-        },
-        {
-            "$project": {
-                "order_total": 1,
-                "marketplace_id": 1,
-                "shipping_address": 1,
-                "shipping_information": 1
-            }
-        }
-    ]
 
-    results = list(Order.objects.aggregate(*pipeline))
     grouped_data = defaultdict(lambda: {"units": 0, "gross": 0.0, "city": "", "state": "", "country": ""})
 
-    for entry in results:
+    for entry in orders:
         address = entry.get("shipping_address") or entry.get("shipping_information", {}).get("postalAddress", {})
 
         city = address.get("city") or address.get("City")
@@ -2728,15 +2657,12 @@ def getCitywiseSales(request):
 
         elif level == "state":
             geo_data = CityDetails.objects.filter(state_id=data_["state"]).first()
-            
-
             item["lat"] = None
             item["lon"] = None
             item["code"] = ""
             item["fips"] = ""
             if geo_data:
                 item["state_name"] = geo_data.state_name
-
             state_key = f"{data_['state']}|USA"
             item["population"] = state_population.get(state_key, 1)
 
@@ -2755,35 +2681,26 @@ def getCitywiseSales(request):
     return JsonResponse({"items": items}, safe=False)
 
 def exportCitywiseSalesExcel(request):
-    today = datetime.utcnow()
-    one_year_ago = today - timedelta(days=365)
+    # today = datetime.utcnow()
+    # one_year_ago = today - timedelta(days=365)
+    preset = request.GET.get("preset", "Yesterday")
+
+    yesterday_start, yesterday_end = get_date_range(preset)
+
     action = request.GET.get("action", "all").lower()  
 
     level = request.GET.get("type", "city").lower()  
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
 
-    pipeline = [
-        {
-            "$match": {
-                "order_date": {
-                    "$gte": one_year_ago,
-                    "$lt": today
-                }
-            }
-        },
-        {
-            "$project": {
-                "order_total": 1,
-                "marketplace_id": 1,
-                "shipping_address": 1,
-                "shipping_information": 1
-            }
-        }
-    ]
-    results = list(Order.objects.aggregate(pipeline))
+    orders = grossRevenue(yesterday_start, yesterday_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
     grouped_data = defaultdict(lambda: {"units": 0, "gross": 0.0, "city": "", "state": "", "country": ""})
 
-    for entry in results:
+    for entry in orders:
         shipping = entry.get("shipping_address") or entry.get("shipping_information", {}).get("postalAddress", {})
         city = shipping.get("city")
         state = shipping.get("state") or shipping.get("StateOrRegion")
@@ -2818,7 +2735,7 @@ def exportCitywiseSalesExcel(request):
             geo_lookup[geo.city] = geo
             if geo.population:
                 if level in ["city"]:
-                    key = f"{city}|{state}|{country}"
+                    key = f"{geo.city}|{geo.state_id}|USA"
                     city_population[key] += geo.population
                 if level in ["state"]:
                     key = f"{geo.state_id}|USA"
@@ -2826,8 +2743,9 @@ def exportCitywiseSalesExcel(request):
                 if level == "country":
                     country_population['USA'] += geo.population
     data_rows = []
+    headers = ["Date From", "Date To", "Country", "Gross Revenue", "Units Sold"]
     for key, values in grouped_data.items():
-        row = [one_year_ago.strftime("%b %d, %Y"), today.strftime("%b %d, %Y")]
+        row = [yesterday_end.strftime("%b %d, %Y"), yesterday_start.strftime("%b %d, %Y")]
 
         if level == "city":
             row.extend([values["country"], values["state"], values["city"]])
@@ -2880,33 +2798,24 @@ def exportCitywiseSalesExcel(request):
 
 
 def downloadCitywiseSalesCSV(request):
-    today = datetime.utcnow()
-    one_year_ago = today - timedelta(days=365)
+    # today = datetime.utcnow()
+    # one_year_ago = today - timedelta(days=365)
+    preset = request.GET.get("preset", "Yesterday")
+
+    yesterday_start, yesterday_end = get_date_range(preset)
+
     action = request.GET.get("action", "all").lower()  # 'all' or 'percapita'
     level = request.GET.get("type", "city").lower()  # 'city', 'state', 'country'
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
 
-    pipeline = [
-        {
-            "$match": {
-                "order_date": {
-                    "$gte": one_year_ago,
-                    "$lt": today
-                }
-            }
-        },
-        {
-            "$project": {
-                "order_total": 1,
-                "marketplace_id": 1,
-                "shipping_address": 1,
-                "shipping_information": 1
-            }
-        }
-    ]
-    results = list(Order.objects.aggregate(pipeline))
+    orders = grossRevenue(yesterday_start, yesterday_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
     grouped_data = defaultdict(lambda: {"units": 0, "gross": 0.0, "city": "", "state": "", "country": ""})
 
-    for entry in results:
+    for entry in orders:
         shipping = entry.get("shipping_address") or entry.get("shipping_information", {}).get("postalAddress", {})
         city = shipping.get("city")
         state = shipping.get("state") or shipping.get("StateOrRegion")
@@ -2945,7 +2854,7 @@ def downloadCitywiseSalesCSV(request):
 
     data_rows = []
     for key, values in grouped_data.items():
-        row = [one_year_ago.strftime("%b %d, %Y"), today.strftime("%b %d, %Y")]
+        row = [yesterday_end.strftime("%b %d, %Y"), yesterday_start.strftime("%b %d, %Y")]
 
         if level == "city":
             row.extend([values["country"], values["state"], values["city"]])
@@ -3095,121 +3004,18 @@ def calculate_metrics(start_date, end_date):
     }
 
 
-def get_products_with_pagination(request):
-    page = int(request.GET.get("page", 1))
-    page_size = 10
-
-    # Define the pipeline for pagination and data fetching
-    pipeline = [
-        {
-            "$facet": {
-                "total_count": [{"$count": "count"}],
-                "products": [
-                    {"$skip": (page - 1) * page_size},
-                    {"$limit": page_size},
-                    {
-                        "$project": {
-                            "_id": 0,
-                            "id": {"$toString":"$_id"},
-                            "AmazonToken_id": {"$ifNull": ["$AmazonToken_id", "N/A"]},
-                            "asin": {"$ifNull": ["$product_id", "N/A"]},
-                            "sellerSku": {"$ifNull": ["$sku", "N/A"]},
-                            "marketplace": {"$ifNull": ["$marketplace", "N/A"]},
-                            "inventoryStatus": {"$ifNull": ["$inventoryStatus", "N/A"]},
-                            "fulfillmentChannel": {"$ifNull": ["$fulfillmentChannel", "N/A"]},
-                            "price": {"$ifNull": ["$price", "N/A"]},
-                            "priceDraft": {"$ifNull": ["$priceDraft", "N/A"]},
-                            "title": {"$ifNull": ["$product_title", "N/A"]},
-                            "totalRatingsCount": {"$ifNull": ["$totalRatingsCount", "N/A"]},
-                            "reviewRating": {"$ifNull": ["$reviewRating", "N/A"]},
-                            "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
-                            "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
-                            "parentAsin": {"$ifNull": ["$parentAsin", "N/A"]},
-                            "buyBoxWinnerId": {"$ifNull": ["$buyBoxWinnerId", "N/A"]},
-                            "newInsightsCount": {"$ifNull": ["$newInsightsCount", "N/A"]},
-                            "newInsightsGrouped": {"$ifNull": ["$newInsightsGrouped", "N/A"]},
-                            "category": {"$ifNull": ["$category", "N/A"]},
-                            "categoryTitle": {"$ifNull": ["$categoryTitle", "N/A"]},
-                            "amazonLink": {"$ifNull": ["$amazonLink", "N/A"]},
-                            "bsr": {"$ifNull": ["$bsr", "N/A"]},
-                            "subcategoriesBsr": {"$ifNull": ["$subcategoriesBsr", "N/A"]},
-                            "salesForToday": {"$ifNull": ["$salesForToday", 0]},
-                            "unitsSoldForToday": {"$ifNull": ["$unitsSoldForToday", 0]},
-                            "unitsSoldForPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
-                            "refunds": {"$ifNull": ["$refunds", 0]},
-                            "refundsAmount": {"$ifNull": ["$refundsAmount", 0]},
-                            "refundRate": {"$ifNull": ["$refundRate", "0%"]},
-                            "pageViews": {"$ifNull": ["$pageViews", 0]},
-                            "pageViewsPercentage": {"$ifNull": ["$pageViewsPercentage", "0%"]},
-                            "conversionRate": {"$ifNull": ["$conversionRate", "N/A"]},
-                            "grossProfit": {"$ifNull": ["$grossProfit", 0]},
-                            "netProfit": {"$ifNull": ["$netProfit", 0]},
-                            "margin": {"$ifNull": ["$margin", "0%"]},
-                            "totalAmazonFees": {"$ifNull": ["$totalAmazonFees", "N/A"]},
-                            "roi": {"$ifNull": ["$roi", "0%"]},
-                            "cogs": {"$ifNull": ["$cogs", 0]},
-                            "fbaPerOrderFulfillmentFee": {"$ifNull": ["$fbaPerOrderFulfillmentFee", "N/A"]},
-                            "fbaPerUnitFulfillmentFee": {"$ifNull": ["$fbaPerUnitFulfillmentFee", "N/A"]},
-                            "fbaWeightBasedFee": {"$ifNull": ["$fbaWeightBasedFee", "N/A"]},
-                            "variableClosingFee": {"$ifNull": ["$variableClosingFee", "N/A"]},
-                            "commission": {"$ifNull": ["$commission", "N/A"]},
-                            "fixedClosingFee": {"$ifNull": ["$fixedClosingFee", "N/A"]},
-                            "salesTaxCollectionFee": {"$ifNull": ["$salesTaxCollectionFee", "N/A"]},
-                            "shippingHbFee": {"$ifNull": ["$shippingHbFee", "N/A"]},
-                            "isFavorite": {"$ifNull": ["$isFavorite", "N/A"]},
-                            "trafficSessions": {"$ifNull": ["$trafficSessions", "N/A"]},
-                            "trafficSessionPercentage": {"$ifNull": ["$trafficSessionPercentage", "0%"]},
-                            # "deltas": {"$ifNull": ["$deltas", None]},
-                            "competitorsProducts": {"$ifNull": ["$competitorsProducts", 0]},
-                            "tags": {"$ifNull": ["$tags", []]},
-                        }
-                    }
-                ]
-            }
-        }
-    ]
-
-    # Execute the pipeline
-    result = list(Product.objects.aggregate(*pipeline))
-
-    # Extract total count and products
-    total_products = result[0]["total_count"][0]["count"] if result[0]["total_count"] else 0
-    products = result[0]["products"]
-
-    # Prepare response data
-    response_data = {
-        "total_products": total_products,
-        "page": page,
-        "page_size": page_size,
-        "products": products,
-    }
-
-    return JsonResponse(response_data, safe=False)
-
 
 
 def getProfitAndLossDetails(request):
     current_date = datetime.utcnow()
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+
     
-    def grossRevenue(start_date, end_date):
-        pipeline = [
-            {
-                "$match": {
-                    "order_date": {"$gte": start_date, "$lte": end_date},
-                    "order_status": {"$in": ['Shipped', 'Delivered']}
-                }
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "order_items": 1,
-                    "order_total": 1
-                }
-            }
-        ]
-        return list(Order.objects.aggregate(*pipeline))
-    
-    def calculate_metrics(start_date, end_date):
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
@@ -3220,7 +3026,7 @@ def getProfitAndLossDetails(request):
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
 
-        result = grossRevenue(start_date, end_date)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         order_total = 0
         other_price = 0
         tax_price = 0
@@ -3288,7 +3094,7 @@ def getProfitAndLossDetails(request):
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
-            "refunds": refund,  
+            "refunds": refund,   
             "skuCount": len(sku_set),
             "sessions": 0,
             "pageViews": 0,
@@ -3303,9 +3109,9 @@ def getProfitAndLossDetails(request):
             "productCompleteness": product_completeness  # Added product completeness data
         }
 
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to):
-        current = calculate_metrics(cur_from, cur_to)
-        previous = calculate_metrics(prev_from, prev_to)
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+        current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
         def with_delta(metric):
             return {
@@ -3380,7 +3186,7 @@ def getProfitAndLossDetails(request):
     prev_to_date = to_date - custom_duration
 
     response_data = {
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date),
+        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
     }
 
     return JsonResponse(response_data, safe=False)
@@ -3394,24 +3200,8 @@ def profit_loss_chart(request):
         end_date = datetime(year, month, last_day, 23, 59, 59)
         return start_date, end_date
 
-    def gross_revenue(start_date, end_date):
-        pipeline = [
-            {
-                "$match": {
-                    "order_date": {"$gte": start_date, "$lte": end_date},
-                    "order_status": {"$in": ['Shipped', 'Delivered']}
-                }
-            },
-            {
-                "$project": {
-                    "order_items": 1,
-                    "order_total": 1
-                }
-            }
-        ]
-        return list(Order.objects.aggregate(*pipeline))
 
-    def calculate_metrics(start_date, end_date):
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
         gross_revenue_amt = 0
         total_cogs = 0
         refund = 0
@@ -3426,7 +3216,7 @@ def profit_loss_chart(request):
         tax_price = 0
         temp_price = 0
 
-        result = gross_revenue(start_date, end_date)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
@@ -3508,6 +3298,11 @@ def profit_loss_chart(request):
     values = {metric: {} for metric in metrics}
     preset = request.GET.get('preset')
     from_date, to_date = get_date_range(preset)
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
 
     # Preset types
     hourly_presets = ["Today", "Yesterday"]
@@ -3541,7 +3336,7 @@ def profit_loss_chart(request):
             year, month = int(key[:4]), int(key[5:7])
             start, end = get_month_range(year, month)
 
-        data = calculate_metrics(start, end)
+        data = calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
         values["grossRevenue"][key] = data["grossRevenue"]
         values["expenses"][key] = data["expenses"]
@@ -3566,25 +3361,6 @@ def profitLossExportXl(request):
         end_date = datetime(year, month, last_day, 23, 59, 59)
         return start_date, end_date
 
-    def gross_revenue(start_date, end_date):
-        pipeline = [
-            {
-                "$match": {
-                    "order_date": {"$gte": start_date, "$lte": end_date},
-                    "order_status": {"$in": ['Shipped', 'Delivered']}
-                }
-            },
-            {
-                "$project": {
-                    "order_items": 1,
-                    "order_total": 1,
-                    "marketplace_id": 1,
-
-                }
-            }
-        ]
-        return list(Order.objects.aggregate(*pipeline))
-
     def calculate_metrics(start_date, end_date):
         gross_revenue_amt = 0
         total_cogs = 0
@@ -3598,7 +3374,7 @@ def profitLossExportXl(request):
         tax_price = 0
         temp_price = 0
         m_name = ""
-        result = gross_revenue(start_date, end_date)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
@@ -3679,6 +3455,12 @@ def profitLossExportXl(request):
     # Determine interval
     interval_keys = []
     interval_type = ""
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+    
 
     if preset in ["Today", "Yesterday"]:
         interval_keys = [(from_date + timedelta(hours=i)).strftime("%Y-%m-%d %H:00:00")
@@ -3718,7 +3500,7 @@ def profitLossExportXl(request):
             start, end = get_month_range(year, month)
             time_label = f"{year}-{month:02d}"
 
-        row_data = calculate_metrics(start, end)
+        row_data = calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
         ws.append([
             row_data.get("Marketplace", ""),
@@ -3781,25 +3563,8 @@ def profitLossChartCsv(request):
         elif preset == "Last 90 days":
             return today - timedelta(days=89), today + timedelta(hours=23, minutes=59, seconds=59)
         return today, today
-    def gross_revenue(start_date, end_date):
-        pipeline = [
-            {
-                "$match": {
-                    "order_date": {"$gte": start_date, "$lte": end_date},
-                    "order_status": {"$in": ['Shipped', 'Delivered']}
-                }
-            },
-            {
-                "$project": {
-                    "order_items": 1,
-                    "order_total": 1,
-                    "marketplace_id": 1,
-
-                }
-            }
-        ]
-        return list(Order.objects.aggregate(*pipeline))
-    def dummy_calculate_metrics(start_date, end_date):
+    
+    def dummy_calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
         gross_revenue_amt = 0
         total_cogs = 0
         refund = 0
@@ -3812,7 +3577,7 @@ def profitLossChartCsv(request):
         tax_price = 0
         temp_price = 0
         m_name = ""
-        result = gross_revenue(start_date, end_date)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
@@ -3878,6 +3643,11 @@ def profitLossChartCsv(request):
 
     preset = request.GET.get('preset', 'Last 7 days')
     from_date, to_date = get_date_range(preset)
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.getlist('brand_id', [])
+    product_id = request.GET.getlist('product_id',[])
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
 
     hourly_presets = ["Today", "Yesterday"]
     daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", "Last 60 days", "Last 90 days"]
@@ -3912,8 +3682,7 @@ def profitLossChartCsv(request):
             year, month = int(key[:4]), int(key[5:7])
             start, end = get_month_range(year, month)
 
-        data = dummy_calculate_metrics(start, end)
-        print(data)
+        data = dummy_calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
 
         writer.writerow([
             data.get("Marketplace", ""),
@@ -4083,7 +3852,7 @@ def InsightsDashboardView(request):
     fee_alerts = []
     listing_optimization_alerts = []
     product_performance_alerts = []  # New alert list for Product Performance
-
+    
     def is_optimized(product):
         title = product.product_title or ""
         if len(title) < 100 or re.search(r'(?i)(best|free|deal|offer|discount)', title):
@@ -4239,26 +4008,82 @@ def InsightsDashboardView(request):
             })
 
     return JsonResponse({
-        "total_products": total_products,
-        "listing_optimization": {
-            "optimized_products": optimized_count,
-            "not_optimized_products": total_products - optimized_count
-        },
-        "alerts": {
-            "storage_fee_alerts": fee_alerts,
-            "refund_alerts": refund_alerts,
-            "listing_optimization_alerts": listing_optimization_alerts,
-            "inventory_alerts": inventory_alerts,
-            "product_performance_alerts": product_performance_alerts 
-        },
-        "insights_by_category": {
-            "Listing Optimization": len(listing_optimization_alerts),
-            "Product Performance": len(refund_alerts) + len(product_performance_alerts), 
-            "Inventory": len(fee_alerts) + len(inventory_alerts),
-            "Refunds": Refund.objects.count(),
-            "Keyword": 42  
-        }
-    })
+    "total_products": total_products,
+    "listing_optimization": {
+        "optimized_products": optimized_count,
+        "not_optimized_products": total_products - optimized_count
+    },
+    "insights_by_category": {
+        "Listing Optimization": len(listing_optimization_alerts),
+        "Product Performance": len(refund_alerts) + len(product_performance_alerts),
+        "Inventory": len(fee_alerts) + len(inventory_alerts),
+        "Refunds": len(refund_alerts),
+        "Keyword": 42  # Placeholder until real keyword logic is added
+    },
+    "alerts_feed": [  # 🆕 Unified feed-style list for UI rendering
+        *[
+            {
+                "type": "Listing Optimization",
+                "title": alert["title"],
+                "date": datetime.today(),  # Optional: Add if you track creation date
+                "message": msg
+            }
+            for alert in listing_optimization_alerts
+            for msg in alert["messages"]
+        ],
+        *[
+            {
+                "type": "Refunds",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in refund_alerts
+        ],
+        *[
+            {
+                "type": "Product Performance",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in product_performance_alerts
+        ],
+        *[
+            {
+                "type": "Inventory",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["inventory_alert"]
+            }
+            for alert in inventory_alerts
+        ],
+        *[
+            {
+                "type": "Inventory",
+                "title": "Storage Fee Alert",
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in fee_alerts
+        ],
+        *[
+            # {
+            #     "type": "Keyword",
+            #     "title": "Keyword Ranking",
+            #     "date": "2024-11-30",
+            #     "message": "Your keyword “nuriva memory pill” went from page 1, position 8, to position 13 over the past 4 days. Review the listing for issues or review your PPC campaigns."
+            # },
+            # {
+            #     "type": "Keyword",
+            #     "title": "Keyword Ranking",
+            #     "date": "2024-11-24",
+            #     "message": "Your keyword “neuriva brain supplement” went from page 1, position 9, to position 11 over the past 4 days. Review the listing for issues or review your PPC campaigns."
+            # }
+        ]
+    ]
+})
+
 
 
 
@@ -4404,3 +4229,517 @@ def productsSalesOverview(request):
     }
 
     return JsonResponse(response_data, safe=False)
+
+
+
+def productsListingQualityScore(request):
+    product_id = request.GET.get('product_id')
+    # Get date ranges
+    today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    yesterday = today - timedelta(days=1)
+    previous_day = yesterday - timedelta(days=1)
+    seven_days_ago = today - timedelta(days=7)
+    thirty_days_ago = today - timedelta(days=30)
+    
+    # Helper function to calculate percentage change
+    def get_change(current, previous):
+        if previous == 0:
+            return "∞" if current > 0 else "-"
+        change = ((current - previous) / previous) * 100
+        return f"{change:.0f}%"
+
+    # 1. Get summary data (yesterday, previous day, last 7 days)
+    # Assuming you have Order and OrderItem models
+    yesterday_data = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=yesterday,
+        order__order_date__lt=today
+    ).aggregate(
+        units=Sum('quantity'),
+        revenue=Sum('price')
+    )
+    
+    previous_day_data = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=previous_day,
+        order__order_date__lt=yesterday
+    ).aggregate(
+        units=Sum('quantity'),
+        revenue=Sum('price')
+    )
+    
+    last_7_days_data = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=seven_days_ago,
+        order__order_date__lt=today
+    ).aggregate(
+        units=Sum('quantity'),
+        revenue=Sum('price')
+    )
+    
+    # 2. Get 30-day graph data
+    graph_data = []
+    date_dict = defaultdict(lambda: {'units': 0, 'revenue': 0.0})
+    
+    # Query all order items in the last 30 days
+    order_items = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=thirty_days_ago,
+        order__order_date__lt=today
+    ).values('order__order_date__date', 'quantity', 'price')
+    
+    # Aggregate data by day
+    for item in order_items:
+        date = item['order__order_date__date']
+        date_dict[date]['units'] += item['quantity']
+        date_dict[date]['revenue'] += item['price'] * item['quantity']
+    
+    # Convert to sorted list of dates
+    for day in (today - timedelta(days=n) for n in range(30)):
+        day_date = day.date()
+        graph_data.append({
+            'date': day_date.strftime('%b %d, %Y'),
+            'units': date_dict.get(day_date, {}).get('units', 0),
+            'revenue': round(date_dict.get(day_date, {}).get('revenue', 0.0), 2)
+        })
+    
+    # Prepare response
+    response_data = {
+        'summary': {
+            'date_range': f"{thirty_days_ago.strftime('%b %d, %Y')} – {today.strftime('%b %d, %Y')}",
+            'yesterday': {
+                'units': yesterday_data.get('units', 0),
+                'revenue': round(yesterday_data.get('revenue', 0.0), 2),
+                'change': get_change(
+                    yesterday_data.get('revenue', 0.0),
+                    previous_day_data.get('revenue', 0.0)
+                )
+            },
+            'previous_day': {
+                'units': previous_day_data.get('units', 0),
+                'revenue': round(previous_day_data.get('revenue', 0.0), 2),
+                'change': '-'
+            },
+            'last_7_days': {
+                'units': last_7_days_data.get('units', 0),
+                'revenue': round(last_7_days_data.get('revenue', 0.0), 2),
+                'change': get_change(
+                    last_7_days_data.get('revenue', 0.0),
+                    # Compare with previous 7-day period
+                    OrderItems.objects.filter(
+                        product_id=product_id,
+                        order__order_date__gte=thirty_days_ago,
+                        order__order_date__lt=seven_days_ago
+                    ).aggregate(revenue=Sum('price')).get('revenue', 0.0)
+                )
+            }
+        },
+        'graph_data': graph_data
+    }
+
+    return JsonResponse(response_data, safe=False)
+
+
+def productsTrafficandConversions(request):
+    product_id = request.GET.get('product_id')
+    # Get date ranges
+    today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    yesterday = today - timedelta(days=1)
+    previous_day = yesterday - timedelta(days=1)
+    seven_days_ago = today - timedelta(days=7)
+    thirty_days_ago = today - timedelta(days=30)
+    
+    # Helper function to calculate percentage change
+    def get_change(current, previous):
+        if previous == 0:
+            return "∞" if current > 0 else "-"
+        change = ((current - previous) / previous) * 100
+        return f"{change:.0f}%"
+
+    print("111111111111")
+    # 1. Get summary data (yesterday, previous day, last 7 days)
+    # Assuming you have Order and OrderItem models
+    yesterday_data = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=yesterday,
+        order__order_date__lt=today
+    ).aggregate(
+        units=Sum('quantity'),
+        revenue=Sum('price')
+    )
+    
+    previous_day_data = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=previous_day,
+        order__order_date__lt=yesterday
+    ).aggregate(
+        units=Sum('quantity'),
+        revenue=Sum('price')
+    )
+    
+    last_7_days_data = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=seven_days_ago,
+        order__order_date__lt=today
+    ).aggregate(
+        units=Sum('quantity'),
+        revenue=Sum('price')
+    )
+    
+    # 2. Get 30-day graph data
+    graph_data = []
+    date_dict = defaultdict(lambda: {'units': 0, 'revenue': 0.0})
+    
+    # Query all order items in the last 30 days
+    order_items = OrderItems.objects.filter(
+        product_id=product_id,
+        order__order_date__gte=thirty_days_ago,
+        order__order_date__lt=today
+    ).values('order__order_date__date', 'quantity', 'price')
+    
+    # Aggregate data by day
+    for item in order_items:
+        date = item['order__order_date__date']
+        date_dict[date]['units'] += item['quantity']
+        date_dict[date]['revenue'] += item['price'] * item['quantity']
+    
+    # Convert to sorted list of dates
+    for day in (today - timedelta(days=n) for n in range(30)):
+        day_date = day.date()
+        graph_data.append({
+            'date': day_date.strftime('%b %d, %Y'),
+            'units': date_dict.get(day_date, {}).get('units', 0),
+            'revenue': round(date_dict.get(day_date, {}).get('revenue', 0.0), 2)
+        })
+    
+    # Prepare response
+    response_data = {
+        'summary': {
+            'date_range': f"{thirty_days_ago.strftime('%b %d, %Y')} – {today.strftime('%b %d, %Y')}",
+            'yesterday': {
+                'units': yesterday_data.get('units', 0),
+                'revenue': round(yesterday_data.get('revenue', 0.0), 2),
+                'change': get_change(
+                    yesterday_data.get('revenue', 0.0),
+                    previous_day_data.get('revenue', 0.0)
+                )
+            },
+            'previous_day': {
+                'units': previous_day_data.get('units', 0),
+                'revenue': round(previous_day_data.get('revenue', 0.0), 2),
+                'change': '-'
+            },
+            'last_7_days': {
+                'units': last_7_days_data.get('units', 0),
+                'revenue': round(last_7_days_data.get('revenue', 0.0), 2),
+                'change': get_change(
+                    last_7_days_data.get('revenue', 0.0),
+                    # Compare with previous 7-day period
+                    OrderItems.objects.filter(
+                        product_id=product_id,
+                        order__order_date__gte=thirty_days_ago,
+                        order__order_date__lt=seven_days_ago
+                    ).aggregate(revenue=Sum('price')).get('revenue', 0.0)
+                )
+            }
+        },
+        'graph_data': graph_data
+    }
+
+    return JsonResponse(response_data, safe=False)
+
+
+
+##################################-----------------------Dashboard Filter API-----------------------###############################################
+
+
+def getSKUlist(request):
+    marketplace_id = request.GET.get('marketplace_id')
+    pipeline = []
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        pipeline.append({"$match": {"marketplace_id": ObjectId(marketplace_id)}})
+
+    pipeline.extend([
+        {
+            "$project": {
+                "_id": 0,
+                "id" : {"$toString": "$_id"},
+                "sku": "$sku",
+            }
+        }
+    ])
+    sku_list = list(Product.objects.aggregate(*pipeline))
+    return sku_list
+
+
+def getproductIdlist(request):
+    marketplace_id = request.GET.get('marketplace_id')
+    pipeline = []
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        pipeline.append({"$match": {"marketplace_id": ObjectId(marketplace_id)}})
+
+    pipeline.extend([
+        {
+            "$project": {
+                "_id": 0,
+                "id" : {"$toString": "$_id"},
+                "Asin": "$product_id",
+            }
+        }
+    ])
+    asin_list = list(Product.objects.aggregate(*pipeline))
+    return asin_list
+
+
+
+
+
+def InsightsProductWise(request):
+    product_id = request.GET.get('product_id')
+    optimized_count = 0
+    refund_alerts = []
+    fee_alerts = []
+    listing_optimization_alerts = []
+    product_performance_alerts = []  # New alert list for Product Performance
+
+    def is_optimized(product):
+        title = product.product_title or ""
+        if len(title) < 100 or re.search(r'(?i)(best|free|deal|offer|discount)', title):
+            return False
+
+        bullets = product.features or []
+        if len(bullets) < 5 or any(re.search(r'<|>|🔥|👍|😁|[A-Z]{4,}', b) for b in bullets):
+            return False
+
+        description = product.product_description or ""
+        if len(description) <= 300:
+            return False
+        words = re.findall(r'\b\w+\b', description)
+        if len(words) != len(set(words)):
+            return False
+
+        images = product.image_urls or []
+        if not images or any(not img.endswith(('.jpg', '.jpeg', '.png')) or 'watermark' in img.lower() for img in images):
+            return False
+
+        upc = product.upc or ""
+        if not re.fullmatch(r'\d{12,14}', upc):
+            return False
+
+        category = product.category or ""
+        if ">" not in category:
+            return False
+
+        return True
+
+    def get_image_alerts(product):
+        alerts = []
+        images = product.image_urls or []
+        if not images:
+            alerts.append("No main image found. Please upload a clear product image with a white background.")
+        else:
+            main_image = images[0]
+            if not (main_image.endswith('.jpg') or main_image.endswith('.jpeg') or main_image.endswith('.png')):
+                alerts.append("Main image format should be JPG or PNG for better clarity and compatibility.")
+            if 'white' not in main_image.lower():
+                alerts.append("Update your main image background to white. This enhances your product's visual appeal and professionalism while meeting Amazon's requirements.")
+            if 'small' in main_image.lower() or 'thumbnail' in main_image.lower():
+                alerts.append("Update your main image size so that it is clear and of high quality for your potential customers.")
+        return alerts
+
+    Refund_obj = Refund.objects(product_id=product_id)
+    refunded_product_ids = list(set([i.product_id.id for i in Refund_obj]))
+    for product_id in refunded_product_ids:
+        product = Product.objects(id=product_id).first()
+        if not product:
+            continue
+
+        if is_optimized(product):
+            optimized_count += 1
+
+        alerts = get_image_alerts(product)
+        if alerts:
+            listing_optimization_alerts.append({
+                "product_id": str(product.id),
+                "title": product.product_title,
+                "messages": alerts
+            })
+
+        # Count orders using aggregation
+        pipeline = [
+            {
+                "$lookup": {
+                    "from": "order_items",
+                    "localField": "order_items",
+                    "foreignField": "_id",
+                    "as": "order_items"
+                }
+            },
+            {"$unwind": "$order_items"},
+            {
+                "$match": {
+                    "order_items.ProductDetails.product_id": ObjectId(str(product.id))
+                }
+            }
+        ]
+        orders = list(Order.objects.aggregate(*pipeline))
+        total_orders = len(orders)
+        refund_count = Refund.objects(product_id=product.id).count()
+        # total_orders = 8
+        if total_orders > 0:
+            refund_rate = (refund_count / total_orders) * 100
+            if refund_rate > 6:
+                refund_alerts.append({
+                    "product_id": str(product.id),
+                    "title": product.product_title,
+                    "refund_rate": round(refund_rate, 2),
+                    "message": f"{product.product_title} has exceeded a 6% refund rate. Refund rates are soaring, impacting your profits. Review, analyze, and revise now."
+                })
+
+            # **New alert for Product Performance if refund rate has decreased by 6% or more**
+            if refund_rate <= 6:
+                product_performance_alerts.append({
+                    "product_id": str(product.id),
+                    "title": product.product_title,
+                    "refund_rate": round(refund_rate, 2),
+                    "message": f"Refund rates for {product.product_title} have decreased by an impressive 6% or more. Your dedication is driving results, it’s time to take a closer look at your strategy."
+                })
+
+    # Amazon Fee Analysis
+    today = datetime.utcnow()
+    start_of_this_month = today.replace(day=1)
+    start_of_last_month = (start_of_this_month - timedelta(days=1)).replace(day=1)
+
+    this_month_fees = Fee.objects(
+        marketplace="amazon.com",
+        fee_type="storage",
+        date__gte=start_of_this_month,
+        date__lt=today
+    ).sum('amount') or 0.0
+
+    last_month_fees = Fee.objects(
+        marketplace="amazon.com",
+        fee_type="storage",
+        date__gte=start_of_last_month,
+        date__lt=start_of_this_month
+    ).sum('amount') or 0.0
+
+    if this_month_fees > last_month_fees:
+        increase = round(this_month_fees - last_month_fees, 2)
+        fee_alerts.append({
+            "marketplace": "amazon.com",
+            "increase_amount": increase,
+            "message": f"Amazon Storage fees have increased by ${increase} for amazon.com. Storage fees have increased, cutting into your profit margins. Consider optimizing your inventory or fulfillment strategies now."
+        })
+
+    inventory_alerts = []
+    product_obj = Product.objects(id=product_id).first()
+
+    days_remaining = getattr(product_obj, 'days_of_inventory_remaining', 999)
+
+    if days_remaining <= 45:
+        reorder_by_date = datetime.date.today() + datetime.timedelta(days=days_remaining)
+
+        if days_remaining <= 38:
+            alert_message = f"Order more inventory now to avoid running out of stock. You have {days_remaining} days of inventory remaining."
+        else:
+            alert_message = f"Order more inventory by {reorder_by_date.strftime('%B %d, %Y')} to avoid running out of stock. You have {days_remaining} days of inventory remaining."
+
+        inventory_alerts.append({
+            "title": getattr(product_obj, 'title', ''),
+            "asin": getattr(product_obj, 'asin', ''),
+            "sku": getattr(product_obj, 'sku', ''),
+            "fulfillment_channel": getattr(product_obj, 'fulfillment_channel', ''),
+            "days_left": days_remaining,
+            "reorder_by": reorder_by_date.isoformat(),
+            "inventory_alert": alert_message
+        })
+
+    return JsonResponse({
+    "alerts_feed": [
+        *[
+            {
+                "type": "Listing Optimization",
+                "title": alert["title"],
+                "date": datetime.today(),
+                "message": msg
+            }
+            for alert in listing_optimization_alerts
+            for msg in alert["messages"]
+        ],
+        *[
+            {
+                "type": "Refunds",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in refund_alerts
+        ],
+        *[
+            {
+                "type": "Product Performance",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in product_performance_alerts
+        ],
+        *[
+            {
+                "type": "Inventory",
+                "title": alert["title"],
+                "date":  datetime.today(),
+                "message": alert["inventory_alert"]
+            }
+            for alert in inventory_alerts
+        ],
+        *[
+            {
+                "type": "Inventory",
+                "title": "Storage Fee Alert",
+                "date":  datetime.today(),
+                "message": alert["message"]
+            }
+            for alert in fee_alerts
+        ],
+        *[
+            # {
+            #     "type": "Keyword",
+            #     "title": "Keyword Ranking",
+            #     "date": "2024-11-30",
+            #     "message": "Your keyword “nuriva memory pill” went from page 1, position 8, to position 13 over the past 4 days. Review the listing for issues or review your PPC campaigns."
+            # },
+            # {
+            #     "type": "Keyword",
+            #     "title": "Keyword Ranking",
+            #     "date": "2024-11-24",
+            #     "message": "Your keyword “neuriva brain supplement” went from page 1, position 9, to position 11 over the past 4 days. Review the listing for issues or review your PPC campaigns."
+            # }
+        ]
+    ]
+})
+
+def obtainManufactureNames(request):
+    pipeline = [
+        {
+            "$group" : {
+                "_id" : None,
+                "manufacturer_name_list" : { "$addToSet": "$manufacturer_name" }
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "manufacturer_name_list": 1
+            }
+        }
+    ]
+    Product_list = list(Product.objects.aggregate(*pipeline))
+    data = dict()
+    data['manufacturer_name_list'] = []
+    if Product_list:
+        data['manufacturer_name_list'] = Product_list[0]['manufacturer_name_list']
+    return  JsonResponse(data,safe=False)
