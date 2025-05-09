@@ -1063,7 +1063,8 @@ def calculate_metricss(start_date, end_date,marketplace_id=[],brand_id=[],produc
 
         
         margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-        unitSessionPercentage = (total_units/sessions )*100
+        if sessions != 0:
+                unitSessionPercentage = (total_units/sessions )*100
     return {
         "grossRevenue": round(gross_revenue, 2),
         "expenses": round((other_price + total_cogs) , 2),
@@ -1231,7 +1232,8 @@ def getPeriodWiseDataXl(request):
             other_price += order_total - temp_price - tax_price
             net_profit = gross_revenue - (other_price + total_cogs)
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-            unitSessionPercentage = (total_units/sessions )*100
+            if sessions != 0:
+                unitSessionPercentage = (total_units/sessions )*100
             
         return {
             "grossRevenue": round(gross_revenue, 2),
@@ -1398,7 +1400,8 @@ def exportPeriodWiseCSV(request):
             other_price += order_total - temp_price - tax_price
             net_profit = gross_revenue - (other_price + total_cogs)
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-            unitSessionPercentage = (total_units/sessions )*100
+            if sessions != 0:
+                unitSessionPercentage = (total_units/sessions )*100
             
         return {
             "grossRevenue": round(gross_revenue, 2),
