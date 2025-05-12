@@ -21,7 +21,7 @@ from omnisight.operations.general_functions import getMarketplaceList, getProduc
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders,ShipStationShippingCostAPIView
 
-from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist,InsightsProductWise,getCitywiseSales,exportCitywiseSalesExcel,downloadCitywiseSalesCSV,obtainManufactureNames, getBrandListforfilter
+from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist,InsightsProductWise,getCitywiseSales,exportCitywiseSalesExcel,downloadCitywiseSalesCSV,obtainManufactureNames, getBrandListforfilter,productsDetailsPageSummary,productsSalesOverview, productsListingQualityScore
 
 
 
@@ -131,6 +131,12 @@ urlpatterns = [
     path("exportCitywiseSalesExcel/",exportCitywiseSalesExcel,name="exportCitywiseSalesExcel"),
     path("downloadCitywiseSalesCSV/",downloadCitywiseSalesCSV,name="downloadCitywiseSalesCSV"),
     path('api/shipstation/shipping-cost/', ShipStationShippingCostAPIView.as_view(), name='shipstation-shipping-cost'),
+
+
+    #####MY PRODUCTS #########
+    path("productsDetailsPageSummary/",productsDetailsPageSummary,name="productsDetailsPageSummary"),
+    path("productsSalesOverview/",productsSalesOverview,name="productsSalesOverview"),
+    path("productsListingQualityScore/",productsListingQualityScore,name="productsListingQualityScore"),
 ]
 
 
