@@ -341,3 +341,54 @@ def AnnualizedRevenueAPIView(target_date):
 
 
 
+def getdaywiseproductssold(start_date, end_date,product_id):
+    """
+    Fetches the list of orders based on the provided product ID using a pipeline aggregation.
+
+    Args:
+        productId (str): The ID of the product for which to fetch orders.
+
+    Returns:
+        list: A list of dictionaries containing order details.
+    """
+    pipeline = [
+        {
+            "$match": {
+                "order_date": {"$gte": start_date, "$lte": end_date},
+                "order_status": {"$in": ['Shipped', 'Delivered']}
+            }
+        },
+        {
+            "$lookup": {
+                "from": "order_items",
+                "localField": "order_items",
+                "foreignField": "_id",
+                "as": "order_items_ins"
+            }
+        },
+        {
+            "$unwind": "$order_items_ins"
+        },
+        {
+            "$match": {
+                "order_items_ins.ProductDetails.product_id": ObjectId(product_id)
+            }
+        },
+        {
+            "$group" : {
+                "_id" : {"$dateToString": {"format": "%Y-%m-%d", "date": "$order_date"}},
+                "total_quantity" : { "$sum": "$order_items_ins.ProductDetails.QuantityOrdered" },
+                "total_price" : { "$sum": "$order_items_ins.Pricing.ItemPrice.Amount" }
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "date": "$_id",
+                "total_quantity": 1,
+                "total_price": 1
+            }
+        }
+    ]
+    orders = list(Order.objects.aggregate(*pipeline))
+    return orders

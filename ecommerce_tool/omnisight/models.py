@@ -118,6 +118,9 @@ class Product(Document):
     page_views = IntField(default=0) #dummy data
     refund = IntField(default=0) #dummy data
     sessions = IntField(default=0) #dummy data
+    listing_quality_score = FloatField(default=0.0)  # Score based on listing quality
+    product_url = StringField()  # URL to the product page
+    videos = ListField(StringField())  # List of video URLs
 
 class ignore_api_functions(Document):
     name = StringField()
@@ -215,8 +218,8 @@ class OrderItems(Document):
     TaxCollection = EmbeddedDocumentField(TaxCollection, required=True)
     IsGift = BooleanField(required=True)
     BuyerInfo = EmbeddedDocumentField(BuyerInfo, default=None)
-    created_date = DateTimeField()
-    document_created_date = DateTimeField(default=datetime.now())
+    created_date = DateTimeField(default=datetime.now())
+    document_created_date = DateTimeField()
 
 
 
@@ -424,28 +427,57 @@ class Refund(Document):
     reason  = StringField()
 
 
+
+class pageview_session_count(Document):
+    product_id = ReferenceField(Product)
+    date =  DateTimeField(default=datetime.now())
+    page_views = IntField(default=0)
+    session_count = IntField(default=0)
+
+
+
 # import random
-# from datetime import datetime, timedelta
+# from datetime import datetime,timedelta
 
 # # Fetch 20 random orders
-# random_orders = list(Order.objects.aggregate([{"$sample": {"size": 20}}]))
-# i=1
+# random_orders = list(Order.objects.aggregate([{"$sample": {"size": 40}}]))
+# i = 1
+
 # # Duplicate orders with updated order_date
 # for order_dict in random_orders:
-#     print("1111111111",i)
-#     i+=1
+#     print("Processing order:", i)
+#     i += 1
 #     order_dict.pop('_id', None)  # Remove the original ID to create a new document
-#     # random_time = (datetime.now()).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59), microsecond=0)
 #     random_time = (datetime.now() - timedelta(days=1)).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59), microsecond=0)
 
+#     # random_time = (datetime.now()).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59), microsecond=0)
+
 #     order_dict['order_date'] = random_time  # Set order_date to a random time today
+
 #     # Ensure payment_method_details is a string
 #     if 'payment_method_details' in order_dict and not isinstance(order_dict['payment_method_details'], str):
 #         order_dict['payment_method_details'] = str(order_dict['payment_method_details'])
+
+#     # Create new order
 #     new_order = Order(**order_dict)
 #     new_order.save()
 
-# print("20 random orders duplicated with updated order_date set to random times today.")
+#     # Duplicate order_items for the new order
+#     new_order_items = []
+#     for order_item in order_dict.get('order_items', []):
+#         order_item = OrderItems.objects.get(id=order_item)  # Fetch the full document using ObjectId
+#         order_item_dict = order_item.to_mongo().to_dict()
+#         order_item_dict.pop('_id', None)  # Remove the original ID to create a new document
+#         # order_item_dict['OrderId'] = new_order.id  # Link the new order ID
+#         new_order_item = OrderItems(**order_item_dict)
+#         new_order_item.save()
+#         new_order_items.append(new_order_item)
+
+#     # Update the new order with the duplicated order_items
+#     new_order.order_items = new_order_items
+#     new_order.save()
+
+# print("20 random orders duplicated with updated order_date set to random times today, along with their order_items.")
 
 
 # Update page_views for all products with a random integer between 500 and 10000
@@ -471,3 +503,22 @@ class Refund(Document):
 #     thread.join()
 
 # print("Updated page_views for all products.")
+
+
+
+# # Fetch orders and update order_items
+# def update_order_items_date():
+#     orders = Order.objects()  # Fetch all orders
+#     i=0
+#     for order in orders:
+#         print("Processing order:", i)
+#         i+=1
+#         order_date = order.order_date  # Get the order_date from the order
+#         for order_item in order.order_items:
+#             if order_item.document_created_date != order_date:
+#                 order_item.document_created_date = order_date  # Update the created_date field
+#                 order_item.save()  # Save the updated order item
+
+# # Run the script
+# update_order_items_date()
+# print("Order items' created_date updated successfully.")

@@ -19,8 +19,9 @@ from bson import ObjectId
 from calendar import monthrange
 from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
 from django.db.models import Sum, Q
-from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand
+from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold
 from ecommerce_tool.crud import DatabaseModel
+from omnisight.operations.common_utils import calculate_listing_score
 
 
 
@@ -592,7 +593,8 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
             "orders": len(bucket_orders),
             "units_sold": total_units,
             "refund_amount": round(refund_amount, 2),
-            "refund_quantity": refund_quantity
+            "refund_quantity": refund_quantity,
+            "date" : time_key
         }
 
     return graph_data
@@ -715,7 +717,9 @@ def RevenueWidgetAPIView(request):
         }
         data['compare_total'] = difference
         data['previous_total'] = compare_total
-        data['compare_graph'] = get_graph_data(compare_startdate, compare_enddate, initial,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        compare_graph = get_graph_data(compare_startdate, compare_enddate, initial,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        data['compare_graph'] = compare_graph
+        # data['']
     name = "Revenue"
     item_pipeline = [
                         { "$match": { "name": name } }
@@ -904,11 +908,40 @@ def get_top_products(request):
     return data
 
 def get_products_with_pagination(request):
+    pipeline = list()
+    match = dict()
+    marketplace_id = request.GET.get('marketplace_id', None)
+    brand_id = request.GET.get('brand_id', None)
+    product_id = request.GET.get('product_id', None)
+    manufacturer_name = request.GET.getlist('manufacturer_name',[])
     page = int(request.GET.get("page", 1))
-    page_size = 10
+    page_size = int(request.GET.get("page_size", 10))
+
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+
+    
+    
+    if product_id != None and product_id != "" and product_id != []:
+        product_id = [ObjectId(pid) for pid in product_id]
+        match["_id"] = {"$in": product_id}
+
+    elif brand_id != None and brand_id != "" and brand_id != []:
+        brand_id = [ObjectId(bid) for bid in brand_id]
+        match["brand_id"] = {"$in": brand_id}
+
+    elif manufacturer_name != None and manufacturer_name != "" and manufacturer_name != []:
+        match["manufacturer_name"] = {"$in": manufacturer_name}
+
+
+    if match != {}:
+        pipeline.append({
+            "$match": match
+        })
+
 
     # Define the pipeline for pagination and data fetching
-    pipeline = [
+    pipeline.extend([
         {
             "$facet": {
                 "total_count": [{"$count": "count"}],
@@ -916,23 +949,35 @@ def get_products_with_pagination(request):
                     {"$skip": (page - 1) * page_size},
                     {"$limit": page_size},
                     {
+                        "$lookup" : {
+                            "from" : "marketplace",
+                            "localField" : "marketplace_id",
+                            "foreignField" : "_id",
+                            "as" : "marketplace_ins"
+                        }
+                    },
+                    {
+                        "$unwind" : "$marketplace_ins"
+                    },
+                    {
                         "$project": {
                             "_id": 0,
                             "id": {"$toString":"$_id"},
-                            "AmazonToken_id": {"$ifNull": ["$AmazonToken_id", "N/A"]},
                             "asin": {"$ifNull": ["$product_id", "N/A"]},
                             "sellerSku": {"$ifNull": ["$sku", "N/A"]},
-                            "marketplace": {"$ifNull": ["$marketplace", "N/A"]},
+                            "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
+                            "title": {"$ifNull": ["$product_title", "N/A"]},
+                            "marketplace": {"$ifNull": ["$marketplace_ins.name", "N/A"]},
+
+
                             "inventoryStatus": {"$ifNull": ["$inventoryStatus", "N/A"]},
                             "fulfillmentChannel": {"$ifNull": ["$fulfillmentChannel", "N/A"]},
                             "price": {"$ifNull": ["$price", "N/A"]},
                             "stock" : {"$ifNull": ["$quantity", 0]},
                             "priceDraft": {"$ifNull": ["$priceDraft", "N/A"]},
-                            "title": {"$ifNull": ["$product_title", "N/A"]},
                             "totalRatingsCount": {"$ifNull": ["$totalRatingsCount", "N/A"]},
                             "reviewRating": {"$ifNull": ["$reviewRating", "N/A"]},
                             "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
-                            "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
                             "parentAsin": {"$ifNull": ["$parentAsin", "N/A"]},
                             "buyBoxWinnerId": {"$ifNull": ["$buyBoxWinnerId", "N/A"]},
                             "newInsightsCount": {"$ifNull": ["$newInsightsCount", "N/A"]},
@@ -976,7 +1021,7 @@ def get_products_with_pagination(request):
                 ]
             }
         }
-    ]
+    ])
 
     # Execute the pipeline
     result = list(Product.objects.aggregate(*pipeline))
@@ -4255,7 +4300,7 @@ def productsDetailsPageSummary(request):
     pipeline = [
         {
             "$match": {
-                "_id": product_id
+                "_id": ObjectId(product_id)
             }
         },
         {
@@ -4271,6 +4316,7 @@ def productsDetailsPageSummary(request):
                 "review_count" : {"$ifNull" : ["$review_count",0]},
                 "age" : {"$ifNull" : ["$age",0]},
                 "listing_quality_score" : {"$ifNull" : ["$listing_quality_score",0.0]},
+                "currency" : {"$ifNull" : ["$currency",""]},
             }
         }
     ]
@@ -4280,334 +4326,263 @@ def productsDetailsPageSummary(request):
         return item_result
     return {}
 
+    
+
+from django.utils import timezone
 
 def productsSalesOverview(request):
     product_id = request.GET.get('product_id')
-    # Get date ranges
-    today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
-
-    yesterday = today - timedelta(days=1)
-    previous_day = yesterday - timedelta(days=1)
-    seven_days_ago = today - timedelta(days=7)
-    thirty_days_ago = today - timedelta(days=30)
+    # Calculate date ranges
+    today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    end_date = today - timedelta(days=1)  # Yesterday (end of period)
+    start_date = end_date - timedelta(days=29)  # 30 days ago (including yesterday)
     
-    # Helper function to calculate percentage change
-    def get_change(current, previous):
-        if previous == 0:
-            return "∞" if current > 0 else "-"
-        change = ((current - previous) / previous) * 100
-        return f"{change:.0f}%"
-
-    print("111111111111")
-    # 1. Get summary data (yesterday, previous day, last 7 days)
-    # Assuming you have Order and OrderItem models
-    yesterday_data = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=yesterday,
-        order__order_date__lt=today
-    ).aggregate(
-        units=Sum('quantity'),
-        revenue=Sum('price')
-    )
+    # Get daily sales data using existing function
+    daily_sales = getdaywiseproductssold(start_date, end_date, product_id)
     
-    previous_day_data = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=previous_day,
-        order__order_date__lt=yesterday
-    ).aggregate(
-        units=Sum('quantity'),
-        revenue=Sum('price')
-    )
+    # Convert to dictionary for easy lookup
+    sales_dict = {item['date']: item for item in daily_sales}
     
-    last_7_days_data = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=seven_days_ago,
-        order__order_date__lt=today
-    ).aggregate(
-        units=Sum('quantity'),
-        revenue=Sum('price')
-    )
+    # Generate complete date range
+    complete_data = []
+    current_date = start_date
+    while current_date <= end_date:
+        date_str = current_date.strftime('%Y-%m-%d')
+        if date_str in sales_dict:
+            complete_data.append(sales_dict[date_str])
+        else:
+            complete_data.append({
+                'date': date_str,
+                'total_quantity': 0,
+                'total_price': 0.0
+            })
+        current_date += timedelta(days=1)
     
-    # 2. Get 30-day graph data
-    graph_data = []
-    date_dict = defaultdict(lambda: {'units': 0, 'revenue': 0.0})
+    # Initialize results
+    results = {
+        "units": [],
+        "gross": []
+    }
     
-    # Query all order items in the last 30 days
-    order_items = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=thirty_days_ago,
-        order__order_date__lt=today
-    ).values('order__order_date__date', 'quantity', 'price')
+    # 1. Yesterday vs Previous Day
+    yesterday = end_date
+    prev_day = yesterday - timedelta(days=1)
     
-    # Aggregate data by day
-    for item in order_items:
-        date = item['order__order_date__date']
-        date_dict[date]['units'] += item['quantity']
-        date_dict[date]['revenue'] += item['price'] * item['quantity']
+    results["units"].append({
+        "current": {
+            "dateFrom": yesterday.strftime("%Y-%m-%d 00:00:00"),
+            "dateTo": yesterday.strftime("%Y-%m-%d 23:59:59"),
+            "value": sales_dict.get(yesterday.strftime("%Y-%m-%d"), {}).get("total_quantity", 0)
+        },
+        "previous": {
+            "dateFrom": prev_day.strftime("%Y-%m-%d 00:00:00"),
+            "dateTo": prev_day.strftime("%Y-%m-%d 23:59:59"),
+            "value": sales_dict.get(prev_day.strftime("%Y-%m-%d"), {}).get("total_quantity", 0)
+        }
+    })
     
-    # Convert to sorted list of dates
-    for day in (today - timedelta(days=n) for n in range(30)):
-        day_date = day.date()
-        graph_data.append({
-            'date': day_date.strftime('%b %d, %Y'),
-            'units': date_dict.get(day_date, {}).get('units', 0),
-            'revenue': round(date_dict.get(day_date, {}).get('revenue', 0.0), 2)
+    results["gross"].append({
+        "current": {
+            "dateFrom": yesterday.strftime("%Y-%m-%d 00:00:00"),
+            "dateTo": yesterday.strftime("%Y-%m-%d 23:59:59"),
+            "value": str(sales_dict.get(yesterday.strftime("%Y-%m-%d"), {}).get("total_price", 0))
+        },
+        "previous": {
+            "dateFrom": prev_day.strftime("%Y-%m-%d 00:00:00"),
+            "dateTo": prev_day.strftime("%Y-%m-%d 23:59:59"),
+            "value": str(sales_dict.get(prev_day.strftime("%Y-%m-%d"), {}).get("total_price", 0))
+        }
+    })
+    
+    # 2. Last day with sales vs its previous day
+    # Find last day with sales
+    last_sales_day = None
+    for day in (end_date - timedelta(days=n) for n in range(30)):
+        day_str = day.strftime("%Y-%m-%d")
+        if day_str in sales_dict and (sales_dict[day_str].get("total_quantity", 0) > 0 or 
+                                        sales_dict[day_str].get("total_price", 0) > 0):
+            last_sales_day = day
+            break
+    
+    if last_sales_day:
+        prev_sales_day = last_sales_day - timedelta(days=1)
+        
+        results["units"].append({
+            "current": {
+                "dateFrom": last_sales_day.strftime("%Y-%m-%d 00:00:00"),
+                "dateTo": last_sales_day.strftime("%Y-%m-%d 23:59:59"),
+                "value": sales_dict.get(last_sales_day.strftime("%Y-%m-%d"), {}).get("total_quantity", 0)
+            },
+            "previous": {
+                "dateFrom": prev_sales_day.strftime("%Y-%m-%d 00:00:00"),
+                "dateTo": prev_sales_day.strftime("%Y-%m-%d 23:59:59"),
+                "value": sales_dict.get(prev_sales_day.strftime("%Y-%m-%d"), {}).get("total_quantity", 0)
+            }
+        })
+        
+        results["gross"].append({
+            "current": {
+                "dateFrom": last_sales_day.strftime("%Y-%m-%d 00:00:00"),
+                "dateTo": last_sales_day.strftime("%Y-%m-%d 23:59:59"),
+                "value": str(sales_dict.get(last_sales_day.strftime("%Y-%m-%d"), {}).get("total_price", 0))
+            },
+            "previous": {
+                "dateFrom": prev_sales_day.strftime("%Y-%m-%d 00:00:00"),
+                "dateTo": prev_sales_day.strftime("%Y-%m-%d 23:59:59"),
+                "value": str(sales_dict.get(prev_sales_day.strftime("%Y-%m-%d"), {}).get("total_price", 0))
+            }
         })
     
-    # Prepare response
-    response_data = {
-        'summary': {
-            'date_range': f"{thirty_days_ago.strftime('%b %d, %Y')} – {today.strftime('%b %d, %Y')}",
-            'yesterday': {
-                'units': yesterday_data.get('units', 0),
-                'revenue': round(yesterday_data.get('revenue', 0.0), 2),
-                'change': get_change(
-                    yesterday_data.get('revenue', 0.0),
-                    previous_day_data.get('revenue', 0.0)
-                )
-            },
-            'previous_day': {
-                'units': previous_day_data.get('units', 0),
-                'revenue': round(previous_day_data.get('revenue', 0.0), 2),
-                'change': '-'
-            },
-            'last_7_days': {
-                'units': last_7_days_data.get('units', 0),
-                'revenue': round(last_7_days_data.get('revenue', 0.0), 2),
-                'change': get_change(
-                    last_7_days_data.get('revenue', 0.0),
-                    # Compare with previous 7-day period
-                    OrderItems.objects.filter(
-                        product_id=product_id,
-                        order__order_date__gte=thirty_days_ago,
-                        order__order_date__lt=seven_days_ago
-                    ).aggregate(revenue=Sum('price')).get('revenue', 0.0)
-                )
-            }
+    # 3. Last 7 days vs Previous 7 days
+    last_7days_end = end_date
+    last_7days_start = last_7days_end - timedelta(days=6)
+    prev_7days_end = last_7days_start - timedelta(days=1)
+    prev_7days_start = prev_7days_end - timedelta(days=6)
+    
+    # Calculate totals for these periods
+    def calculate_period_total(start, end):
+        total_qty = 0
+        total_price = 0.0
+        for day in (start + timedelta(days=n) for n in range((end - start).days + 1)):
+            day_str = day.strftime("%Y-%m-%d")
+            if day_str in sales_dict:
+                total_qty += sales_dict[day_str].get("total_quantity", 0)
+                total_price += sales_dict[day_str].get("total_price", 0.0)
+        return total_qty, round(total_price, 2)
+    
+    current_7days_qty, current_7days_price = calculate_period_total(last_7days_start, last_7days_end)
+    prev_7days_qty, prev_7days_price = calculate_period_total(prev_7days_start, prev_7days_end)
+    
+    results["units"].append({
+        "current": {
+            "dateFrom": last_7days_start.strftime("%Y-%m-%d 00:00:00"),
+            "dateTo": last_7days_end.strftime("%Y-%m-%d 23:59:59"),
+            "value": current_7days_qty
         },
-        'graph_data': graph_data
-    }
-
-    return JsonResponse(response_data, safe=False)
+        "previous": {
+            "dateFrom": prev_7days_start.strftime("%Y-%m-%d 00:00:00"),
+            "dateTo": prev_7days_end.strftime("%Y-%m-%d 23:59:59"),
+            "value": prev_7days_qty
+        }
+    })
+    
+    results["gross"].append({
+        "current": {
+            "dateFrom": last_7days_start.strftime("%Y-%m-%d 00:00:00"),
+            "dateTo": last_7days_end.strftime("%Y-%m-%d 23:59:59"),
+            "value": str(current_7days_price)
+        },
+        "previous": {
+            "dateFrom": prev_7days_start.strftime("%Y-%m-%d 00:00:00"),
+            "dateTo": prev_7days_end.strftime("%Y-%m-%d 23:59:59"),
+            "value": str(prev_7days_price)
+        }
+    })
+    results['graph'] = complete_data
+    
+    return results
+    
 
 
 
 def productsListingQualityScore(request):
     product_id = request.GET.get('product_id')
-    # Get date ranges
-    today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
-
-    yesterday = today - timedelta(days=1)
-    previous_day = yesterday - timedelta(days=1)
-    seven_days_ago = today - timedelta(days=7)
-    thirty_days_ago = today - timedelta(days=30)
-    
-    # Helper function to calculate percentage change
-    def get_change(current, previous):
-        if previous == 0:
-            return "∞" if current > 0 else "-"
-        change = ((current - previous) / previous) * 100
-        return f"{change:.0f}%"
-
-    # 1. Get summary data (yesterday, previous day, last 7 days)
-    # Assuming you have Order and OrderItem models
-    yesterday_data = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=yesterday,
-        order__order_date__lt=today
-    ).aggregate(
-        units=Sum('quantity'),
-        revenue=Sum('price')
-    )
-    
-    previous_day_data = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=previous_day,
-        order__order_date__lt=yesterday
-    ).aggregate(
-        units=Sum('quantity'),
-        revenue=Sum('price')
-    )
-    
-    last_7_days_data = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=seven_days_ago,
-        order__order_date__lt=today
-    ).aggregate(
-        units=Sum('quantity'),
-        revenue=Sum('price')
-    )
-    
-    # 2. Get 30-day graph data
-    graph_data = []
-    date_dict = defaultdict(lambda: {'units': 0, 'revenue': 0.0})
-    
-    # Query all order items in the last 30 days
-    order_items = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=thirty_days_ago,
-        order__order_date__lt=today
-    ).values('order__order_date__date', 'quantity', 'price')
-    
-    # Aggregate data by day
-    for item in order_items:
-        date = item['order__order_date__date']
-        date_dict[date]['units'] += item['quantity']
-        date_dict[date]['revenue'] += item['price'] * item['quantity']
-    
-    # Convert to sorted list of dates
-    for day in (today - timedelta(days=n) for n in range(30)):
-        day_date = day.date()
-        graph_data.append({
-            'date': day_date.strftime('%b %d, %Y'),
-            'units': date_dict.get(day_date, {}).get('units', 0),
-            'revenue': round(date_dict.get(day_date, {}).get('revenue', 0.0), 2)
-        })
-    
-    # Prepare response
-    response_data = {
-        'summary': {
-            'date_range': f"{thirty_days_ago.strftime('%b %d, %Y')} – {today.strftime('%b %d, %Y')}",
-            'yesterday': {
-                'units': yesterday_data.get('units', 0),
-                'revenue': round(yesterday_data.get('revenue', 0.0), 2),
-                'change': get_change(
-                    yesterday_data.get('revenue', 0.0),
-                    previous_day_data.get('revenue', 0.0)
-                )
+    product_doc = DatabaseModel.get_document(Product.objects,{"id" : ObjectId(product_id)})
+    product_dict = product_doc.to_mongo().to_dict()
+    listing_data = calculate_listing_score(product_dict)
+    scoreData = {
+        "asin": product_dict.get("product_id",""),
+        "imageUrl": product_dict.get("image_url",""),
+        "title": product_dict.get("product_title",""),  
+        "productUrl": product_dict.get("product_url",""),
+        "metricData": {
+            "titleStrangeSymbols": {
+                "metric": "titleStrangeSymbols",
+                "metricTitle": "Title does not contain symbols or emojis",
+                "metricTooltip": "Emojis and symbols can hamper readability",
+                "passed": listing_data['rules_checks'][0]
             },
-            'previous_day': {
-                'units': previous_day_data.get('units', 0),
-                'revenue': round(previous_day_data.get('revenue', 0.0), 2),
-                'change': '-'
+            "titleLength": {
+                "metric": "titleLength",
+                "metricTitle": "Title contains 150+ characters",
+                "metricTooltip": "Maximized number of relevant keywords in your title improves discoverability",
+                "passed": listing_data['rules_checks'][1]
             },
-            'last_7_days': {
-                'units': last_7_days_data.get('units', 0),
-                'revenue': round(last_7_days_data.get('revenue', 0.0), 2),
-                'change': get_change(
-                    last_7_days_data.get('revenue', 0.0),
-                    # Compare with previous 7-day period
-                    OrderItems.objects.filter(
-                        product_id=product_id,
-                        order__order_date__gte=thirty_days_ago,
-                        order__order_date__lt=seven_days_ago
-                    ).aggregate(revenue=Sum('price')).get('revenue', 0.0)
-                )
+            "qtyBullets": {
+                "metric": "qtyBullets",
+                "metricTitle": "5+ bullet points",
+                "metricTooltip": "Maximized number of bullet points can help improve discoverability",
+                "passed": listing_data['rules_checks'][2]
+            },
+            "lengthBullets": {
+                "metric": "lengthBullets",
+                "metricTitle": "150+ characters in each bullet point",
+                "metricTooltip": "Maximized number of relevant keywords in bullet points helps improve discoverability",
+                "passed": listing_data['rules_checks'][3]
+            },
+            "capitalizedBullets": {
+                "metric": "capitalizedBullets",
+                "metricTitle": "First letter of bullet points is capitalized",
+                "metricTooltip": "Capitalized first letter of first word in each bullet point improves readability",
+                "passed": listing_data['rules_checks'][4]
+            },
+            "allCapsBullets": {
+                "metric": "allCapsBullets",
+                "metricTitle": "Bullet points are not in all caps",
+                "metricTooltip": "Amazon TOS discourages using all caps",
+                "passed": listing_data['rules_checks'][5]
+            },
+            "ebcAndDescription": {
+                "metric": "ebcAndDescription",
+                "metricTitle": "1,000+ characters in description or A+ content",
+                "metricTooltip": "Maximized number of relevant keywords in description helps improve discoverability",
+                "passed": listing_data['rules_checks'][6]
+            },
+            "imageResolution": {
+                "metric": "imageResolution",
+                "metricTitle": "1000 x 1000 px +",
+                "metricTooltip": "Images at least 1000 x 1000px enable zoom feature",
+                "passed": listing_data['rules_checks'][7]
+            },
+            "imageBackground": {
+                "metric": "imageBackground",
+                "metricTitle": "Main image is on a white background",
+                "metricTooltip": "Amazon TOS requires main image to be on a white background",
+                "passed": listing_data['rules_checks'][8]
+            },
+            "imagesQty": {
+                "metric": "imagesQty",
+                "metricTitle": "7+ images",
+                "metricTooltip": "Increased number of images can help drive conversions",
+                "passed": listing_data['rules_checks'][9]
+            },
+            "videosQty": {
+                "metric": "videosQty",
+                "metricTitle": "Includes video",
+                "metricTooltip": "Videos can help users learn more about the product and increase conversions",
+                "passed": listing_data['rules_checks'][10]
+            },
+            "reviewQty": {
+                "metric": "reviewQty",
+                "metricTitle": "20+ reviews",
+                "metricTooltip": "Increased number of reviews can increase product credibility with shoppers",
+                "passed": listing_data['rules_checks'][11]
+            },
+            "reviewRating": {
+                "metric": "reviewRating",
+                "metricTitle": "4+ average star ratings",
+                "metricTooltip": "Increased number of positive, 4+ star ratings can increase product credibility with shoppers",
+                "passed": listing_data['rules_checks'][12]
             }
         },
-        'graph_data': graph_data
+        "totalScore": product_dict.get("listing_quality_score","0"),
     }
-
-    return JsonResponse(response_data, safe=False)
+    return scoreData
 
 
 def productsTrafficandConversions(request):
     product_id = request.GET.get('product_id')
-    # Get date ranges
-    today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
-
-    yesterday = today - timedelta(days=1)
-    previous_day = yesterday - timedelta(days=1)
-    seven_days_ago = today - timedelta(days=7)
-    thirty_days_ago = today - timedelta(days=30)
-    
-    # Helper function to calculate percentage change
-    def get_change(current, previous):
-        if previous == 0:
-            return "∞" if current > 0 else "-"
-        change = ((current - previous) / previous) * 100
-        return f"{change:.0f}%"
-
-    print("111111111111")
-    # 1. Get summary data (yesterday, previous day, last 7 days)
-    # Assuming you have Order and OrderItem models
-    yesterday_data = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=yesterday,
-        order__order_date__lt=today
-    ).aggregate(
-        units=Sum('quantity'),
-        revenue=Sum('price')
-    )
-    
-    previous_day_data = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=previous_day,
-        order__order_date__lt=yesterday
-    ).aggregate(
-        units=Sum('quantity'),
-        revenue=Sum('price')
-    )
-    
-    last_7_days_data = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=seven_days_ago,
-        order__order_date__lt=today
-    ).aggregate(
-        units=Sum('quantity'),
-        revenue=Sum('price')
-    )
-    
-    # 2. Get 30-day graph data
-    graph_data = []
-    date_dict = defaultdict(lambda: {'units': 0, 'revenue': 0.0})
-    
-    # Query all order items in the last 30 days
-    order_items = OrderItems.objects.filter(
-        product_id=product_id,
-        order__order_date__gte=thirty_days_ago,
-        order__order_date__lt=today
-    ).values('order__order_date__date', 'quantity', 'price')
-    
-    # Aggregate data by day
-    for item in order_items:
-        date = item['order__order_date__date']
-        date_dict[date]['units'] += item['quantity']
-        date_dict[date]['revenue'] += item['price'] * item['quantity']
-    
-    # Convert to sorted list of dates
-    for day in (today - timedelta(days=n) for n in range(30)):
-        day_date = day.date()
-        graph_data.append({
-            'date': day_date.strftime('%b %d, %Y'),
-            'units': date_dict.get(day_date, {}).get('units', 0),
-            'revenue': round(date_dict.get(day_date, {}).get('revenue', 0.0), 2)
-        })
-    
-    # Prepare response
-    response_data = {
-        'summary': {
-            'date_range': f"{thirty_days_ago.strftime('%b %d, %Y')} – {today.strftime('%b %d, %Y')}",
-            'yesterday': {
-                'units': yesterday_data.get('units', 0),
-                'revenue': round(yesterday_data.get('revenue', 0.0), 2),
-                'change': get_change(
-                    yesterday_data.get('revenue', 0.0),
-                    previous_day_data.get('revenue', 0.0)
-                )
-            },
-            'previous_day': {
-                'units': previous_day_data.get('units', 0),
-                'revenue': round(previous_day_data.get('revenue', 0.0), 2),
-                'change': '-'
-            },
-            'last_7_days': {
-                'units': last_7_days_data.get('units', 0),
-                'revenue': round(last_7_days_data.get('revenue', 0.0), 2),
-                'change': get_change(
-                    last_7_days_data.get('revenue', 0.0),
-                    # Compare with previous 7-day period
-                    OrderItems.objects.filter(
-                        product_id=product_id,
-                        order__order_date__gte=thirty_days_ago,
-                        order__order_date__lt=seven_days_ago
-                    ).aggregate(revenue=Sum('price')).get('revenue', 0.0)
-                )
-            }
-        },
-        'graph_data': graph_data
-    }
-
+    response_data ={}
     return JsonResponse(response_data, safe=False)
 
 
