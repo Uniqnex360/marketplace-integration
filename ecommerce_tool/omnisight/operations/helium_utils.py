@@ -386,7 +386,7 @@ def getdaywiseproductssold(start_date, end_date,product_id):
                 "_id": 0,
                 "date": "$_id",
                 "total_quantity": 1,
-                "total_price": 1
+                "total_price": {"$round": ["$total_price", 2]}
             }
         }
     ]

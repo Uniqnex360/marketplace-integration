@@ -4104,7 +4104,8 @@ def InsightsDashboardView(request):
         return alerts
 
     Refund_obj = Refund.objects()
-    refunded_product_ids = list(set([i.product_id.id for i in Refund_obj]))
+    # refunded_product_ids = list(set([i.product_id.id for i in Refund_obj]))
+    refunded_product_ids = list(set([i.id for i in all_products][:2]))
     for product_id in refunded_product_ids:
         product = Product.objects(id=product_id).first()
         if not product:
@@ -4144,22 +4145,24 @@ def InsightsDashboardView(request):
         # total_orders = 8
         if total_orders > 0:
             refund_rate = (refund_count / total_orders) * 100
-            if refund_rate > 6:
-                refund_alerts.append({
-                    "product_id": str(product.id),
-                    "title": product.product_title,
-                    "refund_rate": round(refund_rate, 2),
-                    "message": f"{product.product_title} has exceeded a 6% refund rate. Refund rates are soaring, impacting your profits. Review, analyze, and revise now."
-                })
+        else:
+            refund_rate = 0 
+        if refund_rate > 6:
+            refund_alerts.append({
+                "product_id": str(product.id),
+                "title": product.product_title,
+                "refund_rate": round(refund_rate, 2),
+                "message": f"{product.product_title} has exceeded a 6% refund rate. Refund rates are soaring, impacting your profits. Review, analyze, and revise now."
+            })
 
-            # **New alert for Product Performance if refund rate has decreased by 6% or more**
-            if refund_rate <= 6:
-                product_performance_alerts.append({
-                    "product_id": str(product.id),
-                    "title": product.product_title,
-                    "refund_rate": round(refund_rate, 2),
-                    "message": f"Refund rates for {product.product_title} have decreased by an impressive 6% or more. Your dedication is driving results, it’s time to take a closer look at your strategy."
-                })
+        # **New alert for Product Performance if refund rate has decreased by 6% or more**
+        if refund_rate <= 6:
+            product_performance_alerts.append({
+                "product_id": str(product.id),
+                "title": product.product_title,
+                "refund_rate": round(refund_rate, 2),
+                "message": f"Refund rates for {product.product_title} have decreased by an impressive 6% or more. Your dedication is driving results, it’s time to take a closer look at your strategy."
+            })
 
     # Amazon Fee Analysis
     today = datetime.utcnow()
@@ -4490,6 +4493,7 @@ def productsListingQualityScore(request):
     product_doc = DatabaseModel.get_document(Product.objects,{"id" : ObjectId(product_id)})
     product_dict = product_doc.to_mongo().to_dict()
     listing_data = calculate_listing_score(product_dict)
+    DatabaseModel.update_documents(Product.objects,{"id" : ObjectId(product_id)},{"listing_quality_score" : listing_data['final_score']})
     scoreData = {
         "asin": product_dict.get("product_id",""),
         "imageUrl": product_dict.get("image_url",""),
@@ -4575,7 +4579,7 @@ def productsListingQualityScore(request):
                 "passed": listing_data['rules_checks'][12]
             }
         },
-        "totalScore": product_dict.get("listing_quality_score","0"),
+        "totalScore": listing_data['final_score']
     }
     return scoreData
 
@@ -4593,16 +4597,20 @@ def productsTrafficandConversions(request):
 def getSKUlist(request):
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')
+    brand_id = request.GET.get('brand_id')
     match =dict()
     pipeline = []
 
     if search_query != None and search_query != "":
         search_query = search_query.strip() 
-        match["$sku"] = {"$regex": search_query, "$options": "i"}
+        match["sku"] = {"$regex": search_query, "$options": "i"}
 
     
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
+
+    if brand_id != None and brand_id != "" and brand_id != "all" and brand_id != "custom":
+        match['brand_id'] = ObjectId(brand_id)
     if match != {}:
         pipeline.append({"$match": match})
 
@@ -4625,18 +4633,20 @@ def getSKUlist(request):
 
 def getproductIdlist(request):
     marketplace_id = request.GET.get('marketplace_id')
-
+    brand_id = request.GET.get('brand_id')
     search_query = request.GET.get('search_query')
     match =dict()
     pipeline = []
 
     if search_query != None and search_query != "":
         search_query = search_query.strip() 
-        match["$product_id"] = {"$regex": search_query, "$options": "i"}
+        match["product_id"] = {"$regex": search_query, "$options": "i"}
 
     
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
+    if brand_id != None and brand_id != "" and brand_id != "all" and brand_id != "custom":
+        match['brand_id'] = ObjectId(brand_id)
     if match != {}:
         pipeline.append({"$match": match})
 
@@ -4666,7 +4676,7 @@ def getBrandListforfilter(request):
 
     if search_query != None and search_query != "":
         search_query = search_query.strip() 
-        match["$name"] = {"$regex": search_query, "$options": "i"}
+        match["name"] = {"$regex": search_query, "$options": "i"}
 
     
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
