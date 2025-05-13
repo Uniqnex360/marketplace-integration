@@ -69,7 +69,6 @@ def getProductList(request):
     if match != {}:
         match_pipeline = {
             "$match" : match}
-        print(match_pipeline)
         pipeline.append(match_pipeline)
         count_pipeline.append(match_pipeline)
     pipeline.extend([

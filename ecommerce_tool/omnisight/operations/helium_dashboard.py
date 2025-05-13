@@ -4490,6 +4490,7 @@ def productsListingQualityScore(request):
     product_doc = DatabaseModel.get_document(Product.objects,{"id" : ObjectId(product_id)})
     product_dict = product_doc.to_mongo().to_dict()
     listing_data = calculate_listing_score(product_dict)
+    DatabaseModel.update_documents(Product.objects,{"id" : ObjectId(product_id)},{"listing_quality_score" : listing_data['final_score']})
     scoreData = {
         "asin": product_dict.get("product_id",""),
         "imageUrl": product_dict.get("image_url",""),
@@ -4575,7 +4576,7 @@ def productsListingQualityScore(request):
                 "passed": listing_data['rules_checks'][12]
             }
         },
-        "totalScore": product_dict.get("listing_quality_score","0"),
+        "totalScore": listing_data['final_score']
     }
     return scoreData
 
@@ -4593,16 +4594,20 @@ def productsTrafficandConversions(request):
 def getSKUlist(request):
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')
+    brand_id = request.GET.get('brand_id')
     match =dict()
     pipeline = []
 
     if search_query != None and search_query != "":
         search_query = search_query.strip() 
-        match["$sku"] = {"$regex": search_query, "$options": "i"}
+        match["sku"] = {"$regex": search_query, "$options": "i"}
 
     
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
+
+    if brand_id != None and brand_id != "" and brand_id != "all" and brand_id != "custom":
+        match['brand_id'] = ObjectId(brand_id)
     if match != {}:
         pipeline.append({"$match": match})
 
@@ -4625,18 +4630,20 @@ def getSKUlist(request):
 
 def getproductIdlist(request):
     marketplace_id = request.GET.get('marketplace_id')
-
+    brand_id = request.GET.get('brand_id')
     search_query = request.GET.get('search_query')
     match =dict()
     pipeline = []
 
     if search_query != None and search_query != "":
         search_query = search_query.strip() 
-        match["$product_id"] = {"$regex": search_query, "$options": "i"}
+        match["product_id"] = {"$regex": search_query, "$options": "i"}
 
     
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
+    if brand_id != None and brand_id != "" and brand_id != "all" and brand_id != "custom":
+        match['brand_id'] = ObjectId(brand_id)
     if match != {}:
         pipeline.append({"$match": match})
 
@@ -4666,7 +4673,7 @@ def getBrandListforfilter(request):
 
     if search_query != None and search_query != "":
         search_query = search_query.strip() 
-        match["$name"] = {"$regex": search_query, "$options": "i"}
+        match["name"] = {"$regex": search_query, "$options": "i"}
 
     
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":

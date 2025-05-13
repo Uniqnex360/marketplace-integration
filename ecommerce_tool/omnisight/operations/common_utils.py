@@ -1,14 +1,18 @@
 import re
 import threading
+import emoji
+
 
 
 def calculate_listing_score(product):
     total_rules = 13
     score_per_rule = 10 / total_rules
     passed_rules = 0
-
     def check_title_strange_symbols(p):
-        return not bool(re.search(r'[^\w\s]', p.get("product_title", "")))
+        # Check if the product title contains any emoji
+        title = p.get("product_title", "")
+        contains_emoji = any(char in emoji.EMOJI_DATA for char in title)
+        return not contains_emoji
 
     def check_title_length(p):
         return len(p.get("product_title", "")) >= 150

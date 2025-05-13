@@ -2,7 +2,7 @@ from mongoengine import Document, StringField, FloatField, IntField, BooleanFiel
 from mongoengine.errors import ValidationError
 from datetime import datetime
 import re
-from ecommerce_tool.crud import DatabaseModel
+# from ecommerce_tool.crud import DatabaseModel
 
 
 
@@ -121,6 +121,7 @@ class Product(Document):
     listing_quality_score = FloatField(default=0.0)  # Score based on listing quality
     product_url = StringField()  # URL to the product page
     videos = ListField(StringField())  # List of video URLs
+    new_product = BooleanField(default=False)  # Flag for new products
 
 class ignore_api_functions(Document):
     name = StringField()
@@ -448,9 +449,9 @@ class pageview_session_count(Document):
 #     print("Processing order:", i)
 #     i += 1
 #     order_dict.pop('_id', None)  # Remove the original ID to create a new document
-#     random_time = (datetime.now() - timedelta(days=1)).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59), microsecond=0)
+#     # random_time = (datetime.now() - timedelta(days=1)).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59), microsecond=0)
 
-#     # random_time = (datetime.now()).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59), microsecond=0)
+#     random_time = (datetime.now()).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59), microsecond=0)
 
 #     order_dict['order_date'] = random_time  # Set order_date to a random time today
 
