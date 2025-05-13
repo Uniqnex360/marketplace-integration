@@ -4104,7 +4104,8 @@ def InsightsDashboardView(request):
         return alerts
 
     Refund_obj = Refund.objects()
-    refunded_product_ids = list(set([i.product_id.id for i in Refund_obj]))
+    # refunded_product_ids = list(set([i.product_id.id for i in Refund_obj]))
+    refunded_product_ids = list(set([i.id for i in all_products][:2]))
     for product_id in refunded_product_ids:
         product = Product.objects(id=product_id).first()
         if not product:
@@ -4144,22 +4145,24 @@ def InsightsDashboardView(request):
         # total_orders = 8
         if total_orders > 0:
             refund_rate = (refund_count / total_orders) * 100
-            if refund_rate > 6:
-                refund_alerts.append({
-                    "product_id": str(product.id),
-                    "title": product.product_title,
-                    "refund_rate": round(refund_rate, 2),
-                    "message": f"{product.product_title} has exceeded a 6% refund rate. Refund rates are soaring, impacting your profits. Review, analyze, and revise now."
-                })
+        else:
+            refund_rate = 0 
+        if refund_rate > 6:
+            refund_alerts.append({
+                "product_id": str(product.id),
+                "title": product.product_title,
+                "refund_rate": round(refund_rate, 2),
+                "message": f"{product.product_title} has exceeded a 6% refund rate. Refund rates are soaring, impacting your profits. Review, analyze, and revise now."
+            })
 
-            # **New alert for Product Performance if refund rate has decreased by 6% or more**
-            if refund_rate <= 6:
-                product_performance_alerts.append({
-                    "product_id": str(product.id),
-                    "title": product.product_title,
-                    "refund_rate": round(refund_rate, 2),
-                    "message": f"Refund rates for {product.product_title} have decreased by an impressive 6% or more. Your dedication is driving results, it’s time to take a closer look at your strategy."
-                })
+        # **New alert for Product Performance if refund rate has decreased by 6% or more**
+        if refund_rate <= 6:
+            product_performance_alerts.append({
+                "product_id": str(product.id),
+                "title": product.product_title,
+                "refund_rate": round(refund_rate, 2),
+                "message": f"Refund rates for {product.product_title} have decreased by an impressive 6% or more. Your dedication is driving results, it’s time to take a closer look at your strategy."
+            })
 
     # Amazon Fee Analysis
     today = datetime.utcnow()
