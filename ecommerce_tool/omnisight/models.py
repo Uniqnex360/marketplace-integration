@@ -2,6 +2,9 @@ from mongoengine import Document, StringField, FloatField, IntField, BooleanFiel
 from mongoengine.errors import ValidationError
 from datetime import datetime
 import re
+import random
+from datetime import datetime, timedelta
+from bson import ObjectId
 # from ecommerce_tool.crud import DatabaseModel
 
 
@@ -434,6 +437,30 @@ class pageview_session_count(Document):
     date =  DateTimeField(default=datetime.now())
     page_views = IntField(default=0)
     session_count = IntField(default=0)
+
+
+
+# # Generate random data for the last 7 days for a specific product
+
+# # Replace with the actual product ID
+# product_id = ObjectId("67cecfa71bd94e0a032dc0ce")
+
+# # Generate data for the last 7 days
+# for i in range(7):
+#     random_date = (datetime.now() - timedelta(days=i)).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59))
+#     page_views = random.randint(100, 1000)
+#     session_count = random.randint(50, 500)
+
+#     # Create a new document in the pageview_session_count collection
+#     pageview_entry = pageview_session_count(
+#         product_id=product_id,
+#         date=random_date,
+#         page_views=page_views,
+#         session_count=session_count
+#     )
+#     pageview_entry.save()
+
+# print("Random data for the last 7 days has been added for the specified product.")
 
 
 
