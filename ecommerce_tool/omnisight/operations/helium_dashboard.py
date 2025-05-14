@@ -19,7 +19,7 @@ from bson import ObjectId
 from calendar import monthrange
 from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
 from django.db.models import Sum, Q
-from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold
+from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount
 from ecommerce_tool.crud import DatabaseModel
 from omnisight.operations.common_utils import calculate_listing_score
 
@@ -4331,7 +4331,6 @@ def productsDetailsPageSummary(request):
 
     
 
-from django.utils import timezone
 
 def productsSalesOverview(request):
     product_id = request.GET.get('product_id')
@@ -4585,19 +4584,68 @@ def productsListingQualityScore(request):
 
 
 def productsTrafficandConversions(request):
+    data = dict()
+    preset = request.GET.get('preset')
     product_id = request.GET.get('product_id')
-    response_data ={}
-    return JsonResponse(response_data, safe=False)
+   
+    # Calculate date ranges
+    start_date, end_date = get_date_range(preset)
+
+    data['date'] = start_date.strftime("%b %d, %Y") + " - " + end_date.strftime("%b %d, %Y")
+    
+    
+    # Get daily sales data using existing function
+    daily_sales = getdaywiseproductssold(start_date, end_date, product_id)
+    view_and_sales = pageViewsandSessionCount(start_date,end_date,product_id)
+    #UNITS SOLD DATA
+    data['total_units_sold'] = sum(item['total_quantity'] for item in daily_sales)
+    data['average_units_sold'] = 0
+    units_sold_graph = []
+    for item in daily_sales:
+        units_sold_graph.append({
+            "date": item['date'],
+            "units": item['total_quantity'],
+            "average" : 0
+        })
+    data['units_sold_graph'] = units_sold_graph
+
+    #SESSION WISE DATA
+    data['total_sessions'] = sum(item['session_count'] for item in view_and_sales)
+    data['average_sessions'] = 0
+    sessions_graph = []
+    for item in view_and_sales:
+        sessions_graph.append({
+            "date": item['date'],
+            "sessions": item['session_count'],
+            "average" : 0
+        })
+    data['sessions_graph'] = sessions_graph
+    #PAGE VIEWS DATA
+    data['total_page_views'] = sum(item['page_views'] for item in view_and_sales)
+    data['average_page_views'] = 0
+    page_views_graph = []
+    for item in view_and_sales:
+        page_views_graph.append({
+            "date": item['date'],
+            "page_views": item['page_views'],
+            "average" : 0
+        })
+    data['page_views_graph'] = page_views_graph
+    
+    
+    return data
 
 
 
 ##################################-----------------------Dashboard Filter API-----------------------###############################################
 
-
+@csrf_exempt
 def getSKUlist(request):
-    marketplace_id = request.GET.get('marketplace_id')
-    search_query = request.GET.get('search_query')
-    brand_id = request.GET.get('brand_id')
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id')
+    search_query = json_request.get('search_query')
+    brand_id = json_request.get('brand_id')
+    manufacturer_name = json_request.get('manufacturer_name')
     match =dict()
     pipeline = []
 
@@ -4609,8 +4657,13 @@ def getSKUlist(request):
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
 
-    if brand_id != None and brand_id != "" and brand_id != "all" and brand_id != "custom":
-        match['brand_id'] = ObjectId(brand_id)
+    if brand_id != None and brand_id != "" and brand_id != [] and brand_id != "custom":
+        brand_list = [ObjectId(i) for i in brand_id]
+        match['brand_id'] = {"$in":brand_list}
+
+    if manufacturer_name != None and manufacturer_name != "" and manufacturer_name != [] and manufacturer_name != "custom":
+        match['manufacturer_name'] = {"$in":manufacturer_name}
+
     if match != {}:
         pipeline.append({"$match": match})
 
@@ -4630,13 +4683,15 @@ def getSKUlist(request):
     sku_list = list(Product.objects.aggregate(*pipeline))
     return sku_list
 
-
+@csrf_exempt
 def getproductIdlist(request):
-    marketplace_id = request.GET.get('marketplace_id')
-    brand_id = request.GET.get('brand_id')
-    search_query = request.GET.get('search_query')
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id')
+    brand_id = json_request.get('brand_id')
+    search_query = json_request.get('search_query')
     match =dict()
     pipeline = []
+    manufacturer_name = json_request.get('manufacturer_name')
 
     if search_query != None and search_query != "":
         search_query = search_query.strip() 
@@ -4645,8 +4700,13 @@ def getproductIdlist(request):
     
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
-    if brand_id != None and brand_id != "" and brand_id != "all" and brand_id != "custom":
-        match['brand_id'] = ObjectId(brand_id)
+    if brand_id != None and brand_id != "" and brand_id != [] and brand_id != "custom":
+        brand_list = [ObjectId(i) for i in brand_id]
+        match['brand_id'] = {"$in":brand_list}
+
+    if manufacturer_name != None and manufacturer_name != "" and manufacturer_name != [] and manufacturer_name != "custom":
+        match['manufacturer_name'] = {"$in":manufacturer_name}
+        
     if match != {}:
         pipeline.append({"$match": match})
 
@@ -4664,6 +4724,7 @@ def getproductIdlist(request):
             "$sample": {"size": 10}  # Randomly select 10 documents
         })
     asin_list = list(Product.objects.aggregate(*pipeline))
+    print(asin_list)
     return asin_list
 
 
@@ -4709,7 +4770,7 @@ def obtainManufactureNames(request):
 
     if search_query != None and search_query != "":
         search_query = search_query.strip() 
-        match["$manufacturer_name"] = {"$regex": search_query, "$options": "i"}
+        match["manufacturer_name"] = {"$regex": search_query, "$options": "i"}
 
     
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":

@@ -1,4 +1,4 @@
-from omnisight.models import Product, Order, OrderItems, Marketplace, Brand, Category
+from omnisight.models import Product, Order,pageview_session_count
 from bson import ObjectId
 from datetime import datetime,timedelta
 from dateutil.relativedelta import relativedelta
@@ -392,3 +392,35 @@ def getdaywiseproductssold(start_date, end_date,product_id):
     ]
     orders = list(Order.objects.aggregate(*pipeline))
     return orders
+
+
+
+def pageViewsandSessionCount(start_date,end_date,product_id):
+    """
+    Fetches the list of orders based on the provided product ID using a pipeline aggregation.
+
+    Args:
+        productId (str): The ID of the product for which to fetch orders.
+
+    Returns:
+        list: A list of dictionaries containing order details.
+    """
+    pipeline = [
+        {
+            "$match": {
+                "date": {"$gte": start_date, "$lte": end_date},
+                "product_id": ObjectId(product_id)
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "date" : 1,
+                "page_views": 1,
+                "session_count": 1
+            }
+        }
+    ]
+    views_list = list(pageview_session_count.objects.aggregate(*pipeline))
+    print(views_list)
+    return views_list
