@@ -231,6 +231,8 @@ def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product
 def get_previous_periods(current_start, current_end):
     # Calculate the duration of the current period
     period_duration = current_end - current_start
+    if period_duration.days > 1:
+        period_duration += timedelta(days=1)
     
     # Calculate previous periods
     previous_period = {
