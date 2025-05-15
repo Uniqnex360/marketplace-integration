@@ -4333,6 +4333,7 @@ def productsDetailsPageSummary(request):
 
 
 def productsSalesOverview(request):
+    from django.utils import timezone
     product_id = request.GET.get('product_id')
     # Calculate date ranges
     today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -4724,7 +4725,6 @@ def getproductIdlist(request):
             "$sample": {"size": 10}  # Randomly select 10 documents
         })
     asin_list = list(Product.objects.aggregate(*pipeline))
-    print(asin_list)
     return asin_list
 
 
