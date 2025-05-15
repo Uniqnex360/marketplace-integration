@@ -19,7 +19,7 @@ from bson import ObjectId
 from calendar import monthrange
 from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
 from django.db.models import Sum, Q
-from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount
+from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount, getproductIdListBasedonManufacture
 from ecommerce_tool.crud import DatabaseModel
 from omnisight.operations.common_utils import calculate_listing_score
 
@@ -367,10 +367,16 @@ def LatestOrdersTodayAPIView(request):
     match['order_date__gte'] = start_of_day
     match['order_date__lte'] = end_of_day
     match['order_status__in'] = ['Shipped', 'Delivered']
+    if fulfillment_channel:
+        match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
 
-    if product_id != None and product_id != "" and product_id != []:
+    if manufacturer_name != None and manufacturer_name != "" and manufacturer_name != []:
+        ids = getproductIdListBasedonManufacture(manufacturer_name)
+        match["_id"] = {"$in": ids}
+
+    elif product_id != None and product_id != "" and product_id != []:
         product_id = [ObjectId(pid) for pid in product_id]
         ids = getOrdersListBasedonProductId(product_id)
         match["id__in"] = ids
@@ -4588,7 +4594,8 @@ def productsTrafficandConversions(request):
     data = dict()
     preset = request.GET.get('preset')
     product_id = request.GET.get('product_id')
-   
+    product_obj = DatabaseModel.get_document(Product.objects,{"id" : ObjectId(product_id)},['product_id'])
+    data['asin'] = product_obj.product_id
     # Calculate date ranges
     start_date, end_date = get_date_range(preset)
 
