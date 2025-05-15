@@ -439,15 +439,14 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
                       for i in range(24)]
         time_format = "%Y-%m-%d %H:00:00"
     else:
-        # Daily data - only up to current day
+        # Daily data - include up to today
         if preset in ["This Week", "This Month", "This Quarter", "This Year"]:
-            # For current periods, only include days up to today
-            last_day = min(end_date, today + timedelta(days=1))  # Include today
-            days = (last_day - start_date).days
+            # For current periods, include days up to today
+            days = (end_date - start_date).days + 1
         else:
             # For past periods, include all days
             days = (end_date - start_date).days
-            
+          
         time_buckets = [(start_date + timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0) 
                       for i in range(days)]
         time_format = "%Y-%m-%d 00:00:00"
