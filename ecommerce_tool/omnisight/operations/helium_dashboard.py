@@ -347,7 +347,7 @@ def LatestOrdersTodayAPIView(request):
     }
     return data
 
-
+@csrf_exempt
 def LatestOrdersTodayAPIView(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
