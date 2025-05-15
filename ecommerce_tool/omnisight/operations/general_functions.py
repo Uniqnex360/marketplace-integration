@@ -486,7 +486,13 @@ def fetchAllorders(request):
                     sort_by : int(sort_by_value)
                 }
             }
-            pipeline.append(sort)
+        else:
+            sort =  {
+                "$sort" : {
+                    "order_date" : -1
+                }
+            }
+        pipeline.append(sort)
         pipeline.extend([
             {
             "$skip": skip
