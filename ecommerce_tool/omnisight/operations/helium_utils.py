@@ -1,7 +1,9 @@
-from omnisight.models import Product, Order,pageview_session_count
+from omnisight.models import Product, Order,pageview_session_count,OrderItems
 from bson import ObjectId
 from datetime import datetime,timedelta
 from dateutil.relativedelta import relativedelta
+from ecommerce_tool.crud import DatabaseModel
+
 
 
 def getOrdersListBasedonProductId(productIds):
@@ -422,5 +424,236 @@ def pageViewsandSessionCount(start_date,end_date,product_id):
         }
     ]
     views_list = list(pageview_session_count.objects.aggregate(*pipeline))
-    print(views_list)
     return views_list
+
+
+
+def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,product_id=None,manufacturer_name=None,fulfillment_channel=None):
+    now = datetime.utcnow()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Determine time buckets based on preset
+    if preset in ["Today", "Yesterday"]:
+        # Hourly data for 24 hours
+        time_buckets = [(start_date + timedelta(hours=i)).replace(minute=0, second=0, microsecond=0) 
+                      for i in range(24)]
+        time_format = "%Y-%m-%d %H:00:00"
+    else:
+        # Daily data - only up to current day
+        if preset in ["This Week", "This Month", "This Quarter", "This Year"]:
+            # For current periods, only include days up to today
+            last_day = min(end_date, today + timedelta(days=1))  # Include today
+            days = (last_day - start_date).days
+        else:
+            # For past periods, include all days
+            days = (end_date - start_date).days
+            
+        time_buckets = [(start_date + timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0) 
+                      for i in range(days)]
+        time_format = "%Y-%m-%d 00:00:00"
+
+    # Initialize graph data with all time periods
+    graph_data = {}
+    for dt in time_buckets:
+        time_key = dt.strftime(time_format)
+        graph_data[time_key] = {
+            "gross_revenue": 0,
+            "net_profit": 0,
+            "profit_margin": 0,
+            "orders": 0,
+            "units_sold": 0,
+            "refund_amount": 0,
+            "refund_quantity": 0
+        }
+
+    # Get all orders grouped by time bucket
+    orders_by_bucket = {}
+    match = dict()
+    match['order_status__in'] = ['Shipped', 'Delivered']
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+
+    if product_id != None and product_id != "" and product_id != []:
+        product_id = [ObjectId(pid) for pid in product_id]
+        ids = getOrdersListBasedonProductId(product_id)
+        match["id__in"] = ids
+
+    elif brand_id != None and brand_id != "" and brand_id != []:
+        brand_id = [ObjectId(bid) for bid in brand_id]
+        ids = getproductIdListBasedonbrand(brand_id)
+        match["id__in"] = ids
+    for dt in time_buckets:
+        bucket_start = dt
+        if preset in ["Today", "Yesterday"]:
+            bucket_end = dt + timedelta(hours=1)
+        else:
+            bucket_end = dt + timedelta(days=1)
+        # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
+        
+        match['order_date__gte'] = bucket_start
+        match['order_date__lte'] = bucket_end
+
+        orders = DatabaseModel.list_documents(Order.objects,match)
+        orders_by_bucket[dt.strftime(time_format)] = list(orders)
+
+    # Process each time bucket
+    for time_key in graph_data:
+        bucket_orders = orders_by_bucket.get(time_key, [])
+        gross_revenue = 0
+        total_cogs = 0
+        refund_amount = 0
+        refund_quantity = 0
+        total_units = 0
+        other_price = 0
+
+        bucket_start = datetime.strptime(time_key, "%Y-%m-%d %H:00:00")
+        if preset in ["Today", "Yesterday"]:
+            bucket_end = bucket_start.replace(minute=59, second=59)
+        else:
+            bucket_end = bucket_start.replace(hour=23, minute=59, second=59)
+        # Calculate refunds first (same as your total calculation)
+        refund_ins = refundOrder(bucket_start, bucket_end,marketplace_id,brand_id,product_id)
+        if refund_ins:
+            for ins in refund_ins:
+                if ins['order_date'] >= bucket_start and ins['order_date'] < bucket_end:
+                    refund_amount += ins['order_total']
+                    refund_quantity += len(ins['order_items'])
+
+        # Process each order in the bucket
+        for order in bucket_orders:
+            gross_revenue += order.order_total
+            temp_other_price = 0
+            tax_price = 0
+            
+            for item in order.order_items:
+                # Get product and COGS (same as your total calculation)
+                pipeline = [
+                    {
+                        "$match": {
+                            "_id": item.id
+                        }
+                    },
+                    {
+                        "$lookup": {
+                            "from": "product",
+                            "localField": "ProductDetails.product_id",
+                            "foreignField": "_id",
+                            "as": "product_ins"
+                        }
+                    },
+                    {
+                        "$unwind": {
+                            "path": "$product_ins",
+                            "preserveNullAndEmptyArrays": True
+                        }
+                    },
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "price": "$Pricing.ItemPrice.Amount",
+                            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                            "tax_price": "$Pricing.ItemTax.Amount",
+                        }
+                    }
+                ]
+                result = list(OrderItems.objects.aggregate(*pipeline))
+                if result:
+                    temp_other_price += result[0]['price']
+                    total_cogs += result[0]['cogs']
+                    total_units += 1
+                    tax_price += result[0]['tax_price']
+            
+            other_price += order.order_total - temp_other_price - tax_price
+
+        # Calculate net profit and margin
+        net_profit = gross_revenue - (other_price + total_cogs)
+        profit_margin = round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0
+
+        # Update graph data for this time bucket
+        graph_data[time_key] = {
+            "gross_revenue": round(gross_revenue, 2),
+            "net_profit": round(net_profit, 2),
+            "profit_margin": profit_margin,
+            "orders": len(bucket_orders),
+            "units_sold": total_units,
+            "refund_amount": round(refund_amount, 2),
+            "refund_quantity": refund_quantity,
+            "date" : time_key
+        }
+
+    return graph_data
+
+
+def totalRevenueCalculation(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacturer_name=None,fulfillment_channel=None):
+    total = dict()
+    gross_revenue = 0
+    total_cogs = 0
+    refund = 0
+    net_profit = 0
+    total_units = 0
+    total_orders = 0
+
+    result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+    refund_ins = refundOrder(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+    refund_quantity_ins = 0
+    if refund_ins != []:
+        for ins in refund_ins:
+            refund += ins['order_total']
+            refund_quantity_ins += len(ins['order_items'])
+    total_orders = len(result)
+    if result != []:
+        for ins in result:
+            tax_price = 0
+            gross_revenue += ins['order_total']
+            other_price = 0
+            temp_other_price = 0 
+            for j in ins['order_items']:                  
+                pipeline = [
+                    {
+                        "$match": {
+                            "_id": j
+                        }
+                    },
+                    {
+                        "$lookup": {
+                            "from": "product",
+                            "localField": "ProductDetails.product_id",
+                            "foreignField": "_id",
+                            "as": "product_ins"
+                        }
+                    },
+                    {
+                    "$unwind": {
+                        "path": "$product_ins",
+                        "preserveNullAndEmptyArrays": True
+                    }
+                    },
+                    {
+                        "$project": {
+                            "_id" : 0,
+                            "price": "$Pricing.ItemPrice.Amount",
+                            "cogs": {"$ifNull":["$product_ins.cogs",0.0]},
+                            "tax_price": "$Pricing.ItemTax.Amount",
+                        }
+                    }
+                ]
+                result = list(OrderItems.objects.aggregate(*pipeline))
+                tax_price += result[0]['tax_price']
+                temp_other_price += result[0]['price']
+                total_cogs += result[0]['cogs']
+                total_units += 1
+        other_price += ins['order_total'] - temp_other_price - tax_price
+
+        net_profit = gross_revenue - (other_price + total_cogs)
+
+    # Total values
+    total = {
+        "gross_revenue": round(gross_revenue, 2),
+        "net_profit": round(net_profit, 2),
+        "profit_margin": round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0,
+        "orders": round(total_orders, 2),
+        "units_sold": round(total_units, 2),
+        "refund_amount": round(refund, 2),
+        "refund_quantity": refund_quantity_ins
+    }
+    return total
