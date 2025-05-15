@@ -237,22 +237,22 @@ def get_previous_periods(current_start, current_end):
     # Calculate previous periods
     previous_period = {
         'start': (current_start - period_duration).strftime('%b %d, %Y'),
-        'end': (current_end - period_duration - timedelta(days=1)).strftime('%b %d, %Y')
+        'end': (current_start - timedelta(days=1)).strftime('%b %d, %Y')
     }
     
     previous_week = {
         'start': (current_start - timedelta(weeks=1)).strftime('%b %d, %Y'),
-        'end': (current_end - timedelta(weeks=1) - timedelta(days=1)).strftime('%b %d, %Y')
+        'end': (current_end - timedelta(weeks=1)).strftime('%b %d, %Y')
     }
     
     previous_month = {
         'start': (current_start - relativedelta(months=1)).strftime('%b %d, %Y'),
-        'end': (current_end - relativedelta(months=1) - timedelta(days=1)).strftime('%b %d, %Y')
+        'end': (current_end - relativedelta(months=1)).strftime('%b %d, %Y')
     }
     
     previous_year = {
         'start': (current_start - relativedelta(years=1)).strftime('%b %d, %Y'),
-        'end': (current_end - relativedelta(years=1) - timedelta(days=1)).strftime('%b %d, %Y')
+        'end': (current_end - relativedelta(years=1)).strftime('%b %d, %Y')
     }
     
     response_data = {
@@ -262,7 +262,7 @@ def get_previous_periods(current_start, current_end):
         'previous_year': previous_year,
         'current_period': {
             'start': current_start.strftime('%b %d, %Y'),
-            'end': (current_end - timedelta(days=1)).strftime('%b %d, %Y')
+            'end': current_end.strftime('%b %d, %Y')
         }
     }
     
