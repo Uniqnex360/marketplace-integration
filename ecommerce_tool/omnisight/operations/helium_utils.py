@@ -265,7 +265,7 @@ def get_previous_periods(current_start, current_end):
             'end': current_end.strftime('%b %d, %Y')
         }
     }
-    
+
     return response_data
 
 
@@ -441,13 +441,15 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
                       for i in range(24)]
         time_format = "%Y-%m-%d %H:00:00"
     else:
-        # Daily data - include up to today
-        if preset in ["This Week", "This Month", "This Quarter", "This Year"]:
-            # For current periods, include days up to today
-            days = (end_date - start_date).days + 1
-        else:
-            # For past periods, include all days
-            days = (end_date - start_date).days
+        # # Daily data - include up to today
+        # if preset in ["This Week", "This Month", "This Quarter", "This Year"]:
+        #     # For current periods, include days up to today
+        #     days = (end_date - start_date).days + 1
+        # else:
+        #     # For past periods, include all days
+        #     days = (end_date - start_date).days +1 
+        days = (end_date - start_date).days +1
+     
           
         time_buckets = [(start_date + timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0) 
                       for i in range(days)]
