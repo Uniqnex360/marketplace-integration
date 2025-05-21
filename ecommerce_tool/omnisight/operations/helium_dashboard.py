@@ -774,54 +774,22 @@ def get_products_with_pagination(request):
                             "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
                             "title": {"$ifNull": ["$product_title", "N/A"]},
                             "marketplace": {"$ifNull": ["$marketplace_ins.name", "N/A"]},
-
-
-                            "inventoryStatus": {"$ifNull": ["$inventoryStatus", "N/A"]},
-                            "fulfillmentChannel": {"$ifNull": ["$fulfillmentChannel", "N/A"]},
-                            "price": {"$ifNull": ["$price", "N/A"]},
+                            "fulfillmentChannel": {"$ifNull": ["$fullfillment_by_channel", "N/A"]},
+                            "price": {"$ifNull": ["$price", "0.0"]},
                             "stock" : {"$ifNull": ["$quantity", 0]},
-                            "priceDraft": {"$ifNull": ["$priceDraft", "N/A"]},
-                            "totalRatingsCount": {"$ifNull": ["$totalRatingsCount", "N/A"]},
-                            "reviewRating": {"$ifNull": ["$reviewRating", "N/A"]},
                             "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
-                            "parentAsin": {"$ifNull": ["$parentAsin", "N/A"]},
-                            "buyBoxWinnerId": {"$ifNull": ["$buyBoxWinnerId", "N/A"]},
-                            "newInsightsCount": {"$ifNull": ["$newInsightsCount", "N/A"]},
-                            "newInsightsGrouped": {"$ifNull": ["$newInsightsGrouped", "N/A"]},
+                            "cogs": {"$round" : [{"$ifNull": ["$cogs", 0]},2]},
                             "category": {"$ifNull": ["$category", "N/A"]},
-                            "categoryTitle": {"$ifNull": ["$categoryTitle", "N/A"]},
-                            "amazonLink": {"$ifNull": ["$amazonLink", "N/A"]},
-                            "bsr": {"$ifNull": ["$bsr", "N/A"]},
-                            "subcategoriesBsr": {"$ifNull": ["$subcategoriesBsr", "N/A"]},
+                            "salesForToday": {"$ifNull": ["$salesForToday", 0]},
                             "salesForToday": {"$ifNull": ["$salesForToday", 0]},
                             "unitsSoldForToday": {"$ifNull": ["$unitsSoldForToday", 0]},
                             "unitsSoldForPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
                             "refunds": {"$ifNull": ["$refunds", 0]},
                             "refundsAmount": {"$ifNull": ["$refundsAmount", 0]},
-                            "refundRate": {"$ifNull": ["$refundRate", "0%"]},
-                            "pageViews": {"$ifNull": ["$page_views", 0]},
-                            "pageViewsPercentage": {"$ifNull": ["$pageViewsPercentage", "0%"]},
-                            "conversionRate": {"$ifNull": ["$conversionRate", "N/A"]},
                             "grossProfit": {"$ifNull": ["$grossProfit", 0]},
                             "netProfit": {"$ifNull": ["$netProfit", 0]},
                             "margin": {"$ifNull": ["$margin", "0%"]},
-                            "totalAmazonFees": {"$ifNull": ["$totalAmazonFees", "N/A"]},
-                            "roi": {"$ifNull": ["$roi", "0%"]},
-                            "cogs": {"$round" : [{"$ifNull": ["$cogs", 0]},2]},
-                            "fbaPerOrderFulfillmentFee": {"$ifNull": ["$fbaPerOrderFulfillmentFee", "N/A"]},
-                            "fbaPerUnitFulfillmentFee": {"$ifNull": ["$fbaPerUnitFulfillmentFee", "N/A"]},
-                            "fbaWeightBasedFee": {"$ifNull": ["$fbaWeightBasedFee", "N/A"]},
-                            "variableClosingFee": {"$ifNull": ["$variableClosingFee", "N/A"]},
-                            "commission": {"$ifNull": ["$commission", "N/A"]},
-                            "fixedClosingFee": {"$ifNull": ["$fixedClosingFee", "N/A"]},
-                            "salesTaxCollectionFee": {"$ifNull": ["$salesTaxCollectionFee", "N/A"]},
-                            "shippingHbFee": {"$ifNull": ["$shippingHbFee", "N/A"]},
-                            "isFavorite": {"$ifNull": ["$isFavorite", "N/A"]},
-                            "trafficSessions": {"$ifNull": ["$trafficSessions", "N/A"]},
-                            "trafficSessionPercentage": {"$ifNull": ["$trafficSessionPercentage", "0%"]},
-                            # "deltas": {"$ifNull": ["$deltas", None]},
-                            "competitorsProducts": {"$ifNull": ["$competitorsProducts", 0]},
-                            "tags": {"$ifNull": ["$tags", []]},
+                            "totalchannelFees": {"$ifNull": ["$totalAmazonFees", "N/A"]},
                         }
                     }
                 ]
@@ -4251,39 +4219,17 @@ def productsDetailsPageSummary(request):
         return item_result
     return {}
 
-def format_date_label(preset, start_date, end_date):
-    if preset == "Today":
-        return start_date.strftime("%B %d, %Y")
-    elif preset == "Yesterday":
-        return (start_date).strftime("%B %d, %Y")
-    elif preset in ["Last 7 Days", "Last 30 Days"]:
-        return f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
-    else:
-        return f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
+    
 
 
 def productsSalesOverview(request):
     from django.utils import timezone
     product_id = request.GET.get('product_id')
-    preset = request.GET.get('preset')
-
     # Calculate date ranges
-    # today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    # end_date = today - timedelta(days=1)  # Yesterday (end of period)
-    # start_date = end_date - timedelta(days=29)  # 30 days ago (including yesterday)
-    start_date_str = request.GET.get('start_date')
-    end_date_str = request.GET.get('end_date')
-
-    # Define if we need hourly.
-    is_hourly = preset in ["Today", "Yesterday"]
-
-    # Parse dates
-    if start_date_str and end_date_str:
-        start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
-        end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
-    else:
-        start_date, end_date = get_date_range(preset)
-
+    today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    end_date = today - timedelta(days=1)  # Yesterday (end of period)
+    start_date = end_date - timedelta(days=29)  # 30 days ago (including yesterday)
+    
     # Get daily sales data using existing function
     daily_sales = getdaywiseproductssold(start_date, end_date, product_id)
     
@@ -4292,45 +4238,23 @@ def productsSalesOverview(request):
     
     # Generate complete date range
     complete_data = []
-
-    if is_hourly:
-        base_date = start_date.strftime('%Y-%m-%d')
-        for hour in range(24):
-            time_str = f"{base_date} {hour:02d}:00:00"
-            complete_data.append(sales_dict.get(time_str, {
-                "date": time_str,
-                "total_quantity": 0,
-                "total_price": 0.0
-            }))
-    else:
-        current_date = start_date
-        while current_date <= end_date:
-            date_str = current_date.strftime('%Y-%m-%d')
-            complete_data.append(sales_dict.get(date_str, {
-                "date": date_str,
-                "total_quantity": 0,
-                "total_price": 0.0
-            }))
-            current_date += timedelta(days=1)
-
-    # current_date = start_date
-    # while current_date <= end_date:
-    #     date_str = current_date.strftime('%Y-%m-%d')
-    #     if date_str in sales_dict:
-    #         complete_data.append(sales_dict[date_str])
-    #     else:
-    #         complete_data.append({
-    #             'date': date_str,
-    #             'total_quantity': 0,
-    #             'total_price': 0.0
-    #         })
-    #     current_date += timedelta(days=1)
+    current_date = start_date
+    while current_date <= end_date:
+        date_str = current_date.strftime('%Y-%m-%d')
+        if date_str in sales_dict:
+            complete_data.append(sales_dict[date_str])
+        else:
+            complete_data.append({
+                'date': date_str,
+                'total_quantity': 0,
+                'total_price': 0.0
+            })
+        current_date += timedelta(days=1)
     
     # Initialize results
     results = {
         "units": [],
-        "gross": [],
-        "graph": complete_data
+        "gross": []
     }
     
     # 1. Yesterday vs Previous Day
@@ -4365,55 +4289,17 @@ def productsSalesOverview(request):
     
     # 2. Last day with sales vs its previous day
     # Find last day with sales
-    # last_sales_day = None
-    # for day in (end_date - timedelta(days=n) for n in range(30)):
-    #     day_str = day.strftime("%Y-%m-%d")
-    #     if day_str in sales_dict and (sales_dict[day_str].get("total_quantity", 0) > 0 or 
-    #                                     sales_dict[day_str].get("total_price", 0) > 0):
-    #         last_sales_day = day
-    #         break
-    
-    # if last_sales_day:
-    #     prev_sales_day = last_sales_day - timedelta(days=1)
-        
-    #     results["units"].append({
-    #         "current": {
-    #             "dateFrom": last_sales_day.strftime("%Y-%m-%d 00:00:00"),
-    #             "dateTo": last_sales_day.strftime("%Y-%m-%d 23:59:59"),
-    #             "value": sales_dict.get(last_sales_day.strftime("%Y-%m-%d"), {}).get("total_quantity", 0)
-    #         },
-    #         "previous": {
-    #             "dateFrom": prev_sales_day.strftime("%Y-%m-%d 00:00:00"),
-    #             "dateTo": prev_sales_day.strftime("%Y-%m-%d 23:59:59"),
-    #             "value": sales_dict.get(prev_sales_day.strftime("%Y-%m-%d"), {}).get("total_quantity", 0)
-    #         }
-    #     })
-        
-    #     results["gross"].append({
-    #         "current": {
-    #             "dateFrom": last_sales_day.strftime("%Y-%m-%d 00:00:00"),
-    #             "dateTo": last_sales_day.strftime("%Y-%m-%d 23:59:59"),
-    #             "value": str(sales_dict.get(last_sales_day.strftime("%Y-%m-%d"), {}).get("total_price", 0))
-    #         },
-    #         "previous": {
-    #             "dateFrom": prev_sales_day.strftime("%Y-%m-%d 00:00:00"),
-    #             "dateTo": prev_sales_day.strftime("%Y-%m-%d 23:59:59"),
-    #             "value": str(sales_dict.get(prev_sales_day.strftime("%Y-%m-%d"), {}).get("total_price", 0))
-    #         }
-    #     })
-
-     # 2. Last sales day vs previous
     last_sales_day = None
-    for n in range(30):
-        day = end_date - timedelta(days=n)
-        day_str = day.strftime('%Y-%m-%d')
+    for day in (end_date - timedelta(days=n) for n in range(30)):
+        day_str = day.strftime("%Y-%m-%d")
         if day_str in sales_dict and (sales_dict[day_str].get("total_quantity", 0) > 0 or 
-                                      sales_dict[day_str].get("total_price", 0) > 0):
+                                        sales_dict[day_str].get("total_price", 0) > 0):
             last_sales_day = day
             break
-
+    
     if last_sales_day:
         prev_sales_day = last_sales_day - timedelta(days=1)
+        
         results["units"].append({
             "current": {
                 "dateFrom": last_sales_day.strftime("%Y-%m-%d 00:00:00"),
@@ -4426,7 +4312,7 @@ def productsSalesOverview(request):
                 "value": sales_dict.get(prev_sales_day.strftime("%Y-%m-%d"), {}).get("total_quantity", 0)
             }
         })
-
+        
         results["gross"].append({
             "current": {
                 "dateFrom": last_sales_day.strftime("%Y-%m-%d 00:00:00"),
@@ -4439,10 +4325,10 @@ def productsSalesOverview(request):
                 "value": str(sales_dict.get(prev_sales_day.strftime("%Y-%m-%d"), {}).get("total_price", 0))
             }
         })
-
     
     # 3. Last 7 days vs Previous 7 days
-    last_7days_start = end_date - timedelta(days=6)
+    last_7days_end = end_date
+    last_7days_start = last_7days_end - timedelta(days=6)
     prev_7days_end = last_7days_start - timedelta(days=1)
     prev_7days_start = prev_7days_end - timedelta(days=6)
     
@@ -4457,13 +4343,13 @@ def productsSalesOverview(request):
                 total_price += sales_dict[day_str].get("total_price", 0.0)
         return total_qty, round(total_price, 2)
     
-    current_7days_qty, current_7days_price = calculate_period_total(last_7days_start, end_date)
+    current_7days_qty, current_7days_price = calculate_period_total(last_7days_start, last_7days_end)
     prev_7days_qty, prev_7days_price = calculate_period_total(prev_7days_start, prev_7days_end)
-
+    
     results["units"].append({
         "current": {
             "dateFrom": last_7days_start.strftime("%Y-%m-%d 00:00:00"),
-            "dateTo": end_date.strftime("%Y-%m-%d 23:59:59"),
+            "dateTo": last_7days_end.strftime("%Y-%m-%d 23:59:59"),
             "value": current_7days_qty
         },
         "previous": {
@@ -4476,7 +4362,7 @@ def productsSalesOverview(request):
     results["gross"].append({
         "current": {
             "dateFrom": last_7days_start.strftime("%Y-%m-%d 00:00:00"),
-            "dateTo": end_date.strftime("%Y-%m-%d 23:59:59"),
+            "dateTo": last_7days_end.strftime("%Y-%m-%d 23:59:59"),
             "value": str(current_7days_price)
         },
         "previous": {
@@ -4485,24 +4371,9 @@ def productsSalesOverview(request):
             "value": str(prev_7days_price)
         }
     })
-
-    date_label = format_date_label(preset, start_date, end_date) #Helper
-
-    formatted_response = {
-        "data": {
-            "units": {
-                "date": date_label,
-                "values": results["units"]
-            },
-            "gross": {
-                "date": date_label,
-                "values": results["gross"]
-            },
-            "graph": results["graph"]
-        }
-    }
-
-    return formatted_response
+    results['graph'] = complete_data
+    
+    return results
     
 
 
@@ -4609,18 +4480,9 @@ def productsTrafficandConversions(request):
     product_id = request.GET.get('product_id')
     product_obj = DatabaseModel.get_document(Product.objects,{"id" : ObjectId(product_id)},['product_id'])
     data['asin'] = product_obj.product_id
+    # Calculate date ranges
+    start_date, end_date = get_date_range(preset)
 
-    start_date_str = request.GET.get('start_date')
-    end_date_str = request.GET.get('end_date')
-
-    # Parse dates
-    if start_date_str and end_date_str:
-        start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
-        end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
-    else:
-         # Calculate date ranges
-        start_date, end_date = get_date_range(preset)
-   
     data['date'] = start_date.strftime("%b %d, %Y") + " - " + end_date.strftime("%b %d, %Y")
     
     
@@ -4761,8 +4623,10 @@ def getBrandListforfilter(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')
+    skip = int(request.GET.get('limit',1))
     match =dict()
     pipeline = []
+
 
     if search_query != None and search_query != "":
         search_query = search_query.strip() 
@@ -4781,12 +4645,20 @@ def getBrandListforfilter(request):
                 "name" : 1,
                 
             }
+        },
+        {
+            "$sort" : {
+                "name" : 1
+            }
+        },
+        {
+            "$skip" : skip
+        },
+        {
+            "$limit" : 10
         }
     ])
-    if match =={}:
-        pipeline.append({
-            "$sample": {"size": 10}  # Randomly select 10 documents
-        })
+    
     brand_list = list(Brand.objects.aggregate(*(pipeline)))
     data['brand_list'] = brand_list
     return data

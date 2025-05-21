@@ -5,7 +5,8 @@ import re
 import random
 from datetime import datetime, timedelta
 from bson import ObjectId
-# from ecommerce_tool.crud import DatabaseModel
+import pandas as pd
+from ecommerce_tool.crud import DatabaseModel
 
 
 
@@ -35,6 +36,8 @@ class Brand(Document):
     description = StringField()  # Brand description
     website = StringField()  # Brand website
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
+    marketplace_ids = ListField(ReferenceField(Marketplace),default=[])  # List of Marketplace IDs
+    
 
 
 
@@ -53,13 +56,18 @@ class Product(Document):
     product_description = StringField()
     product_id = StringField()  # Can store ASIN, UPC, GTIN, WPID
     product_id_type = StringField()
-    sku = StringField()
+    
     price = FloatField()
-    currency = StringField()
+    currency = StringField(default="$")
     quantity = IntField(default=0)
     quantity_unit = StringField()
     item_condition = StringField()
     item_note = StringField()  # Additional notes about item condition
+
+    #SKU Details
+    sku = StringField()
+    master_sku = StringField()  # Master SKU for parent-child relationships
+    parent_sku = StringField()  # Parent SKU for child products 
 
     # Platform-Specific Identifiers
     listing_id = StringField()  # Amazon Listing ID
@@ -125,6 +133,30 @@ class Product(Document):
     product_url = StringField()  # URL to the product page
     videos = ListField(StringField())  # List of video URLs
     new_product = BooleanField(default=False)  # Flag for new products
+
+    #AMAZON Details
+    fullfillment_by_channel = BooleanField(default=False)  # Flag for Fulfilled by Amazon
+    channel_fee = FloatField(default=0.0)  # Amazon fees
+    fullfillment_by_channel_fee = FloatField(default=0.0)  # FBA fees
+
+    vendor_funding = FloatField(default=0.0)  # Vendor funding amount
+    vendor_discount = FloatField(default=0.0)  # Vendor discount amount
+
+    marketplace_ids = ListField(ReferenceField(Marketplace),default=[])  # List of Marketplace IDs
+
+    product_cost = FloatField(default=0.0)  # Cost of the product
+    referral_fee = FloatField(default=0.0)  # Referral fee for the product
+    a_shipping_cost = FloatField(default=0.0)  # Amazon shipping cost
+    total_cogs = FloatField(default=0.0)  # Total cost of goods sold
+    product_created_date = DateTimeField(default=datetime.now())  # Date when the product was created
+    producted_last_updated_date = DateTimeField(default=datetime.now())  # Date when the product was last updated
+
+    w_product_cost = FloatField(default=0.0)# Walmart product cost
+    walmart_fee = FloatField(default=0.0)  # Walmart fees
+    w_shiping_cost = FloatField(default=0.0)  # Walmart shipping cost
+    w_total_cogs = FloatField(default=0.0)  # Total cost of goods sold for Walmart
+    pack_size = IntField(default=0)  # Size of the product pack
+
 
 class ignore_api_functions(Document):
     name = StringField()
@@ -278,25 +310,12 @@ class Order(Document):
     is_global_express_enabled = BooleanField()  # True if fast shipping is available for international orders
 
 
+    sales_channel = StringField()  # The channel through which the order was placed
+    order_channel = StringField()  # The channel through which the order was placed
 
-# class customOrder(Document):
-#     product_id = ReferenceField(Product)
-#     product_title = StringField()
-#     sku = StringField()
-#     customer_name = StringField()
-#     to_address = StringField()
-#     quantity = IntField()
-#     unit_price = FloatField()
-#     total_price = FloatField()
-#     taxes = FloatField(default=0.0)
-#     phone_number = StringField()
-#     purchase_order_date = DateTimeField(default=datetime.now())
-#     expected_delivery_date = DateTimeField(default=datetime.now())
-#     supplier_name = StringField()
-#     mark_order_as_shipped = BooleanField(default=False)
-#     mark_order_as_paid = BooleanField(default=False)
-#     tags = ListField(StringField())
-#     notes = StringField()
+
+
+
 
 
 class product_details(EmbeddedDocument):
@@ -439,114 +458,3 @@ class pageview_session_count(Document):
     session_count = IntField(default=0)
 
 
-
-# # Generate random data for the last 7 days for a specific product
-
-# # Replace with the actual product ID
-# product_id = ObjectId("67cecfa71bd94e0a032dc0ce")
-
-# # Generate data for the last 7 days
-# for i in range(7):
-#     random_date = (datetime.now() - timedelta(days=i)).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59))
-#     page_views = random.randint(100, 1000)
-#     session_count = random.randint(50, 500)
-
-#     # Create a new document in the pageview_session_count collection
-#     pageview_entry = pageview_session_count(
-#         product_id=product_id,
-#         date=random_date,
-#         page_views=page_views,
-#         session_count=session_count
-#     )
-#     pageview_entry.save()
-
-# print("Random data for the last 7 days has been added for the specified product.")
-
-
-
-# import random
-# from datetime import datetime,timedelta
-
-# # Fetch 20 random orders
-# random_orders = list(Order.objects.aggregate([{"$sample": {"size": 40}}]))
-# i = 1
-
-# # Duplicate orders with updated order_date
-# for order_dict in random_orders:
-#     print("Processing order:", i)
-#     i += 1
-#     order_dict.pop('_id', None)  # Remove the original ID to create a new document
-#     # random_time = (datetime.now() - timedelta(days=1)).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59), microsecond=0)
-
-#     random_time = (datetime.now()).replace(hour=random.randint(0, 23), minute=random.randint(0, 59), second=random.randint(0, 59), microsecond=0)
-
-#     order_dict['order_date'] = random_time  # Set order_date to a random time today
-
-#     # Ensure payment_method_details is a string
-#     if 'payment_method_details' in order_dict and not isinstance(order_dict['payment_method_details'], str):
-#         order_dict['payment_method_details'] = str(order_dict['payment_method_details'])
-
-#     # Create new order
-#     new_order = Order(**order_dict)
-#     new_order.save()
-
-#     # Duplicate order_items for the new order
-#     new_order_items = []
-#     for order_item in order_dict.get('order_items', []):
-#         order_item = OrderItems.objects.get(id=order_item)  # Fetch the full document using ObjectId
-#         order_item_dict = order_item.to_mongo().to_dict()
-#         order_item_dict.pop('_id', None)  # Remove the original ID to create a new document
-#         # order_item_dict['OrderId'] = new_order.id  # Link the new order ID
-#         new_order_item = OrderItems(**order_item_dict)
-#         new_order_item.save()
-#         new_order_items.append(new_order_item)
-
-#     # Update the new order with the duplicated order_items
-#     new_order.order_items = new_order_items
-#     new_order.save()
-
-# print("20 random orders duplicated with updated order_date set to random times today, along with their order_items.")
-
-
-# Update page_views for all products with a random integer between 500 and 10000
-# def update_page_views(products):
-#     for product in products:
-#         product.page_views = random.randint(500, 10000)
-#         product.save()
-
-# # Split products into chunks of 100
-# products = list(Product.objects)
-# chunk_size = 100
-# chunks = [products[i:i + chunk_size] for i in range(0, len(products), chunk_size)]
-
-# threads = []
-# for i, chunk in enumerate(chunks):
-#     print(f"Starting thread {i+1}")
-#     thread = threading.Thread(target=update_page_views, args=(chunk,))
-#     threads.append(thread)
-#     thread.start()
-
-# # Wait for all threads to complete
-# for thread in threads:
-#     thread.join()
-
-# print("Updated page_views for all products.")
-
-
-
-# # Fetch orders and update order_items
-# def update_order_items_date():
-#     orders = Order.objects()  # Fetch all orders
-#     i=0
-#     for order in orders:
-#         print("Processing order:", i)
-#         i+=1
-#         order_date = order.order_date  # Get the order_date from the order
-#         for order_item in order.order_items:
-#             if order_item.document_created_date != order_date:
-#                 order_item.document_created_date = order_date  # Update the created_date field
-#                 order_item.save()  # Save the updated order item
-
-# # Run the script
-# update_order_items_date()
-# print("Order items' created_date updated successfully.")

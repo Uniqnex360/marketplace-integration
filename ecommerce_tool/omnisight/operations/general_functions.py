@@ -15,6 +15,8 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 from django.http import HttpResponse
+from omnisight.operations.helium_utils import get_date_range
+
 
 
 
@@ -34,7 +36,7 @@ def getMarketplaceList(request):
         if marketplace_ins['name'] == "Amazon":
             marketplace_ins['fulfillment_channel'] = [{'FBA' : "AFN"},{'FBM' : "MFN"}]
         elif marketplace_ins['name'] == "Walmart":
-            marketplace_ins['fulfillment_channel'] = [{'FBW' : ""},{'FBM' : "SellerFulfilled"}]
+            marketplace_ins['fulfillment_channel'] = [{'FBM' : "SellerFulfilled"}]
     return marketplace_list
 
 #---------------------------------------------PRODUCT APIS---------------------------------------------------
@@ -247,7 +249,9 @@ def fetchProductDetails(request):
                 "features" : {"$ifNull" : ["$features", []]},
                 "shelf_path" : {"$ifNull" : ["$shelf_path", ""]},
                 "image_url" : {"$ifNull" : ["$image_url", ""]},
-                "image_urls" : {"$ifNull" : ["$image_urls", []]}
+                "image_urls" : {"$ifNull" : ["$image_urls", []]},
+                "vendor_funding" : {"$ifNull" : ["$vendor_funding", 0.0]},
+                "veddor_discount" : {"$ifNull" : ["$vendor_discount", 0.0]}
             }
         }
     ]
@@ -323,6 +327,11 @@ def getOrdersBasedOnProduct(request):
                 "order_total": 1,
                 "currency": 1,
                 "marketplace_name": 1
+            }
+        },
+        {
+            "$sort" :  {
+                "order_date" : -1
             }
         }
     ]
@@ -992,18 +1001,22 @@ def fetchManualOrderDetails(request):
 
 
 #-------------------------------------DASH BOARD APIS-------------------------------------------------------------------------------------------------
-
 def ordersCountForDashboard(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
     start_date = request.GET.get('start_date')  # Custom start date
     end_date = request.GET.get('end_date')  # Custom end date
+    preset = request.GET.get("preset", "Today")
 
     match_conditions = {}
-    if start_date and end_date:
+    if start_date != None and start_date != "":
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
-        match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
+    else:
+        start_date, end_date = get_date_range(preset)
+
+    match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
+
 
     if marketplace_id == "all":
         # Count for Order collection
@@ -1176,21 +1189,12 @@ def salesAnalytics(request):
     start_date = json_request.get('start_date')  # Optional custom start date
     end_date = json_request.get('end_date')  # Optional custom end date
 
-    # Determine the date range
-    now = datetime.now()
-    if date_range == 'week':
-        start_date = now - timedelta(days=now.weekday())  # Start of the week
-    elif date_range == 'month':
-        start_date = datetime(now.year, now.month, 1)  # Start of the month
-    elif date_range == 'year':
-        start_date = datetime(now.year, 1, 1)  # Start of the year
-    elif start_date and end_date:
+    preset = json_request.get("preset", "Today")        
+    if start_date != None and start_date != "":
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
     else:
-        start_date = None  # No filtering for 'all'
-
-    end_date = end_date or now
+        start_date, end_date = get_date_range(preset)
 
     # Match conditions
     match_conditions = {}
@@ -2476,3 +2480,51 @@ def fetchSalesSummary(request):
         data['margin'] = ((data['total_sales'] - data['total_cogs']) / data['total_sales']) * 100 if data['total_sales'] else 0
 
     return data
+
+
+def getProductVariant(request):
+    variant_list = list()
+    product_id = request.GET.get('product_id')
+    parant_sku = DatabaseModel.get_document(Product.objects,{"id" : product_id},['parent_sku']).parent_sku
+    print("parant_sku",parant_sku)
+    if parant_sku != None:
+        pipeline = [
+            {
+                "$match" : {
+                    "parent_sku" : parant_sku
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "marketplace",
+                    "localField": "marketplace_id",
+                    "foreignField": "_id",
+                    "as": "marketplace_ins"
+                }
+            },
+            {
+                "$unwind": "$marketplace_ins"
+            },
+            {
+                "$project" : {
+                    "_id" : 0,
+                    "id" : {"$toString" : "$_id"},
+                    "product_title" : {"$ifNull" : ["$product_title", ""]},
+                    "product_id" : {"$ifNull" : ["$product_id", ""]},
+                    "product_id_type" : {"$ifNull" : ["$product_id_type", ""]},
+                    "sku" : {"$ifNull" : ["$sku", ""]},
+                    "price" : {"$ifNull" : ["$price", 0]},
+                    "currency" : {"$ifNull" : ["$currency", ""]},
+                    "quantity" : {"$ifNull" : ["$quantity", 0]},
+                    "marketplace_ins" : "$marketplace_ins.name",
+                    "marketplace_image_url" : "$marketplace_ins.image_url",
+                    "brand_name" : {"$ifNull" : ["$brand_name", ""]},
+                    "image_url" : {"$ifNull" : ["$image_url", ""]},
+                    
+                }
+            }
+        ]
+        variant_list = list(Product.objects.aggregate(*(pipeline)))
+        print(variant_list)
+        
+    return variant_list
