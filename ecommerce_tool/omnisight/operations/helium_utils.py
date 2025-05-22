@@ -345,16 +345,24 @@ def AnnualizedRevenueAPIView(target_date):
 
 
 
-def getdaywiseproductssold(start_date, end_date,product_id):
+def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
     """
-    Fetches the list of orders based on the provided product ID using a pipeline aggregation.
-
+    Fetch total quantity and price of a product sold between start_date and end_date,
+    grouped by day or hour based on is_hourly flag.
+ 
     Args:
-        productId (str): The ID of the product for which to fetch orders.
-
+        start_date (datetime): Start date/time for filtering orders.
+        end_date (datetime): End date/time for filtering orders.
+        product_id (str): The product ID to filter by.
+        is_hourly (bool): If True, group by hour; else group by day.
+ 
     Returns:
-        list: A list of dictionaries containing order details.
+        list: List of dicts with keys 'date', 'total_quantity', and 'total_price'.
     """
+ 
+    # Choose the date format for grouping based on is_hourly
+    date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
+ 
     pipeline = [
         {
             "$match": {
@@ -379,10 +387,15 @@ def getdaywiseproductssold(start_date, end_date,product_id):
             }
         },
         {
-            "$group" : {
-                "_id" : {"$dateToString": {"format": "%Y-%m-%d", "date": "$order_date"}},
-                "total_quantity" : { "$sum": "$order_items_ins.ProductDetails.QuantityOrdered" },
-                "total_price" : { "$sum": "$order_items_ins.Pricing.ItemPrice.Amount" }
+            "$group": {
+                "_id": {
+                    "$dateToString": {
+                        "format": date_format,
+                        "date": "$order_date"
+                    }
+                },
+                "total_quantity": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
+                "total_price": {"$sum": "$order_items_ins.Pricing.ItemPrice.Amount"}
             }
         },
         {
@@ -392,8 +405,12 @@ def getdaywiseproductssold(start_date, end_date,product_id):
                 "total_quantity": 1,
                 "total_price": {"$round": ["$total_price", 2]}
             }
+        },
+        {
+            "$sort": {"date": 1}  # Sort ascending by date/hour
         }
     ]
+ 
     orders = list(Order.objects.aggregate(*pipeline))
     return orders
 
