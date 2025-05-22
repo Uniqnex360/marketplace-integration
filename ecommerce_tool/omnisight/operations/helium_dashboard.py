@@ -1174,8 +1174,8 @@ def getPeriodWiseDataXl(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += result[0]['total_cogs']
-                        vendor_funding += vendor_funding
+                        total_cogs += item_result[0]['total_cogs']
+                        vendor_funding += item_result[0]['vendor_funding']
                         if item_data.get('page_views') and item_data.get('sessions'):
                             page_views = item_data['page_views']
                             sessions = item_data['sessions']
@@ -1349,8 +1349,8 @@ def exportPeriodWiseCSV(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += result[0]['total_cogs']
-                        vendor_funding += result[0]['vendor_funding']
+                        total_cogs += item_result[0]['total_cogs']
+                        vendor_funding += item_result[0]['vendor_funding']
                         if item_data.get('page_views') and item_data.get('sessions'):
                             page_views = item_data['page_views']
                             sessions = item_data['sessions']
@@ -1860,8 +1860,8 @@ def allMarketplaceData(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += result[0]['total_cogs']
-                        vendor_funding += result[0]['vendor_funding']
+                        total_cogs += item_result[0]['total_cogs']
+                        vendor_funding += item_result[0]['vendor_funding']
                         total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
@@ -3216,7 +3216,6 @@ def getProfitAndLossDetails(request):
             for order in result:
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
-                temp_price = 0
                 tax_price = 0
                 
                 for item_id in order['order_items']:
