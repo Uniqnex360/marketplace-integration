@@ -4222,160 +4222,167 @@ def productsDetailsPageSummary(request):
     
 
 
-def productsSalesOverview(request):
-    from django.utils import timezone
-    product_id = request.GET.get('product_id')
-    # Calculate date ranges
-    today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    end_date = today - timedelta(days=1)  # Yesterday (end of period)
-    start_date = end_date - timedelta(days=29)  # 30 days ago (including yesterday)
-    
-    # Get daily sales data using existing function
-    daily_sales = getdaywiseproductssold(start_date, end_date, product_id)
-    
-    # Convert to dictionary for easy lookup
-    sales_dict = {item['date']: item for item in daily_sales}
-    
-    # Generate complete date range
-    complete_data = []
-    current_date = start_date
-    while current_date <= end_date:
-        date_str = current_date.strftime('%Y-%m-%d')
-        if date_str in sales_dict:
-            complete_data.append(sales_dict[date_str])
-        else:
-            complete_data.append({
-                'date': date_str,
-                'total_quantity': 0,
-                'total_price': 0.0
-            })
-        current_date += timedelta(days=1)
-    
-    # Initialize results
-    results = {
-        "units": [],
-        "gross": []
-    }
-    
-    # 1. Yesterday vs Previous Day
-    yesterday = end_date
-    prev_day = yesterday - timedelta(days=1)
-    
-    results["units"].append({
-        "current": {
-            "dateFrom": yesterday.strftime("%Y-%m-%d 00:00:00"),
-            "dateTo": yesterday.strftime("%Y-%m-%d 23:59:59"),
-            "value": sales_dict.get(yesterday.strftime("%Y-%m-%d"), {}).get("total_quantity", 0)
-        },
-        "previous": {
-            "dateFrom": prev_day.strftime("%Y-%m-%d 00:00:00"),
-            "dateTo": prev_day.strftime("%Y-%m-%d 23:59:59"),
-            "value": sales_dict.get(prev_day.strftime("%Y-%m-%d"), {}).get("total_quantity", 0)
-        }
-    })
-    
-    results["gross"].append({
-        "current": {
-            "dateFrom": yesterday.strftime("%Y-%m-%d 00:00:00"),
-            "dateTo": yesterday.strftime("%Y-%m-%d 23:59:59"),
-            "value": str(sales_dict.get(yesterday.strftime("%Y-%m-%d"), {}).get("total_price", 0))
-        },
-        "previous": {
-            "dateFrom": prev_day.strftime("%Y-%m-%d 00:00:00"),
-            "dateTo": prev_day.strftime("%Y-%m-%d 23:59:59"),
-            "value": str(sales_dict.get(prev_day.strftime("%Y-%m-%d"), {}).get("total_price", 0))
-        }
-    })
-    
-    # 2. Last day with sales vs its previous day
-    # Find last day with sales
-    last_sales_day = None
-    for day in (end_date - timedelta(days=n) for n in range(30)):
-        day_str = day.strftime("%Y-%m-%d")
-        if day_str in sales_dict and (sales_dict[day_str].get("total_quantity", 0) > 0 or 
-                                        sales_dict[day_str].get("total_price", 0) > 0):
-            last_sales_day = day
-            break
-    
-    if last_sales_day:
-        prev_sales_day = last_sales_day - timedelta(days=1)
-        
-        results["units"].append({
-            "current": {
-                "dateFrom": last_sales_day.strftime("%Y-%m-%d 00:00:00"),
-                "dateTo": last_sales_day.strftime("%Y-%m-%d 23:59:59"),
-                "value": sales_dict.get(last_sales_day.strftime("%Y-%m-%d"), {}).get("total_quantity", 0)
-            },
-            "previous": {
-                "dateFrom": prev_sales_day.strftime("%Y-%m-%d 00:00:00"),
-                "dateTo": prev_sales_day.strftime("%Y-%m-%d 23:59:59"),
-                "value": sales_dict.get(prev_sales_day.strftime("%Y-%m-%d"), {}).get("total_quantity", 0)
-            }
-        })
-        
-        results["gross"].append({
-            "current": {
-                "dateFrom": last_sales_day.strftime("%Y-%m-%d 00:00:00"),
-                "dateTo": last_sales_day.strftime("%Y-%m-%d 23:59:59"),
-                "value": str(sales_dict.get(last_sales_day.strftime("%Y-%m-%d"), {}).get("total_price", 0))
-            },
-            "previous": {
-                "dateFrom": prev_sales_day.strftime("%Y-%m-%d 00:00:00"),
-                "dateTo": prev_sales_day.strftime("%Y-%m-%d 23:59:59"),
-                "value": str(sales_dict.get(prev_sales_day.strftime("%Y-%m-%d"), {}).get("total_price", 0))
-            }
-        })
-    
-    # 3. Last 7 days vs Previous 7 days
-    last_7days_end = end_date
-    last_7days_start = last_7days_end - timedelta(days=6)
-    prev_7days_end = last_7days_start - timedelta(days=1)
-    prev_7days_start = prev_7days_end - timedelta(days=6)
-    
-    # Calculate totals for these periods
-    def calculate_period_total(start, end):
-        total_qty = 0
-        total_price = 0.0
-        for day in (start + timedelta(days=n) for n in range((end - start).days + 1)):
-            day_str = day.strftime("%Y-%m-%d")
-            if day_str in sales_dict:
-                total_qty += sales_dict[day_str].get("total_quantity", 0)
-                total_price += sales_dict[day_str].get("total_price", 0.0)
-        return total_qty, round(total_price, 2)
-    
-    current_7days_qty, current_7days_price = calculate_period_total(last_7days_start, last_7days_end)
-    prev_7days_qty, prev_7days_price = calculate_period_total(prev_7days_start, prev_7days_end)
-    
-    results["units"].append({
-        "current": {
-            "dateFrom": last_7days_start.strftime("%Y-%m-%d 00:00:00"),
-            "dateTo": last_7days_end.strftime("%Y-%m-%d 23:59:59"),
-            "value": current_7days_qty
-        },
-        "previous": {
-            "dateFrom": prev_7days_start.strftime("%Y-%m-%d 00:00:00"),
-            "dateTo": prev_7days_end.strftime("%Y-%m-%d 23:59:59"),
-            "value": prev_7days_qty
-        }
-    })
-    
-    results["gross"].append({
-        "current": {
-            "dateFrom": last_7days_start.strftime("%Y-%m-%d 00:00:00"),
-            "dateTo": last_7days_end.strftime("%Y-%m-%d 23:59:59"),
-            "value": str(current_7days_price)
-        },
-        "previous": {
-            "dateFrom": prev_7days_start.strftime("%Y-%m-%d 00:00:00"),
-            "dateTo": prev_7days_end.strftime("%Y-%m-%d 23:59:59"),
-            "value": str(prev_7days_price)
-        }
-    })
-    results['graph'] = complete_data
-    
-    return results
+def format_date_label(preset, start_date, end_date):
+    if preset == "Today":
+        return start_date.strftime("%B %d, %Y")
+    elif preset == "Yesterday":
+        return start_date.strftime("%B %d, %Y")
+    elif preset in ["Last 7 Days", "Last 30 Days"]:
+        return f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
+    else:
+        return f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
     
 
+
+
+def productsSalesOverview(request):
+    from django.utils import timezone
+    from datetime import datetime, timedelta
+
+    product_id = request.GET.get("product_id")
+    preset = request.GET.get("preset", "").strip().title()  # Normalize preset
+    now = timezone.now()
+
+    login_date = now.date()
+    yesterday = login_date - timedelta(days=1)
+    prev_day = yesterday - timedelta(days=1)
+
+    last_7days_start = login_date - timedelta(days=7)
+    last_7days_end = login_date - timedelta(days=1)
+    prev_7days_start = last_7days_start - timedelta(days=7)
+    prev_7days_end = last_7days_start - timedelta(days=1)
+
+    filled_graph = []
+    label = None
+
+    if preset:
+        is_hourly = preset in ["Today", "Yesterday"]
+
+        if preset == "Today":
+            start_date = datetime.combine(login_date, datetime.min.time())
+            end_date = now
+        elif preset == "Yesterday":
+            start_date = datetime.combine(yesterday, datetime.min.time())
+            end_date = datetime.combine(yesterday, datetime.max.time())
+        elif preset == "Last 7 Days":
+            start_date = datetime.combine(last_7days_start, datetime.min.time())
+            end_date = datetime.combine(last_7days_end, datetime.max.time())
+        elif preset == "Last 30 Days":
+            start_date = datetime.combine(login_date - timedelta(days=30), datetime.min.time())
+            end_date = datetime.combine(login_date - timedelta(days=1), datetime.max.time())
+        else:
+            start_date = end_date = None
+
+        if start_date and end_date:
+            label = format_date_label(preset, start_date, end_date)
+            graph_data = getdaywiseproductssold(start_date, end_date, product_id, is_hourly)
+
+            # Normalize dates
+            for item in graph_data:
+                raw_date = item.get("date")
+                try:
+                    dt = datetime.strptime(raw_date, "%Y-%m-%d %H:00") if is_hourly else datetime.strptime(raw_date, "%Y-%m-%d")
+                    item["date"] = dt.strftime("%Y-%m-%d %H:00:00") if is_hourly else dt.strftime("%Y-%m-%d")
+                except Exception:
+                    continue
+
+            sales_dict = {item["date"]: item for item in graph_data}
+
+            if is_hourly:
+                base_date = start_date.strftime("%Y-%m-%d")
+                hour_range = range(0, 25 if preset == "Today" else 24)
+                for hour in hour_range:
+                    time_str = f"{base_date} {hour:02d}:00:00"
+                    filled_graph.append(sales_dict.get(time_str, {
+                        "date": time_str,
+                        "total_quantity": 0,
+                        "total_price": 0.0
+                    }))
+            else:
+                current = start_date.date()
+                while current <= end_date.date():
+                    date_str = current.strftime("%Y-%m-%d")
+                    filled_graph.append(sales_dict.get(date_str, {
+                        "date": date_str,
+                        "total_quantity": 0,
+                        "total_price": 0.0
+                    }))
+                    current += timedelta(days=1)
+
+    def get_val(date_obj):
+        start = datetime.combine(date_obj, datetime.min.time())
+        end = datetime.combine(date_obj, datetime.max.time())
+        daily = getdaywiseproductssold(start, end, product_id, is_hourly=False)
+        if daily:
+            return daily[0]["total_quantity"], float(daily[0]["total_price"])
+        return 0, 0.0
+
+    def sum_period(start_day, end_day):
+        qty, price = 0, 0.0
+        day = start_day
+        while day <= end_day:
+            q, p = get_val(day)
+            qty += q
+            price += p
+            day += timedelta(days=1)
+        return qty, round(price, 2)
+
+    def calc_diff_trend(current, previous):
+        diff = round(current - previous, 2)
+        trend = "up" if diff > 0 else "down" if diff < 0 else "neutral"
+        return diff, trend
+
+    # Fetch values
+    y_qty, y_price = get_val(yesterday)
+    p_qty, p_price = get_val(prev_day)
+    curr_qty, curr_price = sum_period(last_7days_start, last_7days_end)
+    prev_qty, prev_price = sum_period(prev_7days_start, prev_7days_end)
+
+    # Build final dicts
+    units = {
+        "yesterday": {
+            "value": y_qty,
+            "difference": calc_diff_trend(y_qty, p_qty)[0],
+            "trend": calc_diff_trend(y_qty, p_qty)[1],
+        },
+        "previous_day": {
+            "value": p_qty,
+            "difference": calc_diff_trend(p_qty, 0)[0],
+            "trend": calc_diff_trend(p_qty, 0)[1],
+        },
+        "last_7_days": {
+            "value": curr_qty,
+            "difference": calc_diff_trend(curr_qty, prev_qty)[0],
+            "trend": calc_diff_trend(curr_qty, prev_qty)[1],
+        }
+    }
+
+    sales = {
+        "yesterday": {
+            "value": y_price,
+            "difference": calc_diff_trend(y_price, p_price)[0],
+            "trend": calc_diff_trend(y_price, p_price)[1],
+        },
+        "previous_day": {
+            "value": p_price,
+            "difference": calc_diff_trend(p_price, 0)[0],
+            "trend": calc_diff_trend(p_price, 0)[1],
+        },
+        "last_7_days": {
+            "value": curr_price,
+            "difference": calc_diff_trend(curr_price, prev_price)[0],
+            "trend": calc_diff_trend(curr_price, prev_price)[1],
+        }
+    }
+
+    return {
+                "label": label,
+                "units": units,
+                "sales": sales,
+                "graph": filled_graph
+            }
+
+ 
 
 
 def productsListingQualityScore(request):
