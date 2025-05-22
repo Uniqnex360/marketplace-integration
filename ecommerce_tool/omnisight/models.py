@@ -245,14 +245,14 @@ class BuyerInfo(EmbeddedDocument):
     Address = DictField(default=None)
 
 class OrderItems(Document):
-    OrderId = StringField(required=True)
-    Platform = StringField(required=True)
-    ProductDetails = EmbeddedDocumentField(ProductDetails, required=True)
-    Pricing = EmbeddedDocumentField(Pricing, required=True)
+    OrderId = StringField()
+    Platform = StringField()
+    ProductDetails = EmbeddedDocumentField(ProductDetails, )
+    Pricing = EmbeddedDocumentField(Pricing, )
     Fulfillment = EmbeddedDocumentField(Fulfillment, default=None)
     OrderStatus = EmbeddedDocumentField(OrderStatus, default=None)
-    TaxCollection = EmbeddedDocumentField(TaxCollection, required=True)
-    IsGift = BooleanField(required=True)
+    TaxCollection = EmbeddedDocumentField(TaxCollection, )
+    IsGift = BooleanField()
     BuyerInfo = EmbeddedDocumentField(BuyerInfo, default=None)
     created_date = DateTimeField(default=datetime.now())
     document_created_date = DateTimeField()
@@ -264,6 +264,7 @@ class Order(Document):
     purchase_order_id = StringField()  # ID generated after a customer orders a product
     customer_order_id = StringField()  # ID from the customer's perspective for tracking
     seller_order_id = StringField()  # ID used by the seller for internal purposes
+    merchant_order_id = StringField()  # ID used by the merchant for internal purposes
 
     # Customer details
     customer_email_id = StringField()  # Email of the customer
@@ -310,9 +311,9 @@ class Order(Document):
     is_global_express_enabled = BooleanField()  # True if fast shipping is available for international orders
 
 
-    sales_channel = StringField()  # The channel through which the order was placed
     order_channel = StringField()  # The channel through which the order was placed
-
+    items_order_quantity = IntField()  # Number of items in the order
+    shipping_price = FloatField()  # Shipping cost for the order
 
 
 
@@ -456,5 +457,3 @@ class pageview_session_count(Document):
     date =  DateTimeField(default=datetime.now())
     page_views = IntField(default=0)
     session_count = IntField(default=0)
-
-

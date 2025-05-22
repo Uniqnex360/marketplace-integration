@@ -84,6 +84,8 @@ def get_metrics_by_date_range(request):
         total_units = 0
         total_orders = 0
         tax_price = 0
+        temp_other_price = 0
+        vendor_funding = 0
 
         result = grossRevenue(date_range["start"], date_range["end"],marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         refund_ins = refundOrder(date_range["start"], date_range["end"],marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
@@ -95,8 +97,8 @@ def get_metrics_by_date_range(request):
             for ins in result:
                 tax_price = 0
                 gross_revenue += ins['order_total']
-                other_price = 0
-                temp_other_price = 0 
+                # other_price = 0
+                # temp_other_price = 0 
                 for j in ins['order_items']:                  
                     pipeline = [
                         {
@@ -121,20 +123,25 @@ def get_metrics_by_date_range(request):
                         {
                             "$project": {
                                 "_id" : 0,
-                                "price": "$Pricing.ItemPrice.Amount",
+                                "price": {"$ifNull":["$Pricing.ItemPrice.Amount",0]},
                                 "cogs": {"$ifNull":["$product_ins.cogs",0.0]},
-                                "tax_price": "$Pricing.ItemTax.Amount",
+                                "tax_price": {"$ifNull":["$Pricing.ItemTax.Amount",0]},
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                             }
                         }
                     ]
                     result = list(OrderItems.objects.aggregate(*pipeline))
-                    tax_price += result[0]['tax_price']
-                    temp_other_price += result[0]['price']
-                    total_cogs += result[0]['cogs']
-                    total_units += 1
-            other_price += ins['order_total'] - temp_other_price - tax_price
+                    if result != []:
+                        tax_price += result[0]['tax_price']
+                        temp_other_price += result[0]['price']
+                        total_cogs += result[0]['total_cogs']
+                        total_units += 1
+                        vendor_funding += result[0]['vendor_funding']
+            # other_price += ins['order_total'] - temp_other_price - tax_price
 
-            net_profit = gross_revenue - (other_price + total_cogs)
+            net_profit = (temp_other_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue) * 100
         metrics[key] = {
             "gross_revenue": round(gross_revenue, 2),
@@ -701,6 +708,7 @@ def get_top_products(request):
     return data
 
 
+
 @csrf_exempt
 def get_products_with_pagination(request):
     json_request = JSONParser().parse(request)
@@ -715,6 +723,7 @@ def get_products_with_pagination(request):
     preset = json_request.get("preset", "Today")
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
+    parent = json_request.get('parent',True)
 
 
     if start_date != None and start_date != "":
@@ -745,75 +754,177 @@ def get_products_with_pagination(request):
             "$match": match
         })
 
+    if parent != None and parent != "" and parent == True:
+        pipeline.extend([
+            
+                        {
+                            "$group": {
+                                "_id": 0,
+                                "parent_sku_list" : {"$addToSet": "$parent_sku"},
+                            }
+                        },
+                        {
+                            "$project" : {
+                                "_id" :0,
+                                "parent_sku_list" : 1,
+                            }
+                        }
+                
+                        ])
 
-    # Define the pipeline for pagination and data fetching
-    pipeline.extend([
-        {
+        # Execute the pipeline
+        result = list(Product.objects.aggregate(*pipeline))
+        if result != []:
+            sku_list = result[0]['parent_sku_list']
+            total_products = len(sku_list)
+            parent_sku = sku_list[((page - 1) * page_size):page_size] 
+            products = []
+            for ins in parent_sku:
+                p_dict = {}
+                stock = 0
+                price_range = []
+                cogs = 0
+                p_list = DatabaseModel.list_documents(Product.objects,{"parent_sku":ins},['quantity','price','product_title','image_url','parent_sku','marketplace_id','id','total_cogs','w_total_cogs'])
+                p_exist = False
+                for p_ins in p_list:
+                    stock += p_ins.quantity
+                    price_range.append(p_ins.price)
+                    if p_ins.marketplace_id.name == "Amazon":
+                        cogs += p_ins.total_cogs
+                    else:
+                        cogs += p_ins.w_total_cogs
+
+
+                    if p_exist == False:
+                        p_dict = {
+                            "id": str(p_ins.id),
+                            "title" : p_ins.product_title,
+                            "imageUrl" : p_ins.image_url,
+                            "parent_sku" : p_ins.parent_sku,
+                            "marketplace" : p_ins.marketplace_id.name,
+                        }
+                        p_exist = True
+                p_dict['sku_count'] = len(p_list)
+                p_dict['stock'] = stock
+                p_dict['price_start'] = min(price_range) if price_range else 0
+                p_dict['price_end'] = max(price_range) if price_range else 0
+                p_dict['cogs'] = 0
+                p_dict['salesForToday'] = 0
+                p_dict['salesForTodayPeriod'] = 0
+                p_dict['unitsSoldForToday'] = 0
+                p_dict['unitsSoldForPeriod'] = 0
+                p_dict['refunds'] = 0
+                p_dict['refundsforPeriod'] = 0
+                p_dict['refundsAmount'] = 0
+                p_dict['refundsAmountforPeriod'] = 0
+                p_dict['grossRevenue'] = 0
+                p_dict['grossRevenueforPeriod'] = 0
+                p_dict['netProfit'] = 0
+                p_dict['netProfitforPeriod'] = 0
+                p_dict['margin'] = "0%"
+                p_dict['marginforPeriod'] = "0%"
+                p_dict['totalchannelFees'] = "N/A"
+                products.append(p_dict)
+
+
+        response_data = {
+            "total_products": total_products,
+            "page": page,
+            "page_size": page_size,
+            "products": products,
+        }
+
+    else:
+        # Define the pipeline for pagination and data fetching
+        pipeline.extend([
+            {
             "$facet": {
                 "total_count": [{"$count": "count"}],
                 "products": [
-                    {"$skip": (page - 1) * page_size},
-                    {"$limit": page_size},
-                    {
-                        "$lookup" : {
-                            "from" : "marketplace",
-                            "localField" : "marketplace_id",
-                            "foreignField" : "_id",
-                            "as" : "marketplace_ins"
-                        }
-                    },
-                    {
-                        "$unwind" : "$marketplace_ins"
-                    },
-                    {
-                        "$project": {
-                            "_id": 0,
-                            "id": {"$toString":"$_id"},
-                            "asin": {"$ifNull": ["$product_id", "N/A"]},
-                            "sellerSku": {"$ifNull": ["$sku", "N/A"]},
-                            "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
-                            "title": {"$ifNull": ["$product_title", "N/A"]},
-                            "marketplace": {"$ifNull": ["$marketplace_ins.name", "N/A"]},
-                            "fulfillmentChannel": {"$ifNull": ["$fullfillment_by_channel", "N/A"]},
-                            "price": {"$ifNull": ["$price", "0.0"]},
-                            "stock" : {"$ifNull": ["$quantity", 0]},
-                            "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
-                            "cogs": {"$round" : [{"$ifNull": ["$cogs", 0]},2]},
-                            "category": {"$ifNull": ["$category", "N/A"]},
-                            "salesForToday": {"$ifNull": ["$salesForToday", 0]},
-                            "salesForToday": {"$ifNull": ["$salesForToday", 0]},
-                            "unitsSoldForToday": {"$ifNull": ["$unitsSoldForToday", 0]},
-                            "unitsSoldForPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
-                            "refunds": {"$ifNull": ["$refunds", 0]},
-                            "refundsAmount": {"$ifNull": ["$refundsAmount", 0]},
-                            "grossProfit": {"$ifNull": ["$grossProfit", 0]},
-                            "netProfit": {"$ifNull": ["$netProfit", 0]},
-                            "margin": {"$ifNull": ["$margin", "0%"]},
-                            "totalchannelFees": {"$ifNull": ["$totalAmazonFees", "N/A"]},
-                        }
+                {"$skip": (page - 1) * page_size},
+                {"$limit": page_size},
+                {
+                    "$lookup" : {
+                    "from" : "marketplace",
+                    "localField" : "marketplace_id",
+                    "foreignField" : "_id",
+                    "as" : "marketplace_ins"
                     }
+                },
+                {
+                    "$unwind" : "$marketplace_ins"
+                },
+                {
+                    "$project": {
+                    "_id": 0,
+                    "id": {"$toString":"$_id"},
+                    "asin": {"$ifNull": ["$product_id", "N/A"]},
+                    "sellerSku": {"$ifNull": ["$sku", "N/A"]},
+                    "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
+                    "title": {"$ifNull": ["$product_title", "N/A"]},
+                    "marketplace": {"$ifNull": ["$marketplace_ins.name", "N/A"]},
+                    "fulfillmentChannel": {
+                        "$cond": {
+                        "if": {"$eq": ["$fullfillment_by_channel", True]},
+                        "then": "FBA",
+                        "else": "FBM"
+                        }
+                    },
+                    "price": {"$ifNull": ["$price", "0.0"]},
+                    "stock" : {"$ifNull": ["$quantity", 0]},
+                    "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
+                    "cogs": {
+                        "$cond": {
+                        "if": {"$eq": ["$marketplace", "Amazon"]},
+                        "then": "$total_cogs",
+                        "else": "$w_total_cogs"
+                        }
+                    },
+                    "category": {"$ifNull": ["$category", "N/A"]},
+                    "salesForToday": {"$ifNull": ["$salesForToday", 0]},
+                    "salesForTodayPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
+                    "unitsSoldForToday": {"$ifNull": ["$unitsSoldForToday", 0]},
+                    "unitsSoldForPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
+                    "refunds": {"$ifNull": ["$refunds", 0]},
+                    "refundsforPeriod": {"$ifNull": ["$refunds", 0]},
+                    "refundsAmount": {"$ifNull": ["$refundsAmount", 0]},
+                    "refundsAmountforPeriod": {"$ifNull": ["$refundsAmount", 0]},
+                    "grossRevenue": {"$ifNull": ["$grossProfit", 0]},
+                    "grossRevenueforPeriod": {"$ifNull": ["$grossProfit", 0]},
+                    "netProfit": {"$ifNull": ["$netProfit", 0]},
+                    "netProfitforPeriod": {"$ifNull": ["$netProfit", 0]},
+                    "margin": {"$ifNull": ["$margin", "0%"]},
+                    "marginforPeriod": {"$ifNull": ["$margin", "0%"]},
+                    "totalchannelFees": {
+                        "$cond": {
+                        "if": {"$eq": ["$marketplace", "Amazon"]},
+                        "then": {"$sum":["$referral_fee","$a_shipping_cost"]},
+                        "else": {"$sum":["$walmart_fee","$w_shiping_cost"]}
+                        }
+                    },
+                    }
+                }
                 ]
             }
+            }
+        ])
+
+        # Execute the pipeline
+        result = list(Product.objects.aggregate(*pipeline))
+
+        # Extract total count and products
+        total_products = result[0]["total_count"][0]["count"] if result[0]["total_count"] else 0
+        products = result[0]["products"]
+
+        # Prepare response data
+        response_data = {
+            "total_products": total_products,
+            "page": page,
+            "page_size": page_size,
+            "products": products,
         }
-    ])
-
-    # Execute the pipeline
-    result = list(Product.objects.aggregate(*pipeline))
-
-    # Extract total count and products
-    total_products = result[0]["total_count"][0]["count"] if result[0]["total_count"] else 0
-    products = result[0]["products"]
-
-    # Prepare response data
-    response_data = {
-        "total_products": total_products,
-        "page": page,
-        "page_size": page_size,
-        "products": products,
-    }
 
     return JsonResponse(response_data, safe=False)
-
 
 
 #########################SELVA WORKING APIS##########
@@ -831,13 +942,15 @@ def calculate_metricss(start_date, end_date,marketplace_id=[],brand_id=[],produc
     other_price = 0
     tax_price = 0
     page_views = 0
+    temp_price = 0
     sessions = 0
+    vendor_funding = 0
     unitSessionPercentage = 0
     if result:
         for order in result:
             gross_revenue += order['order_total']
             order_total = order['order_total']
-            temp_price = 0
+            # temp_price = 0
             tax_price = 0
             for item_id in order['order_items']:
                 item_pipeline = [
@@ -859,7 +972,10 @@ def calculate_metricss(start_date, end_date,marketplace_id=[],brand_id=[],produc
                             "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
                             "sku": "$product_ins.sku",
                             "page_views": "$product_ins.page_views",
-                            "sessions": "$product_ins.sessions"
+                            "sessions": "$product_ins.sessions",
+                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                         }
                     }
                 ]
@@ -871,13 +987,14 @@ def calculate_metricss(start_date, end_date,marketplace_id=[],brand_id=[],produc
                     if item_data.get('page_views') and item_data.get('sessions'):
                         page_views = item_data['page_views']
                         sessions = item_data['sessions']
-                    total_cogs += item_data['cogs']
+                    total_cogs += result[0]['total_cogs']
+                    vendor_funding +=  result[0]['vendor_funding']
                     total_units += 1
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
             # other_price += (order_total - temp_price) + total_cogs
-        other_price += order_total - temp_price - tax_price
-        net_profit = gross_revenue - (other_price + total_cogs)
+        # other_price += order_total - temp_price - tax_price
+        net_profit = (temp_price - total_cogs) + vendor_funding
 
 
         
@@ -886,9 +1003,9 @@ def calculate_metricss(start_date, end_date,marketplace_id=[],brand_id=[],produc
                 unitSessionPercentage = (total_units/sessions )*100
     return {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round((other_price + total_cogs) , 2),
+        "expenses": round((total_cogs) , 2),
         "netProfit": round(net_profit, 2),
-        "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
+        "roi": round((net_profit / (total_cogs)) * 100, 2) if total_cogs > 0 else 0,
         "unitsSold": total_units,
         "refunds": refund,  
         "skuCount": len(sku_set),
@@ -1005,13 +1122,15 @@ def getPeriodWiseDataXl(request):
         page_views = 0
         sessions = 0
         unitSessionPercentage = 0
+        vendor_funding = 0
         marketplace_name = ""
+        temp_price = 0
         if result:
             for order in result:
                 marketplace_name = order['marketplace_name']
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
-                temp_price = 0
+                # temp_price = 0
                 tax_price = 0
                 for item_id in order['order_items']:
                     item_pipeline = [
@@ -1033,7 +1152,10 @@ def getPeriodWiseDataXl(request):
                                 "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
                                 "sku": "$product_ins.sku",
                                  "page_views": "$product_ins.page_views",
-                            "sessions": "$product_ins.sessions"
+                            "sessions": "$product_ins.sessions",
+                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                             }
                         }
                     ]
@@ -1042,7 +1164,8 @@ def getPeriodWiseDataXl(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_data['cogs']
+                        total_cogs += result[0]['total_cogs']
+                        vendor_funding += vendor_funding
                         if item_data.get('page_views') and item_data.get('sessions'):
                             page_views = item_data['page_views']
                             sessions = item_data['sessions']
@@ -1050,17 +1173,17 @@ def getPeriodWiseDataXl(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
                 # other_price += (order_total - temp_price) + total_cogs
-            other_price += order_total - temp_price - tax_price
-            net_profit = gross_revenue - (other_price + total_cogs)
+            # other_price += order_total - temp_price - tax_price
+            net_profit = (temp_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
             if sessions != 0:
                 unitSessionPercentage = (total_units/sessions )*100
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs), 2),
+            "expenses": round((total_cogs), 2),
             "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
+            "roi": round((net_profit / (total_cogs)) * 100, 2) if total_cogs > 0 else 0,
             "unitsSold": total_units,
             "refunds": refund,  
             "skuCount": len(sku_set),
@@ -1172,12 +1295,14 @@ def exportPeriodWiseCSV(request):
         page_views = 0
         sessions = 0
         unitSessionPercentage = 0
+        temp_price = 0
+        vendor_funding = 0
+
         if result:
             for order in result:
                 marketplace_name = order['marketplace_name']
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
-                temp_price = 0
                 tax_price = 0
                 
                 for item_id in order['order_items']:
@@ -1201,7 +1326,10 @@ def exportPeriodWiseCSV(request):
                                 "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
                                 "sku": "$product_ins.sku",
                                 "page_views": "$product_ins.page_views",
-                            "sessions": "$product_ins.sessions"
+                            "sessions": "$product_ins.sessions",
+                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                                 
                             }
                         }
@@ -1211,7 +1339,8 @@ def exportPeriodWiseCSV(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_data['cogs']
+                        total_cogs += result[0]['total_cogs']
+                        vendor_funding += result[0]['vendor_funding']
                         if item_data.get('page_views') and item_data.get('sessions'):
                             page_views = item_data['page_views']
                             sessions = item_data['sessions']
@@ -1219,17 +1348,17 @@ def exportPeriodWiseCSV(request):
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
                 # other_price += (order_total - temp_price) + total_cogs
-            other_price += order_total - temp_price - tax_price
-            net_profit = gross_revenue - (other_price + total_cogs)
+            # other_price += order_total - temp_price - tax_price
+            net_profit = (temp_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
             if sessions != 0:
                 unitSessionPercentage = (total_units/sessions )*100
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs) , 2),
+            "expenses": round((total_cogs) , 2),
             "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
+            "roi": round((net_profit / (total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
             "refunds": refund,  
             "skuCount": len(sku_set),
@@ -1331,11 +1460,11 @@ def getPeriodWiseDataCustom(request):
         other_price = 0
         tax_price = 0
         temp_price = 0
+        vendor_funding = 0
         if result:
             for order in result:
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
-                temp_price = 0
                 tax_price = 0
                 
                 for item_id in order['order_items']:
@@ -1356,7 +1485,10 @@ def getPeriodWiseDataCustom(request):
                                 "price": "$Pricing.ItemPrice.Amount",
                                 "tax_price": "$Pricing.ItemTax.Amount",
                                 "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
-                                "sku": "$product_ins.sku"
+                                "sku": "$product_ins.sku",
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                             }
                         }
                     ]
@@ -1365,20 +1497,21 @@ def getPeriodWiseDataCustom(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_data['cogs']
+                        total_cogs += result[0]['total_cogs']
+                        vendor_funding += result[0]['vendor_funding']
                         total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
                 # other_price += (order_total - temp_price) + total_cogs
-            other_price += order_total - temp_price - tax_price
-            net_profit = gross_revenue - (other_price + total_cogs)
+            # other_price += order_total - temp_price - tax_price
+            net_profit = (temp_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs) , 2),
+            "expenses": round((total_cogs) , 2),
             "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
+            "roi": round((net_profit / (total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
             "unitsSold": total_units,
             "refunds": refund,  
             "skuCount": len(sku_set),
@@ -1567,17 +1700,18 @@ def allMarketplaceData(request):
             tax_price = 0
             other_price = 0
             total_product_cost = 0
+            temp_price = 0
+            vendor_funding = 0
+
             sku_set = set()
 
             m_obj = Marketplace.objects(id=mp_id)
             marketplace = m_obj[0].name if m_obj else ""
-            print(marketplace)
             
     
             for order in orders:
                 gross_revenue += order["order_total"]
                 order_total = order["order_total"]
-                temp_price = 0
                 tax_price = 0
 
                 for item_id in order['order_items']:
@@ -1598,7 +1732,10 @@ def allMarketplaceData(request):
                                 "price": "$Pricing.ItemPrice.Amount",
                                 "tax_price": "$Pricing.ItemTax.Amount",
                                 "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                                "sku": "$product_ins.sku"
+                                "sku": "$product_ins.sku",
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                             }
                         }
                     ]
@@ -1607,16 +1744,17 @@ def allMarketplaceData(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_data['cogs']
+                        total_cogs += item_result[0]['total_cogs']
+                        vendor_funding += item_result[0]['vendor_funding'] 
                         total_product_cost += item_data['price']
                         total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
-            other_price += order_total - temp_price - tax_price
+            # other_price += order_total - temp_price - tax_price
 
-            expenses = ((total_cogs + other_price ))
-            net_profit = gross_revenue - expenses
+            expenses = total_cogs 
+            net_profit = (temp_price - expenses) + vendor_funding
             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
 
@@ -1666,18 +1804,20 @@ def allMarketplaceData(request):
         net_profit = 0
         margin = 0
         total_units = 0
+        temp_price = 0
         sku_set = set()
 
         result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         order_total = 0
         other_price = 0
         tax_price = 0
+        vendor_funding = 0
 
         if result:
             for order in result:
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
-                temp_price = 0
+                
                 tax_price = 0
 
                 for item_id in order['order_items']:
@@ -1698,7 +1838,10 @@ def allMarketplaceData(request):
                                 "price": "$Pricing.ItemPrice.Amount",
                                 "tax_price": "$Pricing.ItemTax.Amount",
                                 "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                                "sku": "$product_ins.sku"
+                                "sku": "$product_ins.sku",
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                             }
                         }
                     ]
@@ -1707,21 +1850,22 @@ def allMarketplaceData(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_data['cogs']
+                        total_cogs += result[0]['total_cogs']
+                        vendor_funding += result[0]['vendor_funding']
                         total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
-            other_price += order_total - temp_price - tax_price
+            # other_price += order_total - temp_price - tax_price
 
-            net_profit = gross_revenue - (other_price + total_cogs)
+            net_profit = (temp_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
 
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs) , 2),
+            "expenses": round((total_cogs) , 2),
             "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price + total_cogs > 0 else 0,
+            "roi": round((net_profit / (total_cogs)) * 100, 2) if total_cogs > 0 else 0,
             "unitsSold": total_units,
             "refunds": refund,
             "skuCount": len(sku_set),
@@ -1777,7 +1921,7 @@ def allMarketplaceData(request):
 
     return JsonResponse(response_data, safe=False)
 
-
+#------------------------------------------------------------
 @csrf_exempt
 def getProductPerformanceSummary(request):
     json_request = JSONParser().parse(request)
@@ -1816,6 +1960,7 @@ def getProductPerformanceSummary(request):
         total_cogs = 0.0
         sku_set = set()
         tax_price = 0
+        vendor_funding = 0
         for item_id in item_ids:
             item_pipeline = [
                 {"$match": {"_id": item_id}},
@@ -1837,7 +1982,10 @@ def getProductPerformanceSummary(request):
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
-                        "images": "$product_ins.image_url"
+                        "images": "$product_ins.image_url",
+                        "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                        "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                        "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                     }
                 }
             ]
@@ -1850,7 +1998,8 @@ def getProductPerformanceSummary(request):
 
                 images = item_data.get("images", [])
                 price = item_data.get("price", 0.0)
-                cogs = item_data.get("cogs", 0.0)
+                cogs = item_data.get("total_cogs", 0.0) + item_data.get("vendor_funding", 0.0)
+                vendor_funding 
                 temp_price += price
                 total_cogs += cogs
                 if sku:
@@ -1863,12 +2012,12 @@ def getProductPerformanceSummary(request):
                     sku_summary[sku]["grossRevenue"] += price
                     sku_summary[sku]["totalCogs"] += cogs
 
-        other_price = order_total - temp_price - tax_price
+        # other_price = order_total - temp_price - tax_price
 
         for sku in sku_set:
             gross = sku_summary[sku]["grossRevenue"]
             cogs = sku_summary[sku]["totalCogs"]
-            net_profit = gross - (other_price + cogs)
+            net_profit = gross - cogs
             margin = (net_profit / gross) * 100 if gross > 0 else 0
             sku_summary[sku]["netProfit"] = round(net_profit, 2)
             sku_summary[sku]["margin"] = round(margin, 2)
@@ -1923,6 +2072,7 @@ def downloadProductPerformanceSummary(request):
         temp_price = 0.0
         total_cogs = 0.0
         tax_price = 0
+        vendor_funding = 0
         sku_set = set()
         for item_id in item_ids:
             item_pipeline = [
@@ -1945,7 +2095,10 @@ def downloadProductPerformanceSummary(request):
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
                         "images": "$product_ins.image_urls",
-                        "asin": "$product_ins.asin"
+                        "asin": "$product_ins.asin",
+                        "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                        "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                        "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                     }
                 }
             ]
@@ -1959,9 +2112,10 @@ def downloadProductPerformanceSummary(request):
                 
                 tax_price = item_data.get("tax_price", 0.0)
                 price = item_data.get("price", 0.0)
-                cogs = item_data.get("cogs", 0.0)
+                cogs = item_data.get("total_cogs", 0.0)
                 temp_price += price
                 total_cogs += cogs
+                vendor_funding += item_data.get("vendor_funding", 0.0)
                 if sku:
                     sku_set.add(sku)
  
@@ -1974,13 +2128,15 @@ def downloadProductPerformanceSummary(request):
                     sku_summary[sku]["unitsSold"] += 1
                     sku_summary[sku]["grossRevenue"] += price
                     sku_summary[sku]["totalCogs"] += cogs
+                    sku_summary[sku]['vendor_funding'] += vendor_funding
  
-        other_price = order_total - temp_price - tax_price
+        # other_price = order_total - temp_price - tax_price
  
         for sku in sku_set:
             gross = sku_summary[sku]["grossRevenue"]
             cogs = sku_summary[sku]["totalCogs"]
-            net_profit = gross - (other_price + cogs)
+            vendor_funding = sku_summary[sku]['vendor_funding']
+            net_profit = (gross - cogs) + vendor_funding
             margin = (net_profit / gross) * 100 if gross > 0 else 0
             sku_summary[sku]["netProfit"] = round(net_profit, 2)
             sku_summary[sku]["margin"] = round(margin, 2)
@@ -2085,6 +2241,7 @@ def downloadProductPerformanceCSV(request):
         temp_price = 0.0
         total_cogs = 0.0
         tax_price = 0
+        vendor_funding = 0
         sku_set = set()
         m_name = order.get("marketplace_name", "")
 
@@ -2109,7 +2266,10 @@ def downloadProductPerformanceCSV(request):
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
                         "images": "$product_ins.image_urls",
-                        "asin": "$product_ins.asin"
+                        "asin": "$product_ins.asin",
+                        "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                        "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                        "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                     }
                 }
             ]
@@ -2123,9 +2283,10 @@ def downloadProductPerformanceCSV(request):
                 
                 price = item_data.get("price", 0.0)
                 tax_price = item_data.get("tax_price", 0.0)
-                cogs = item_data.get("cogs", 0.0)
+                cogs = item_data.get("total_cogs", 0.0)
                 temp_price += price
                 total_cogs += cogs
+                vendor_funding += item_data.get("vendor_funding", 0.0)
                 if sku:
                     sku_set.add(sku)
  
@@ -2139,13 +2300,15 @@ def downloadProductPerformanceCSV(request):
                     sku_summary[sku]["unitsSold"] += 1
                     sku_summary[sku]["grossRevenue"] += price
                     sku_summary[sku]["totalCogs"] += cogs
+                    sku_summary[sku]['vendor_funding'] += vendor_funding
  
-        other_price = order_total - temp_price - tax_price
+        # other_price = order_total - temp_price - tax_price
  
         for sku in sku_set:
             gross = sku_summary[sku]["grossRevenue"]
             cogs = sku_summary[sku]["totalCogs"]
-            net_profit = gross - (other_price + cogs)
+            vendor_funding = sku_summary[sku]['vendor_funding']
+            net_profit = (gross - cogs) + vendor_funding
             margin = (net_profit / gross) * 100 if gross > 0 else 0
             sku_summary[sku]["netProfit"] = round(net_profit, 2)
             sku_summary[sku]["margin"] = round(margin, 2)
@@ -2241,6 +2404,8 @@ def allMarketplaceDataxl(request):
             tax_price = 0
             other_price = 0
             total_product_cost = 0
+            temp_price = 0
+            vendor_funding = 0
             sku_set = set()
 
             m_obj = Marketplace.objects(id=mp_id)
@@ -2249,7 +2414,7 @@ def allMarketplaceDataxl(request):
             for order in orders:
                 gross_revenue += order["order_total"]
                 order_total = order["order_total"]
-                temp_price = 0
+                
                 tax_price = 0
 
                 for item_id in order['order_items']:
@@ -2270,7 +2435,10 @@ def allMarketplaceDataxl(request):
                                 "price": "$Pricing.ItemPrice.Amount",
                                 "tax_price": "$Pricing.ItemTax.Amount",
                                 "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                                "sku": "$product_ins.sku"
+                                "sku": "$product_ins.sku",
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                             }
                         }
                     ]
@@ -2279,16 +2447,17 @@ def allMarketplaceDataxl(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_data['cogs']
+                        total_cogs += item_result[0]['total_cogs'] 
+                        vendor_funding += item_result[0]['vendor_funding']
                         total_product_cost += item_data['price']
                         total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
-            other_price += order_total - temp_price - tax_price
+            # other_price += order_total - temp_price - tax_price
 
-            expenses = total_cogs + other_price
-            net_profit = gross_revenue - expenses
+            expenses = total_cogs
+            net_profit = (temp_price - expenses) + vendor_funding
             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
 
@@ -2389,6 +2558,7 @@ def downloadMarketplaceDataCSV(request):
             tax_price = 0
             other_price = 0
             total_product_cost = 0
+            vendor_funding = 0
             sku_set = set()
 
             m_obj = Marketplace.objects(id=mp_id)
@@ -2418,7 +2588,10 @@ def downloadMarketplaceDataCSV(request):
                                 "price": "$Pricing.ItemPrice.Amount",
                                 "tax_price": "$Pricing.ItemTax.Amount",
                                 "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                                "sku": "$product_ins.sku"
+                                "sku": "$product_ins.sku",
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                             }
                         }
                     ]
@@ -2427,16 +2600,17 @@ def downloadMarketplaceDataCSV(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_data['cogs']
+                        total_cogs += item_data['total_cogs']
+                        vendor_funding += item_data['vendor_funding']
                         total_product_cost += item_data['price']
                         total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
-            other_price += order_total - temp_price - tax_price
+            # other_price += order_total - temp_price - tax_price
 
-            expenses = total_cogs + other_price 
-            net_profit = gross_revenue - expenses
+            expenses = total_cogs 
+            net_profit = (total_product_cost - expenses) + vendor_funding
             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
 
@@ -2906,14 +3080,14 @@ def calculate_metrics(start_date, end_date):
 
     result = grossRevenue(start_date, end_date)
     order_total = 0
-    other_price = 0
+    # other_price = 0
     tax_price = 0
     temp_price = 0
+    vendor_funding = 0
     if result:
         for order in result:
             gross_revenue += order['order_total']
             order_total = order['order_total']
-            temp_price = 0
             tax_price = 0
 
             for item_id in order['order_items']:
@@ -2935,7 +3109,10 @@ def calculate_metrics(start_date, end_date):
                             "tax_price": "$Pricing.ItemTax.Amount",
                             "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
                             "sku": "$product_ins.sku",
-                            "category": "$product_ins.category"
+                            "category": "$product_ins.category",
+                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                         }
                     }
                 ]
@@ -2944,7 +3121,8 @@ def calculate_metrics(start_date, end_date):
                     item_data = item_result[0]
                     temp_price += item_data['price']
                     tax_price += item_data['tax_price']
-                    total_cogs += item_data['cogs']
+                    total_cogs += item_data['total_cogs']
+                    vendor_funding += item_data['vendor_funding']
                     total_units += 1
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
@@ -2962,15 +3140,15 @@ def calculate_metrics(start_date, end_date):
                     else:
                         product_completeness["incomplete"] += 1
 
-        other_price += order_total - temp_price - tax_price
-        net_profit = gross_revenue - (other_price + total_cogs)
+        # other_price += order_total - temp_price - tax_price
+        net_profit = (temp_price -  total_cogs) + vendor_funding
         margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
 
     return {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round((other_price + total_cogs), 2),
+        "expenses": round(total_cogs, 2),
         "netProfit": round(net_profit, 2),
-        "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price + total_cogs > 0 else 0,
+        "roi": round((net_profit / (total_cogs)) * 100, 2) if total_cogs > 0 else 0,
         "unitsSold": total_units,
         "refunds": refund,  
         "skuCount": len(sku_set),
@@ -3020,9 +3198,10 @@ def getProfitAndLossDetails(request):
 
         result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         order_total = 0
-        other_price = 0
+        # other_price = 0
         tax_price = 0
         temp_price = 0
+        vendor_funding = 0
         if result:
             for order in result:
                 gross_revenue += order['order_total']
@@ -3049,7 +3228,10 @@ def getProfitAndLossDetails(request):
                                 "tax_price": "$Pricing.ItemTax.Amount",
                                 "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
                                 "sku": "$product_ins.sku",
-                                "category": "$product_ins.category"
+                                "category": "$product_ins.category",
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                             }
                         }
                     ]
@@ -3058,7 +3240,8 @@ def getProfitAndLossDetails(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_data['cogs']
+                        total_cogs += item_data['total_cogs']
+                        vendor_funding += item_data['vendor_funding']
                         total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
@@ -3071,20 +3254,20 @@ def getProfitAndLossDetails(request):
                             product_categories[category] = 1
 
                         # Track product completeness
-                        if item_data['price'] and item_data['cogs'] and item_data['sku']:
+                        if item_data['price'] and item_data['total_cogs'] and item_data['sku']:
                             product_completeness["complete"] += 1
                         else:
                             product_completeness["incomplete"] += 1
 
-            other_price += order_total - temp_price - tax_price
-            net_profit = gross_revenue - (other_price + total_cogs)
+            # other_price += order_total - temp_price - ta x_price
+            net_profit = (temp_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
             
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((other_price + total_cogs) , 2),
+            "expenses": round((total_cogs) , 2),
             "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
+            "roi": round((net_profit / (total_cogs)) * 100, 2) if total_cogs > 0 else 0,
             "unitsSold": total_units,
             "refunds": refund,   
             "skuCount": len(sku_set),
@@ -3276,15 +3459,16 @@ def profit_loss_chart(request):
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
         order_total = 0
-        other_price = 0
+        # other_price = 0
         tax_price = 0
         temp_price = 0
+        vendor_funding = 0
 
         result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
-            temp_price = 0
+            # temp_price = 0
             tax_price = 0
 
             for item_id in order.get("order_items", []):
@@ -3305,7 +3489,10 @@ def profit_loss_chart(request):
                             "tax_price": "$Pricing.ItemTax.Amount",
                             "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                             "sku": "$product_ins.sku",
-                            "category": "$product_ins.category"
+                            "category": "$product_ins.category",
+                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                         }
                     }
                 ]
@@ -3314,28 +3501,29 @@ def profit_loss_chart(request):
                     item = item_result[0]
                     temp_price += item.get("price", 0)
                     tax_price += item.get("tax_price", 0)
-                    total_cogs += item.get("cogs", 0)
+                    total_cogs += item.get("total_cogs", 0)
+                    vendor_funding += item.get("vendor_funding", 0)
                     total_units += 1
                     sku = item.get("sku")
                     if sku:
                         sku_set.add(sku)
                     category = item.get("category", "Unknown")
                     product_categories[category] = product_categories.get(category, 0) + 1
-                    if item.get("price") and item.get("cogs") and sku:
+                    if item.get("price") and item.get("total_cogs") and sku:
                         product_completeness["complete"] += 1
                     else:
                         product_completeness["incomplete"] += 1
 
-            other_price += order_total - temp_price - tax_price
+            # other_price += order_total - temp_price - tax_price
 
-        net_profit = gross_revenue_amt - (other_price + total_cogs)
+        net_profit = (temp_price - total_cogs) + vendor_funding
         margin = (net_profit / gross_revenue_amt * 100) if gross_revenue_amt else 0
 
         return {
             "grossRevenue": round(gross_revenue_amt, 2),
-            "expenses": round((other_price + total_cogs) , 2),
+            "expenses": round((total_cogs) , 2),
             "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
+            "roi": round((net_profit / (total_cogs)) * 100, 2) if (total_cogs) else 0,
             "unitsSold": total_units,
             "refunds": refund,
             "skuCount": len(sku_set),
@@ -3443,15 +3631,16 @@ def profitLossExportXl(request):
         total_units = 0
         sku_set = set()
         order_total = 0
-        other_price = 0
+        # other_price = 0
         tax_price = 0
         temp_price = 0
+        vendor_funding = 0
         m_name = ""
         result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
-            temp_price = 0
+            # temp_price = 0
             tax_price = 0
             marketplace_id = order.get("marketplace_id", "")
             Marketplace_obj = Marketplace.objects.filter(id = marketplace_id).first()
@@ -3475,7 +3664,10 @@ def profitLossExportXl(request):
                             "price": "$Pricing.ItemPrice.Amount",
                             "tax_price": "$Pricing.ItemTax.Amount",
                             "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                            "sku": "$product_ins.sku"
+                            "sku": "$product_ins.sku",
+                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                         }
                     }
                 ]
@@ -3484,22 +3676,23 @@ def profitLossExportXl(request):
                     item = item_result[0]
                     temp_price += item.get("price", 0)
                     tax_price += item.get("tax_price", 0)
-                    total_cogs += item.get("cogs", 0)
+                    total_cogs += item.get("total_cogs", 0)
+                    vendor_funding += item.get("vendor_funding", 0)
                     total_units += 1
                     sku = item.get("sku")
                     if sku:
                         sku_set.add(sku)
 
-            other_price += order_total - temp_price - tax_price
+            # other_price += order_total - temp_price - tax_price
 
-        net_profit = gross_revenue_amt - (other_price + total_cogs)
+        net_profit = (temp_price - total_cogs) + vendor_funding
         margin = (net_profit / gross_revenue_amt * 100) if gross_revenue_amt else 0
 
         return {
             "Marketplace":m_name,
             "Date and Time":start_date,
             "Gross Revenue": round(gross_revenue_amt, 2),
-            "Expenses": round((other_price + total_cogs) , 2),
+            "Expenses": round((total_cogs) , 2),
             "Estimated Payout":0,
             "Net Profit": round(net_profit, 2),
             # "ROI (%)": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
@@ -3655,15 +3848,16 @@ def profitLossChartCsv(request):
         total_units = 0
         sku_set = set()
         order_total = 0
-        other_price = 0
+        # other_price = 0
         tax_price = 0
+        vendor_funding  =0 
         temp_price = 0
         m_name = ""
         result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
-            temp_price = 0
+            # temp_price = 0
             tax_price = 0
             marketplace_id = order.get("marketplace_id", "")
             Marketplace_obj = Marketplace.objects.filter(id = marketplace_id).first()
@@ -3687,7 +3881,10 @@ def profitLossChartCsv(request):
                             "price": "$Pricing.ItemPrice.Amount",
                             "tax_price": "$Pricing.ItemTax.Amount",
                             "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                            "sku": "$product_ins.sku"
+                            "sku": "$product_ins.sku",
+                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                         }
                     }
                 ]
@@ -3696,22 +3893,23 @@ def profitLossChartCsv(request):
                     item = item_result[0]
                     temp_price += item.get("price", 0)
                     tax_price += item.get("tax_price", 0)
-                    total_cogs += item.get("cogs", 0)
+                    total_cogs += item.get("total_cogs", 0)
+                    vendor_funding += item.get("vendor_funding", 0)
                     total_units += 1
                     sku = item.get("sku")
                     if sku:
                         sku_set.add(sku)
 
-            other_price += order_total - temp_price - tax_price
+            # other_price += order_total - temp_price - tax_price
 
-        net_profit = gross_revenue_amt - (other_price + total_cogs)
+        net_profit = (temp_price - total_cogs) + vendor_funding
         margin = (net_profit / gross_revenue_amt * 100) if gross_revenue_amt else 0
 
         return {
             "Marketplace":m_name,
             "Date and Time":start_date,
             "Gross Revenue": round(gross_revenue_amt, 2),
-            "Expenses": round((other_price + total_cogs) , 2),
+            "Expenses": round((total_cogs) , 2),
             "Estimated Payout":0,
             "Net Profit": round(net_profit, 2),
             # "ROI (%)": round((net_profit / (other_price + total_cogs)) * 100, 2) if (other_price + total_cogs) else 0,
@@ -4584,8 +4782,8 @@ def getSKUlist(request):
     ])
     if match =={}:
         pipeline.append({
-            "$sample": {"size": 10}  # Randomly select 10 documents
-        })
+            "$limit": 10}  # Randomly select 10 documents
+        )
     sku_list = list(Product.objects.aggregate(*pipeline))
     return sku_list
 

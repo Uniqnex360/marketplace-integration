@@ -221,7 +221,9 @@ def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product
                     "marketplace_id": 1,
                     "currency": 1,
                     "shipping_address": 1,
-                    "shipping_information": 1
+                    "shipping_information": 1,
+                    "shipping_price" : {"$ifNull": ["$ShippingPrice", 0.0]},
+                    "items_order_quantity" : {"$ifNull": ["$ItemsOrderQuantity", 0.0]},
                 }
             },
         ]
@@ -525,6 +527,9 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
         refund_quantity = 0
         total_units = 0
         other_price = 0
+        temp_other_price = 0
+        vendor_funding = 0
+
 
         bucket_start = datetime.strptime(time_key, "%Y-%m-%d %H:00:00")
         if preset in ["Today", "Yesterday"]:
@@ -542,7 +547,6 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
         # Process each order in the bucket
         for order in bucket_orders:
             gross_revenue += order.order_total
-            temp_other_price = 0
             tax_price = 0
             
             for item in order.order_items:
@@ -569,24 +573,28 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
                     },
                     {
                         "$project": {
-                            "_id": 0,
-                            "price": "$Pricing.ItemPrice.Amount",
-                            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                            "tax_price": "$Pricing.ItemTax.Amount",
+                            "_id" : 0,
+                            "price": {"$ifNull":["$Pricing.ItemPrice.Amount",0]},
+                            "cogs": {"$ifNull":["$product_ins.cogs",0.0]},
+                            "tax_price": {"$ifNull":["$Pricing.ItemTax.Amount",0]},
+                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                         }
                     }
                 ]
                 result = list(OrderItems.objects.aggregate(*pipeline))
                 if result:
                     temp_other_price += result[0]['price']
-                    total_cogs += result[0]['cogs']
+                    total_cogs += result[0]['total_cogs']
                     total_units += 1
                     tax_price += result[0]['tax_price']
+                    vendor_funding += result[0]['vendor_funding']
             
-            other_price += order.order_total - temp_other_price - tax_price
+            # other_price += order.order_total - temp_other_price - tax_price
 
         # Calculate net profit and margin
-        net_profit = gross_revenue - (other_price + total_cogs)
+        net_profit = (temp_other_price -  total_cogs) + vendor_funding
         profit_margin = round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0
 
         # Update graph data for this time bucket
@@ -612,6 +620,8 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None,brand_id=N
     net_profit = 0
     total_units = 0
     total_orders = 0
+    temp_other_price = 0
+    vendor_funding = 0
 
     result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
     refund_ins = refundOrder(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
@@ -625,8 +635,8 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None,brand_id=N
         for ins in result:
             tax_price = 0
             gross_revenue += ins['order_total']
-            other_price = 0
-            temp_other_price = 0 
+            # other_price = 0
+            # temp_other_price = 0 
             for j in ins['order_items']:                  
                 pipeline = [
                     {
@@ -651,20 +661,25 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None,brand_id=N
                     {
                         "$project": {
                             "_id" : 0,
-                            "price": "$Pricing.ItemPrice.Amount",
+                            "price": {"$ifNull":["$Pricing.ItemPrice.Amount",0]},
                             "cogs": {"$ifNull":["$product_ins.cogs",0.0]},
-                            "tax_price": "$Pricing.ItemTax.Amount",
+                            "tax_price": {"$ifNull":["$Pricing.ItemTax.Amount",0]},
+                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
                         }
                     }
                 ]
                 result = list(OrderItems.objects.aggregate(*pipeline))
-                tax_price += result[0]['tax_price']
-                temp_other_price += result[0]['price']
-                total_cogs += result[0]['cogs']
-                total_units += 1
-        other_price += ins['order_total'] - temp_other_price - tax_price
+                if result != []:
+                    tax_price += result[0]['tax_price']
+                    temp_other_price += result[0]['price']
+                    total_cogs += result[0]['total_cogs']
+                    total_units += 1
+                    vendor_funding += result[0]['vendor_funding'] 
+        # other_price += ins['order_total'] - temp_other_price - tax_price
 
-        net_profit = gross_revenue - (other_price + total_cogs)
+        net_profit = (temp_other_price - total_cogs) + vendor_funding
 
     # Total values
     total = {

@@ -617,7 +617,10 @@ def syncRecentWalmartOrders():
                     order_items.append(process_walmart_order(order_line_ins,order_date))
 
                 order_status = order_line_ins.get('orderLineStatuses', {}).get('orderLineStatus', [{}])[0].get('status', "")
-
+                try:
+                    shipping_information=eval(row['shippingInfo']) if row.get('shippingInfo') else "",
+                except:
+                    shipping_information = {}
                 
                 order = Order(
                     marketplace_id=marketplace_id,
@@ -625,7 +628,7 @@ def syncRecentWalmartOrders():
                     customer_order_id=str(row.get('customerOrderId', "")),
                     customer_email_id=str(row.get('customerEmailId', "")),
                     order_date=order_date,
-                    shipping_information=eval(row['shippingInfo']) if row.get('shippingInfo') else "",
+                    shipping_information=shipping_information,
                     fulfillment_channel=shipNode.get('type', ""),
                     order_details=order_details.get('orderLine', []),
                     order_items = order_items,
