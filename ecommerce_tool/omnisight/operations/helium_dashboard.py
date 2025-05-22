@@ -4482,6 +4482,13 @@ def productsTrafficandConversions(request):
     data['asin'] = product_obj.product_id
     # Calculate date ranges
     start_date, end_date = get_date_range(preset)
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    if start_date and end_date:
+        start_date = datetime.strptime(start_date, "%Y-%m-%d")
+        end_date = datetime.strptime(end_date, "%Y-%m-%d")
+    else:
+        start_date, end_date = get_date_range(preset)
 
     data['date'] = start_date.strftime("%b %d, %Y") + " - " + end_date.strftime("%b %d, %Y")
     

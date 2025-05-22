@@ -2486,7 +2486,6 @@ def getProductVariant(request):
     variant_list = list()
     product_id = request.GET.get('product_id')
     parant_sku = DatabaseModel.get_document(Product.objects,{"id" : product_id},['parent_sku']).parent_sku
-    print("parant_sku",parant_sku)
     if parant_sku != None:
         pipeline = [
             {
@@ -2525,6 +2524,5 @@ def getProductVariant(request):
             }
         ]
         variant_list = list(Product.objects.aggregate(*(pipeline)))
-        print(variant_list)
         
     return variant_list
