@@ -997,8 +997,8 @@ def calculate_metricss(start_date, end_date,marketplace_id=[],brand_id=[],produc
                     if item_data.get('page_views') and item_data.get('sessions'):
                         page_views = item_data['page_views']
                         sessions = item_data['sessions']
-                    total_cogs += result[0]['total_cogs']
-                    vendor_funding +=  result[0]['vendor_funding']
+                    total_cogs += item_result[0]['total_cogs']
+                    vendor_funding +=  item_result[0]['vendor_funding']
                     total_units += 1
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
@@ -1507,8 +1507,8 @@ def getPeriodWiseDataCustom(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += result[0]['total_cogs']
-                        vendor_funding += result[0]['vendor_funding']
+                        total_cogs += item_result[0]['total_cogs']
+                        vendor_funding += item_result[0]['vendor_funding']
                         total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
