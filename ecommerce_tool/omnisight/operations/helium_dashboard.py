@@ -895,6 +895,7 @@ def get_products_with_pagination(request):
                     "netProfitforPeriod": {"$ifNull": ["$netProfit", 0]},
                     "margin": {"$ifNull": ["$margin", "0%"]},
                     "marginforPeriod": {"$ifNull": ["$margin", "0%"]},
+                    "vendor_funding" : {"$ifNull": ["$vendor_funding", 0]},
                     "totalchannelFees": {
                         "$cond": {
                         "if": {"$eq": ["$marketplace", "Amazon"]},
@@ -915,6 +916,15 @@ def get_products_with_pagination(request):
         # Extract total count and products
         total_products = result[0]["total_count"][0]["count"] if result[0]["total_count"] else 0
         products = result[0]["products"]
+        for ins in products:
+            p_ins = getdaywiseproductssold(start_date, end_date, ins['id'], False)
+            for p in p_ins:
+                ins['salesForToday'] += p['total_price']
+                ins['unitsSoldForToday'] += p['total_quantity']
+                ins['grossRevenue'] += p['total_price']
+            ins['netprofit'] = (ins['grossRevenue'] - (ins['cogs'] * ins['unitsSoldForToday']))+ (ins['vendor_funding']* ins['unitsSoldForToday'])
+            ins['margin'] = (ins['netprofit'] / ins['grossRevenue']) * 100 if ins['grossRevenue'] > 0 else 0
+
 
         # Prepare response data
         response_data = {
