@@ -839,73 +839,73 @@ def get_products_with_pagination(request):
         pipeline.extend([
             {
             "$facet": {
-                "total_count": [{"$count": "count"}],
-                "products": [
-                {"$skip": (page - 1) * page_size},
-                {"$limit": page_size},
-                {
-                    "$lookup" : {
-                    "from" : "marketplace",
-                    "localField" : "marketplace_id",
-                    "foreignField" : "_id",
-                    "as" : "marketplace_ins"
-                    }
-                },
-                {
-                    "$unwind" : "$marketplace_ins"
-                },
-                {
-                    "$project": {
-                    "_id": 0,
-                    "id": {"$toString":"$_id"},
-                    "asin": {"$ifNull": ["$product_id", "N/A"]},
-                    "sellerSku": {"$ifNull": ["$sku", "N/A"]},
-                    "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
-                    "title": {"$ifNull": ["$product_title", "N/A"]},
-                    "marketplace": {"$ifNull": ["$marketplace_ins.name", "N/A"]},
-                    "fulfillmentChannel": {
-                        "$cond": {
-                        "if": {"$eq": ["$fullfillment_by_channel", True]},
-                        "then": "FBA",
-                        "else": "FBM"
-                        }
-                    },
-                    "price": {"$ifNull": ["$price", "0.0"]},
-                    "stock" : {"$ifNull": ["$quantity", 0]},
-                    "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
-                    "cogs": {
-                        "$cond": {
-                        "if": {"$eq": ["$marketplace", "Amazon"]},
-                        "then": "$total_cogs",
-                        "else": "$w_total_cogs"
-                        }
-                    },
-                    "category": {"$ifNull": ["$category", "N/A"]},
-                    "salesForToday": {"$ifNull": ["$salesForToday", 0]},
-                    "salesForTodayPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
-                    "unitsSoldForToday": {"$ifNull": ["$unitsSoldForToday", 0]},
-                    "unitsSoldForPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
-                    "refunds": {"$ifNull": ["$refunds", 0]},
-                    "refundsforPeriod": {"$ifNull": ["$refunds", 0]},
-                    "refundsAmount": {"$ifNull": ["$refundsAmount", 0]},
-                    "refundsAmountforPeriod": {"$ifNull": ["$refundsAmount", 0]},
-                    "grossRevenue": {"$ifNull": ["$grossProfit", 0]},
-                    "grossRevenueforPeriod": {"$ifNull": ["$grossProfit", 0]},
-                    "netProfit": {"$ifNull": ["$netProfit", 0]},
-                    "netProfitforPeriod": {"$ifNull": ["$netProfit", 0]},
-                    "margin": {"$ifNull": ["$margin", "0%"]},
-                    "marginforPeriod": {"$ifNull": ["$margin", "0%"]},
-                    "vendor_funding" : {"$ifNull": ["$vendor_funding", 0]},
-                    "totalchannelFees": {
-                        "$cond": {
-                        "if": {"$eq": ["$marketplace", "Amazon"]},
-                        "then": {"$sum":["$referral_fee","$a_shipping_cost"]},
-                        "else": {"$sum":["$walmart_fee","$w_shiping_cost"]}
-                        }
-                    },
-                    }
+            "total_count": [{"$count": "count"}],
+            "products": [
+            {"$skip": (page - 1) * page_size},
+            {"$limit": page_size},
+            {
+                "$lookup" : {
+                "from" : "marketplace",
+                "localField" : "marketplace_id",
+                "foreignField" : "_id",
+                "as" : "marketplace_ins"
                 }
-                ]
+            },
+            {
+                "$unwind" : "$marketplace_ins"
+            },
+            {
+                "$project": {
+                "_id": 0,
+                "id": {"$toString":"$_id"},
+                "asin": {"$ifNull": ["$product_id", "N/A"]},
+                "sellerSku": {"$ifNull": ["$sku", "N/A"]},
+                "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
+                "title": {"$ifNull": ["$product_title", "N/A"]},
+                "marketplace": {"$ifNull": ["$marketplace_ins.name", "N/A"]},
+                "fulfillmentChannel": {
+                "$cond": {
+                "if": {"$eq": ["$fullfillment_by_channel", True]},
+                "then": "FBA",
+                "else": "FBM"
+                }
+                },
+                "price": {"$ifNull": ["$price", "0.0"]},
+                "stock" : {"$ifNull": ["$quantity", 0]},
+                "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
+                "cogs": {
+                "$cond": {
+                "if": {"$eq": ["$marketplace_ins.name", "Amazon"]},
+                "then": {"$ifNull": ["$total_cogs", 0]},
+                "else": {"$ifNull": ["$w_total_cogs", 0]}
+                }
+                },
+                "category": {"$ifNull": ["$category", "N/A"]},
+                "salesForToday": {"$ifNull": ["$salesForToday", 0]},
+                "salesForTodayPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
+                "unitsSoldForToday": {"$ifNull": ["$unitsSoldForToday", 0]},
+                "unitsSoldForPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
+                "refunds": {"$ifNull": ["$refunds", 0]},
+                "refundsforPeriod": {"$ifNull": ["$refunds", 0]},
+                "refundsAmount": {"$ifNull": ["$refundsAmount", 0]},
+                "refundsAmountforPeriod": {"$ifNull": ["$refundsAmount", 0]},
+                "grossRevenue": {"$ifNull": ["$grossProfit", 0]},
+                "grossRevenueforPeriod": {"$ifNull": ["$grossProfit", 0]},
+                "netProfit": {"$ifNull": ["$netProfit", 0]},
+                "netProfitforPeriod": {"$ifNull": ["$netProfit", 0]},
+                "margin": {"$ifNull": ["$margin", "0%"]},
+                "marginforPeriod": {"$ifNull": ["$margin", "0%"]},
+                "vendor_funding" : {"$ifNull": ["$vendor_funding", 0]},
+                "totalchannelFees": {
+                "$cond": {
+                "if": {"$eq": ["$marketplace_ins.name", "Amazon"]},
+                "then": {"$sum":["$referral_fee","$a_shipping_cost"]},
+                "else": {"$sum":["$walmart_fee","$w_shiping_cost"]}
+                }
+                },
+                }
+            }
+            ]
             }
             }
         ])
