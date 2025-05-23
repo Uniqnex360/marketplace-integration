@@ -579,62 +579,76 @@ def syncRecentWalmartOrders():
     }
     # Get today's date
     today = datetime.utcnow()
-    # Fetch last 30 days of orders
-    start_date = (today - timedelta(days=180)).strftime("%Y-%m-%dT00:00:00Z")
+    # Fetch last 1 day of orders
+    start_date = (today - timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
     end_date = today.strftime("%Y-%m-%dT23:59:59Z")
 
-    url = f"{base_url}?createdStartDate={start_date}&createdEndDate={end_date}"
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        result = response.json()
-        fetched_orders = result.get('list', {}).get('elements', {}).get('order', [])
-        # total_fetched += len(fetched_orders)
+    url = f"{base_url}?createdStartDate={start_date}&createdEndDate={end_date}&limit=100"
+    fetched_orders = []
+    next_cursor = None
+
+    while True:
+        if next_cursor:
+            url = f"{base_url}{next_cursor}"  # Use the nextCursor for pagination
+
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            result = response.json()
+            fetched_orders.extend(result.get('list', {}).get('elements', {}).get('order', []))
+            orders.extend(fetched_orders)
+            next_cursor = result.get("list", {}).get("meta", {}).get("nextCursor")
+            if not next_cursor:
+                break  # No more pages left
+        else:
+            print(f"❌ Error fetching orders: [HTTP {response.status_code}] {response.text}")
+            break
 
        
-        orders.extend(fetched_orders)
-        for row in orders:
-            order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": str(row.get('purchaseOrderId', ""))})
-            if order_obj is not None:
-                print(f"Order with purchase order ID {row['purchaseOrderId']} already exists. Skipping...")
-            else:
-                print(f"Creating order with purchase order ID {row['purchaseOrderId']}...")
-                order_date = row.get('orderDate', "")
-                if order_date:
-                    order_date = datetime.fromtimestamp(int(order_date) / 1000)
-                order_items = list()
-                shipNode = eval(str(row['shipNode'])) if row.get('shipNode') else {}
-                order_details = eval(str(row['orderLines'])) if row.get('orderLines') else []
-                order_total = 0
-                currency = "USD"
-                order_status = ""
-                for order_line_ins in order_details.get('orderLine', []):
-                    for charge_ins in order_line_ins.get('charges', {}).get('charge', []):
-                        tax = 0
-                        if charge_ins.get('tax') is not None:
-                            tax = float(charge_ins['tax']['taxAmount']['amount'])
-                        order_total += float(charge_ins['chargeAmount']['amount']) + tax
-                        currency = charge_ins['chargeAmount']['currency']
-                    order_items.append(process_walmart_order(order_line_ins,order_date))
+        
 
-                order_status = order_line_ins.get('orderLineStatuses', {}).get('orderLineStatus', [{}])[0].get('status', "")
-                try:
-                    shipping_information=eval(row['shippingInfo']) if row.get('shippingInfo') else "",
-                except:
-                    shipping_information = {}
-                
-                order = Order(
-                    marketplace_id=marketplace_id,
-                    purchase_order_id=str(row.get('purchaseOrderId', "")),
-                    customer_order_id=str(row.get('customerOrderId', "")),
-                    customer_email_id=str(row.get('customerEmailId', "")),
-                    order_date=order_date,
-                    shipping_information=shipping_information,
-                    fulfillment_channel=shipNode.get('type', ""),
-                    order_details=order_details.get('orderLine', []),
-                    order_items = order_items,
-                    order_total=order_total,
-                    currency=currency,
-                    order_status=order_status,
-                )
-                order.save()
+    for row in orders:
+        order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": str(row.get('purchaseOrderId', ""))})
+        if order_obj is not None:
+            print(f"Order with purchase order ID {row['purchaseOrderId']} already exists. Skipping...")
+        else:
+            print(f"Creating order with purchase order ID {row['purchaseOrderId']}...")
+            order_date = row.get('orderDate', "")
+            if order_date:
+                order_date = datetime.fromtimestamp(int(order_date) / 1000)
+            order_items = list()
+            shipNode = eval(str(row['shipNode'])) if row.get('shipNode') else {}
+            order_details = eval(str(row['orderLines'])) if row.get('orderLines') else []
+            order_total = 0
+            currency = "USD"
+            order_status = ""
+            for order_line_ins in order_details.get('orderLine', []):
+                for charge_ins in order_line_ins.get('charges', {}).get('charge', []):
+                    tax = 0
+                    if charge_ins.get('tax') is not None:
+                        tax = float(charge_ins['tax']['taxAmount']['amount'])
+                    order_total += float(charge_ins['chargeAmount']['amount']) + tax
+                    currency = charge_ins['chargeAmount']['currency']
+                order_items.append(process_walmart_order(order_line_ins,order_date))
+
+            order_status = order_line_ins.get('orderLineStatuses', {}).get('orderLineStatus', [{}])[0].get('status', "")
+            try:
+                shipping_information=eval(row['shippingInfo']) if row.get('shippingInfo') else "",
+            except:
+                shipping_information = {}
+            
+            order = Order(
+                marketplace_id=marketplace_id,
+                purchase_order_id=str(row.get('purchaseOrderId', "")),
+                customer_order_id=str(row.get('customerOrderId', "")),
+                customer_email_id=str(row.get('customerEmailId', "")),
+                order_date=order_date,
+                shipping_information=shipping_information,
+                fulfillment_channel=shipNode.get('type', ""),
+                order_details=order_details.get('orderLine', []),
+                order_items = order_items,
+                order_total=order_total,
+                currency=currency,
+                order_status=order_status,
+            )
+            order.save()
     return orders
