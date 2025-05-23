@@ -596,7 +596,11 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
                 result = list(OrderItems.objects.aggregate(*pipeline))
                 if result:
                     temp_other_price += result[0]['price']
-                    total_cogs += result[0]['total_cogs']
+                    
+                    if order.manufacture_id.name == "Amazon":
+                        total_cogs += result[0]['total_cogs'] 
+                    else:
+                        total_cogs += result[0]['w_total_cogs']
                     total_units += 1
                     tax_price += result[0]['tax_price']
                     vendor_funding += result[0]['vendor_funding']
@@ -693,7 +697,11 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None,brand_id=N
                 if result != []:
                     tax_price += result[0]['tax_price']
                     temp_other_price += result[0]['price']
-                    total_cogs += result[0]['total_cogs']
+                    
+                    if ins['manufacture_name'] == "Amazon":
+                        total_cogs += result[0]['total_cogs'] 
+                    else:
+                        total_cogs += result[0]['w_total_cogs']
                     total_units += 1
                     vendor_funding += result[0]['vendor_funding'] 
         # other_price += ins['order_total'] - temp_other_price - tax_price
