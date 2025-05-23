@@ -149,7 +149,10 @@ def get_metrics_by_date_range(request):
                     if result != []:
                         tax_price += result[0]['tax_price']
                         temp_other_price += result[0]['price']
-                        total_cogs += result[0]['total_cogs']
+                        if ins['marketplace_name'] == "Amazon":
+                            total_cogs += result[0]['total_cogs']
+                        else:
+                            total_cogs += result[0]['w_total_cogs']
                         total_units += 1
                         vendor_funding += result[0]['vendor_funding']
             # other_price += ins['order_total'] - temp_other_price - tax_price
@@ -1013,8 +1016,12 @@ def calculate_metricss(start_date, end_date,marketplace_id=[],brand_id=[],produc
                     if item_data.get('page_views') and item_data.get('sessions'):
                         page_views = item_data['page_views']
                         sessions = item_data['sessions']
-                    total_cogs += item_result[0]['total_cogs']
-                    vendor_funding +=  item_result[0]['vendor_funding']
+                    
+                    if order['marketplace_name'] == "Amazon":
+                        total_cogs += item_data['total_cogs']
+                    else:
+                        total_cogs += item_data['w_total_cogs']
+                    vendor_funding +=  item_data['vendor_funding']
                     total_units += 1
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
@@ -1190,8 +1197,11 @@ def getPeriodWiseDataXl(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_result[0]['total_cogs']
-                        vendor_funding += item_result[0]['vendor_funding']
+                        if order['marketplace_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs']
+                        else:
+                            total_cogs += item_data['w_total_cogs']
+                        vendor_funding += item_data['vendor_funding']
                         if item_data.get('page_views') and item_data.get('sessions'):
                             page_views = item_data['page_views']
                             sessions = item_data['sessions']
@@ -1365,8 +1375,11 @@ def exportPeriodWiseCSV(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_result[0]['total_cogs']
-                        vendor_funding += item_result[0]['vendor_funding']
+                        if order['marketplace_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs']
+                        else:
+                            total_cogs += item_data['w_total_cogs']
+                        vendor_funding += item_data['vendor_funding']
                         if item_data.get('page_views') and item_data.get('sessions'):
                             page_views = item_data['page_views']
                             sessions = item_data['sessions']
@@ -1523,7 +1536,10 @@ def getPeriodWiseDataCustom(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_result[0]['total_cogs']
+                        if order['marketplace_name'] == "Amazon":
+                            total_cogs += item_result[0]['total_cogs']
+                        else:
+                            total_cogs += item_result[0]['w_total_cogs']
                         vendor_funding += item_result[0]['vendor_funding']
                         total_units += 1
                         if item_data.get('sku'):
@@ -1770,8 +1786,11 @@ def allMarketplaceData(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_result[0]['total_cogs']
-                        vendor_funding += item_result[0]['vendor_funding'] 
+                        if order['marketplace_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs']
+                        else:
+                            total_cogs += item_data['w_total_cogs']
+                        vendor_funding += item_data['vendor_funding'] 
                         total_product_cost += item_data['price']
                         total_units += 1
                         if item_data.get('sku'):
@@ -1876,8 +1895,11 @@ def allMarketplaceData(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_result[0]['total_cogs']
-                        vendor_funding += item_result[0]['vendor_funding']
+                        if order['marketplace_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs']
+                        else:
+                            total_cogs += item_data['w_total_cogs']
+                        vendor_funding += item_data['vendor_funding']
                         total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
@@ -2024,8 +2046,11 @@ def getProductPerformanceSummary(request):
 
                 images = item_data.get("images", [])
                 price = item_data.get("price", 0.0)
-                cogs = item_data.get("total_cogs", 0.0) + item_data.get("vendor_funding", 0.0)
-                vendor_funding 
+                if order['marketplace_name'] == "Amazon":
+                    cogs = item_data.get("total_cogs", 0.0) + item_data.get("vendor_funding", 0.0)
+                else:
+                    cogs = item_data.get("w_total_cogs", 0.0) + item_data.get("vendor_funding", 0.0)
+                 
                 temp_price += price
                 total_cogs += cogs
                 if sku:
@@ -2138,7 +2163,10 @@ def downloadProductPerformanceSummary(request):
                 
                 tax_price = item_data.get("tax_price", 0.0)
                 price = item_data.get("price", 0.0)
-                cogs = item_data.get("total_cogs", 0.0)
+                if order['marketplace_name'] == "Amazon":
+                    cogs = item_data.get("total_cogs", 0.0)
+                else:
+                    cogs = item_data.get("w_total_cogs", 0.0)
                 temp_price += price
                 total_cogs += cogs
                 vendor_funding += item_data.get("vendor_funding", 0.0)
@@ -2309,7 +2337,10 @@ def downloadProductPerformanceCSV(request):
                 
                 price = item_data.get("price", 0.0)
                 tax_price = item_data.get("tax_price", 0.0)
-                cogs = item_data.get("total_cogs", 0.0)
+                if order['marketplace_name'] == "Amazon":
+                    cogs = item_data.get("total_cogs", 0.0)
+                else:
+                    cogs = item_data.get("w_total_cogs", 0.0)
                 temp_price += price
                 total_cogs += cogs
                 vendor_funding += item_data.get("vendor_funding", 0.0)
@@ -2473,8 +2504,11 @@ def allMarketplaceDataxl(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_result[0]['total_cogs'] 
-                        vendor_funding += item_result[0]['vendor_funding']
+                        if order['manufacture_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs'] 
+                        else:
+                            total_cogs += item_data['w_total_cogs']
+                        vendor_funding += item_data['vendor_funding']
                         total_product_cost += item_data['price']
                         total_units += 1
                         if item_data.get('sku'):
@@ -2626,7 +2660,10 @@ def downloadMarketplaceDataCSV(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_data['total_cogs']
+                        if order['manufacture_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs'] 
+                        else:
+                            total_cogs += item_data['w_total_cogs']
                         vendor_funding += item_data['vendor_funding']
                         total_product_cost += item_data['price']
                         total_units += 1
@@ -3147,7 +3184,10 @@ def calculate_metrics(start_date, end_date):
                     item_data = item_result[0]
                     temp_price += item_data['price']
                     tax_price += item_data['tax_price']
-                    total_cogs += item_data['total_cogs']
+                    if order['manufacture_name'] == "Amazon":
+                        total_cogs += item_data['total_cogs'] 
+                    else:
+                        total_cogs += item_data['w_total_cogs']
                     vendor_funding += item_data['vendor_funding']
                     total_units += 1
                     if item_data.get('sku'):
@@ -3265,7 +3305,10 @@ def getProfitAndLossDetails(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        total_cogs += item_data['total_cogs']
+                        if order['manufacture_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs'] 
+                        else:
+                            total_cogs += item_data['w_total_cogs']
                         vendor_funding += item_data['vendor_funding']
                         total_units += 1
                         if item_data.get('sku'):
@@ -3526,7 +3569,11 @@ def profit_loss_chart(request):
                     item = item_result[0]
                     temp_price += item.get("price", 0)
                     tax_price += item.get("tax_price", 0)
-                    total_cogs += item.get("total_cogs", 0)
+                    
+                    if order['manufacture_name'] == "Amazon":
+                        total_cogs += item.get("total_cogs", 0) 
+                    else:
+                        total_cogs += item.get("w_total_cogs", 0)
                     vendor_funding += item.get("vendor_funding", 0)
                     total_units += 1
                     sku = item.get("sku")
@@ -3701,7 +3748,10 @@ def profitLossExportXl(request):
                     item = item_result[0]
                     temp_price += item.get("price", 0)
                     tax_price += item.get("tax_price", 0)
-                    total_cogs += item.get("total_cogs", 0)
+                    if order['manufacture_name'] == "Amazon":
+                        total_cogs += item.get("total_cogs", 0) 
+                    else:
+                        total_cogs += item.get("w_total_cogs", 0)
                     vendor_funding += item.get("vendor_funding", 0)
                     total_units += 1
                     sku = item.get("sku")
@@ -3918,7 +3968,10 @@ def profitLossChartCsv(request):
                     item = item_result[0]
                     temp_price += item.get("price", 0)
                     tax_price += item.get("tax_price", 0)
-                    total_cogs += item.get("total_cogs", 0)
+                    if order['manufacture_name'] == "Amazon":
+                        total_cogs += item.get("total_cogs", 0) 
+                    else:
+                        total_cogs += item.get("w_total_cogs", 0)
                     vendor_funding += item.get("vendor_funding", 0)
                     total_units += 1
                     sku = item.get("sku")
