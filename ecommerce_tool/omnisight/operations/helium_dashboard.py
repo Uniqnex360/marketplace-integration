@@ -372,14 +372,13 @@ def LatestOrdersTodayAPIView(request):
 
 @csrf_exempt
 def LatestOrdersTodayAPIView(request):
-    json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
-    product_id = json_request.get('product_id', None)
-    brand_id = json_request.get('brand_id', None)
-    manufacturer_name = json_request.getlist('manufacturer_name',[])
-    fulfillment_channel = json_request.get('fulfillment_channel',None)
+    marketplace_id = request.GET.get('marketplace_id', None)
+    product_id = request.GET.getlist('product_id', [])
+    brand_id = request.GET.getlist('brand_id', [])
+    manufacturer_name = request.GET.getlist('manufacturer_name', [])
+    fulfillment_channel = request.GET.get('fulfillment_channel',None)
     # 1️⃣ Compute bounds for "today" based on the user's local timezone
-    user_timezone = json_request.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
+    user_timezone = request.GET.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
     local_tz = timezone(user_timezone)
 
     now = datetime.now(local_tz)
