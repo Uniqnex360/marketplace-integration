@@ -3,10 +3,11 @@ from bson import ObjectId
 from datetime import datetime,timedelta
 from dateutil.relativedelta import relativedelta
 from ecommerce_tool.crud import DatabaseModel
+import threading
 
 
 
-def getOrdersListBasedonProductId(productIds):
+def getOrdersListBasedonProductId(productIds,start_date=None, end_date=None):
     """
     Fetches the list of orders based on the provided product ID using a pipeline aggregation.
 
@@ -16,7 +17,15 @@ def getOrdersListBasedonProductId(productIds):
     Returns:
         list: A list of dictionaries containing order details.
     """
-    pipeline = [
+    pipeline = []
+    if start_date and end_date:
+        pipeline.append({
+            "$match": {
+                "order_date": {"$gte": start_date, "$lte": end_date},
+                "order_status": {"$in": ['Shipped', 'Delivered']}
+            }
+        })
+    pipeline.extend([
         {
             "$lookup": {
                 "from": "order_items",
@@ -43,7 +52,7 @@ def getOrdersListBasedonProductId(productIds):
                 "orderIds": 1
             }
         }
-    ]
+    ])
     orders = list(Order.objects.aggregate(*pipeline))
     if orders != []:
         orders = orders[0]['orderIds']
@@ -51,7 +60,7 @@ def getOrdersListBasedonProductId(productIds):
 
 
 
-def getproductIdListBasedonbrand(brandIds):
+def getproductIdListBasedonbrand(brandIds,start_date=None, end_date=None):
     """
     Fetches the list of product IDs based on the provided brand ID using a pipeline aggregation.
 
@@ -83,11 +92,11 @@ def getproductIdListBasedonbrand(brandIds):
     ]
     products = list(Product.objects.aggregate(*pipeline))
     if products != []:
-        orders = getOrdersListBasedonProductId(products[0]['productIds'])
+        orders = getOrdersListBasedonProductId(products[0]['productIds'],start_date, end_date)
     return orders
 
 
-def getproductIdListBasedonManufacture(manufactureName = []):
+def getproductIdListBasedonManufacture(manufactureName = [],start_date=None, end_date=None):
     """
     Fetches the list of product IDs based on the provided brand ID using a pipeline aggregation.
 
@@ -119,7 +128,7 @@ def getproductIdListBasedonManufacture(manufactureName = []):
     ]
     products = list(Product.objects.aggregate(*pipeline))
     if products != []:
-        orders = getOrdersListBasedonProductId(products[0]['productIds'])
+        orders = getOrdersListBasedonProductId(products[0]['productIds'],start_date, end_date)
     return orders
 
 def get_date_range(preset):
@@ -180,17 +189,17 @@ def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product
         match['marketplace_id'] = ObjectId(marketplace_id)
 
     if manufacuture_name != None and manufacuture_name != "" and manufacuture_name != []:
-        ids = getproductIdListBasedonManufacture(manufacuture_name)
+        ids = getproductIdListBasedonManufacture(manufacuture_name,start_date, end_date)
         match["_id"] = {"$in": ids}
     
     elif product_id != None and product_id != "" and product_id != []:
         product_id = [ObjectId(pid) for pid in product_id]
-        ids = getOrdersListBasedonProductId(product_id)
+        ids = getOrdersListBasedonProductId(product_id,start_date, end_date)
         match["_id"] = {"$in": ids}
 
     elif brand_id != None and brand_id != "" and brand_id != []:
         brand_id = [ObjectId(bid) for bid in brand_id]
-        ids = getproductIdListBasedonbrand(brand_id)
+        ids = getproductIdListBasedonbrand(brand_id,start_date, end_date)
         match["_id"] = {"$in": ids}
 
     pipeline = [
@@ -225,7 +234,7 @@ def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product
                     "shipping_price" : {"$ifNull": ["$ShippingPrice", 0.0]},
                     "items_order_quantity" : {"$ifNull": ["$ItemsOrderQuantity", 0.0]},
                 }
-            },
+            }
         ]
     return list(Order.objects.aggregate(*pipeline))
 
@@ -281,17 +290,17 @@ def refundOrder(start_date, end_date, marketplace_id=None,brand_id=None,product_
         match['marketplace_id'] = ObjectId(marketplace_id)
 
     if manufacuture_name != None and manufacuture_name != "" and manufacuture_name != []:
-        ids = getproductIdListBasedonManufacture(manufacuture_name)
+        ids = getproductIdListBasedonManufacture(manufacuture_name,start_date, end_date)
         match["_id"] = {"$in": ids}
 
     elif product_id != None and product_id != "" and product_id != []:
         product_id = [ObjectId(pid) for pid in product_id]
-        ids = getOrdersListBasedonProductId(product_id)
+        ids = getOrdersListBasedonProductId(product_id,start_date, end_date)
         match["_id"] = {"$in": ids}
 
     elif brand_id != None and brand_id != "" and brand_id != []:
         brand_id = [ObjectId(bid) for bid in brand_id]
-        ids = getproductIdListBasedonbrand(brand_id)
+        ids = getproductIdListBasedonbrand(brand_id,start_date, end_date)
         match["_id"] = {"$in": ids}
         
     pipeline = [
@@ -518,8 +527,9 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
         orders = DatabaseModel.list_documents(Order.objects,match)
         orders_by_bucket[dt.strftime(time_format)] = list(orders)
 
-    # Process each time bucket
-    for time_key in graph_data:
+    def process_time_bucket(time_key):
+        nonlocal graph_data, orders_by_bucket, preset, marketplace_id, brand_id, product_id
+
         bucket_orders = orders_by_bucket.get(time_key, [])
         gross_revenue = 0
         total_cogs = 0
@@ -530,14 +540,14 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
         temp_other_price = 0
         vendor_funding = 0
 
-
         bucket_start = datetime.strptime(time_key, "%Y-%m-%d %H:00:00")
         if preset in ["Today", "Yesterday"]:
             bucket_end = bucket_start.replace(minute=59, second=59)
         else:
             bucket_end = bucket_start.replace(hour=23, minute=59, second=59)
-        # Calculate refunds first (same as your total calculation)
-        refund_ins = refundOrder(bucket_start, bucket_end,marketplace_id,brand_id,product_id)
+
+        # Calculate refunds first
+        refund_ins = refundOrder(bucket_start, bucket_end, marketplace_id, brand_id, product_id)
         if refund_ins:
             for ins in refund_ins:
                 if ins['order_date'] >= bucket_start and ins['order_date'] < bucket_end:
@@ -548,9 +558,9 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
         for order in bucket_orders:
             gross_revenue += order.order_total
             tax_price = 0
-            
+
             for item in order.order_items:
-                # Get product and COGS (same as your total calculation)
+                # Get product and COGS
                 pipeline = [
                     {
                         "$match": {
@@ -573,13 +583,13 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
                     },
                     {
                         "$project": {
-                            "_id" : 0,
-                            "price": {"$ifNull":["$Pricing.ItemPrice.Amount",0]},
-                            "cogs": {"$ifNull":["$product_ins.cogs",0.0]},
-                            "tax_price": {"$ifNull":["$Pricing.ItemTax.Amount",0]},
-                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
+                            "_id": 0,
+                            "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                            "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+                            "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                            "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                            "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
                         }
                     }
                 ]
@@ -590,11 +600,9 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
                     total_units += 1
                     tax_price += result[0]['tax_price']
                     vendor_funding += result[0]['vendor_funding']
-            
-            # other_price += order.order_total - temp_other_price - tax_price
 
         # Calculate net profit and margin
-        net_profit = (temp_other_price -  total_cogs) + vendor_funding
+        net_profit = (temp_other_price - total_cogs) + vendor_funding
         profit_margin = round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0
 
         # Update graph data for this time bucket
@@ -606,8 +614,19 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
             "units_sold": total_units,
             "refund_amount": round(refund_amount, 2),
             "refund_quantity": refund_quantity,
-            "date" : time_key
+            "date": time_key
         }
+
+    # Create threads for each time bucket
+    threads = []
+    for time_key in graph_data:
+        thread = threading.Thread(target=process_time_bucket, args=(time_key,))
+        threads.append(thread)
+        thread.start()
+
+    # Wait for all threads to complete
+    for thread in threads:
+        thread.join()
 
     return graph_data
 

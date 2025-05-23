@@ -354,3 +354,209 @@ def getAccesstoken(user_id):
 #             print(f"Carrier: {shipment.get('CarrierCode', 'N/A')}")
 #     else:
 #         print("\n❌ No tracking information found.")
+
+
+
+
+import requests
+import time
+from datetime import datetime, timedelta
+
+# Your existing Amazon credentials
+CLIENT_ID = "amzn1.application-oa2-client.dd341f4b454b44ffa569334a60332762"
+CLIENT_SECRET = "amzn1.oa2-cs.v1.bea7c499c5b8a4ee86c138ee474d5bb64706d74f5e67fde0f4b4d3e65917c10a"
+REFRESH_TOKEN = "Atzr|IwEBIL9SYl71vJBdgX3s44ryAJ8nWxGkaL-dZ-0ppOMTYoyVwHP8TOVS7VP0-9CgcaKks8GxeYouft6_eBtVYnDhDiRG11k96dHy6qoGM4LIpi5K_KQehTGJT1bVKsgBP6f6bgwq1vAwk9GEUiTcGBaLS9RVBqL2BIFUgUZ0az8zDLmpEqkhKA-vWyf0JFxivFcVkbtaMOZ4zwjE-Or6mnxlhxp24w5CNPU_00tFKSOJyIWdmEbdcju6v4eZm3VdRqjbXYI7Yr9IEkxd_apRdNIcykM_ukWROjARdrH5SLhTh_74n2T6tLsK35bmN5IMdgyekzg"
+MARKETPLACE_ID = "ATVPDKIKX0DER"
+SELLER_ID = "ADBBQREI9OKOD"
+
+# SP-API endpoint for US marketplace
+SP_API_ENDPOINT = 'https://sellingpartnerapi-na.amazon.com'
+
+def get_access_token(grantless=False):
+    """Get an access token."""
+    if grantless:
+        # Use grantless authentication for operations that don't require seller authorization
+        payload = {
+            'grant_type': 'client_credentials',
+            'client_id': CLIENT_ID,
+            'client_secret': CLIENT_SECRET,
+            'scope': 'sellingpartnerapi::reports' 
+        }
+    else:
+        # Use refresh token for operations that require seller authorization
+        payload = {
+            'grant_type': 'refresh_token',
+            'refresh_token': REFRESH_TOKEN,
+            'client_id': CLIENT_ID,
+            'client_secret': CLIENT_SECRET
+        }
+    
+    response = requests.post('https://api.amazon.com/auth/o2/token', data=payload)
+    if response.status_code != 200:
+        print(f"Error getting access token: {response.text}")
+        return None
+    return response.json()['access_token']
+
+def request_report(report_type="GET_FLAT_FILE_ORDERS_DATA"):
+    """Request a report."""
+    # For most reports, use the regular auth
+    access_token = get_access_token(grantless=False)
+    if not access_token:
+        return None
+    
+    headers = {
+        'x-amz-access-token': access_token,
+        'Content-Type': 'application/json'
+    }
+    
+    # Get current date and 30 days ago
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=30)
+    date_format = '%Y-%m-%dT%H:%M:%SZ'
+    
+    payload = {
+        "reportType": report_type,
+        "marketplaceIds": [MARKETPLACE_ID]
+    }
+    
+    # Add date range if needed for the report type
+    if report_type in ["GET_FLAT_FILE_ORDERS_DATA", "GET_TRAFFIC_REPORT"]:
+        payload.update({
+            "dataStartTime": start_date.strftime(date_format),
+            "dataEndTime": end_date.strftime(date_format)
+        })
+    
+    print(f"Requesting report with payload: {payload}")
+    
+    response = requests.post(
+        f"{SP_API_ENDPOINT}/reports/2020-09-04/reports",
+        headers=headers,
+        json=payload
+    )
+    
+    if response.status_code == 202 or response.status_code == 200:
+        return response.json().get('reportId')
+    else:
+        print(f"Error requesting report: {response.status_code} - {response.text}")
+        return None
+
+def check_report_status(report_id):
+    """Check the status of a report."""
+    access_token = get_access_token()
+    if not access_token:
+        return None
+    
+    headers = {
+        'x-amz-access-token': access_token
+    }
+    
+    response = requests.get(
+        f"{SP_API_ENDPOINT}/reports/2020-09-04/reports/{report_id}",
+        headers=headers
+    )
+    
+    if response.status_code != 200:
+        print(f"Error checking report status: {response.status_code} - {response.text}")
+        return None
+    
+    return response.json()
+
+def get_report_document(document_id):
+    """Get the report document."""
+    access_token = get_access_token()
+    if not access_token:
+        return None
+    
+    headers = {
+        'x-amz-access-token': access_token
+    }
+    
+    response = requests.get(
+        f"{SP_API_ENDPOINT}/reports/2020-09-04/documents/{document_id}",
+        headers=headers
+    )
+    
+    if response.status_code != 200:
+        print(f"Erroget_date_ranger getting document: {response.status_code} - {response.text}")
+        return None
+    
+    doc_info = response.json()
+    
+    # Download the report
+    report_response = requests.get(doc_info['url'])
+    
+    # Handle compression if necessary
+    if 'compressionAlgorithm' in doc_info and doc_info['compressionAlgorithm'] == 'GZIP':
+        import gzip
+        import io
+        return gzip.decompress(report_response.content).decode('utf-8')
+    
+    return report_response.text
+
+def get_amazon_report():
+    # Try different report types until one works
+    report_types = [
+        "GET_FLAT_FILE_OPEN_LISTINGS_DATA",  # Catalog inventory
+        "GET_MERCHANT_LISTINGS_ALL_DATA",    # Detailed inventory
+        "GET_FLAT_FILE_ORDERS_DATA",         # Order data
+        "GET_TRAFFIC_REPORT"                 # Traffic data (your original request)
+    ]
+    
+    report_id = None
+    for report_type in report_types:
+        print(f"\nTrying report type: {report_type}")
+        report_id = request_report(report_type)
+        if report_id:
+            print(f"Success! Report requested with ID: {report_id}")
+            break
+        else:
+            print(f"Failed to request {report_type} report, trying next type...")
+    
+    if not report_id:
+        print("All report types failed. Please check your permissions in Seller Central.")
+        return
+    
+    # Wait for processing
+    max_attempts = 30
+    attempts = 0
+    document_id = None
+    
+    while attempts < max_attempts:
+        report_status = check_report_status(report_id)
+        if not report_status:
+            print("Failed to check report status")
+            return
+        
+        processing_status = report_status.get('processingStatus')
+        print(f"Report status: {processing_status}")
+        
+        if processing_status == 'DONE':
+            document_id = report_status.get('reportDocumentId')
+            break
+        elif processing_status in ['CANCELLED', 'FATAL']:
+            print(f"Report processing failed: {report_status}")
+            return
+        
+        print("Waiting 30 seconds...")
+        time.sleep(30)
+        attempts += 1
+    
+    if not document_id:
+        print("Report processing timed out")
+        return
+    
+    # Get the report data
+    report_data = get_report_document(document_id)
+    if not report_data:
+        print("Failed to download report")
+        return
+    
+    # Save report to file
+    filename = f"amazon_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    with open(filename, 'w') as f:
+        f.write(report_data)
+    
+    print(f"Report saved to {filename}")
+    print(f"Preview:\n{report_data[:500]}...")
+
+# get_amazon_report()

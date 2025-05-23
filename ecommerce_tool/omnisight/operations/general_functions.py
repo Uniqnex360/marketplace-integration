@@ -264,31 +264,43 @@ def fetchProductDetails(request):
 def getOrdersBasedOnProduct(request):
     data = dict()
     product_id = request.GET.get('product_id')
-
     pipeline = [
         {
             "$match": {
-                "ProductDetails.product_id": ObjectId(product_id)  # Ensure product_id is a valid ObjectId
+                "order_items": {"$exists": True, "$ne": []}
             }
         },
         {
             "$lookup": {
-                "from": "order",
-                "localField": "_id",
-                "foreignField": "order_items",
-                "as": "order_ins"
+                "from": "order_items",
+                "localField": "order_items",
+                "foreignField": "_id",
+                "as": "order_items"
             }
         },
         {
-            "$unwind": {
-                "path": "$order_ins",
-                "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
+            "$unwind": "$order_items"
+        },
+        {
+            "$match": {
+                "order_items.ProductDetails.product_id": ObjectId(product_id)
+            }
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "purchase_order_id": 1,
+                "order_date": 1,
+                "order_status": 1,
+                "order_total": 1,
+                "currency": 1,
+                "marketplace_id": 1
             }
         },
         {
             "$lookup": {
                 "from": "marketplace",
-                "localField": "order_ins.marketplace_id",
+                "localField": "marketplace_id",
                 "foreignField": "_id",
                 "as": "marketplace_ins"
             }
@@ -296,47 +308,33 @@ def getOrdersBasedOnProduct(request):
         {
             "$unwind": {
                 "path": "$marketplace_ins",
-                "preserveNullAndEmptyArrays": True  # Ensure the product is not removed if no orders exist
+                "preserveNullAndEmptyArrays": True
             }
         },
         {
             "$project": {
                 "_id": 0,
-                "id": {"$toString": "$order_ins._id"},
-                "purchase_order_id": "$order_ins.purchase_order_id",
+                "id": {"$toString": "$_id"},
+                "purchase_order_id": 1,
                 "order_date": {
                     "$dateToString": {
                         "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                        "date": "$order_ins.order_date",
+                        "date": "$order_date",
                     }
                 },
-                "order_status": "$order_ins.order_status",
-                "order_total": "$order_ins.order_total",
-                "currency": "$order_ins.currency",
-                "marketplace_name": "$marketplace_ins.name",
-                "filtered_order": {"$arrayElemAt": ["$order_ins.filtered_order", 0]}  # Get first matching order item
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "id": {"$toString" : "$_id"},
-                "purchase_order_id": 1,
-                "order_date": 1,
                 "order_status": 1,
-                "order_total": 1,
+                "order_total": {"$round" : ["$order_total", 2]},
                 "currency": 1,
-                "marketplace_name": 1
+                "marketplace_name": "$marketplace_ins.name"
             }
         },
         {
-            "$sort" :  {
-                "order_date" : -1
+            "$sort": {
+                "order_date": -1
             }
         }
     ]
-
-    orders = list(OrderItems.objects.aggregate(*pipeline))
+    orders = list(Order.objects.aggregate(*pipeline, allowDiskUse=True))
     custom_pipeline = [
         {
             "$match": {

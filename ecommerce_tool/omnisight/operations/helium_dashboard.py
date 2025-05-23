@@ -22,6 +22,7 @@ from django.db.models import Sum, Q
 from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount, getproductIdListBasedonManufacture,totalRevenueCalculation,get_graph_data
 from ecommerce_tool.crud import DatabaseModel
 from omnisight.operations.common_utils import calculate_listing_score
+import threading
 
 
 @csrf_exempt
@@ -64,16 +65,28 @@ def get_metrics_by_date_range(request):
     metrics = {}
     graph_data = {}
 
-    for key, date_range in last_8_days_filter.items():
+    def process_date_range(key, date_range, results):
         gross_revenue = 0
-        result = grossRevenue(date_range["start"], date_range["end"],marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        if result != []:            
+        result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+        if result != []:
             for ins in result:
                 gross_revenue += ins['order_total']
-                
-        graph_data[key] = {
+        results[key] = {
             "gross_revenue": round(gross_revenue, 2),
         }
+
+    results = {}
+    threads = []
+    for key, date_range in last_8_days_filter.items():
+        thread = threading.Thread(target=process_date_range, args=(key, date_range, results))
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    # Ensure the results are in the same order as the keys in last_8_days_filter
+    graph_data = {key: results[key] for key in last_8_days_filter.keys()}
     metrics["graph_data"] = graph_data
     for key, date_range in date_filters.items():
         gross_revenue = 0
