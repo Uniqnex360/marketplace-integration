@@ -656,6 +656,3 @@ def syncRecentWalmartOrders():
             )
             order.save()
     return orders
-
-
-print(syncRecentWalmartOrders())
