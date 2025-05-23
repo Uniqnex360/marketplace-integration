@@ -610,6 +610,10 @@ def syncRecentWalmartOrders():
         order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": str(row.get('purchaseOrderId', ""))})
         if order_obj is not None:
             print(f"Order with purchase order ID {row['purchaseOrderId']} already exists. Skipping...")
+            try:
+                DatabaseModel.update_documents(Order.objects, {"purchase_order_id": str(row.get('purchaseOrderId', ""))}, {"order_status": row['orderLines']['orderLine'][0]['orderLineStatuses']['orderLineStatus'][0]['status']})
+            except:
+                pass
         else:
             print(f"Creating order with purchase order ID {row['purchaseOrderId']}...")
             order_date = row.get('orderDate', "")
@@ -652,3 +656,6 @@ def syncRecentWalmartOrders():
             )
             order.save()
     return orders
+
+
+print(syncRecentWalmartOrders())
