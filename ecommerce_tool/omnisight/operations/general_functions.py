@@ -455,6 +455,27 @@ def fetchAllorders(request):
         pipeline.append(match)
         count_pipeline.append(match)
     if market_place_id != "custom":
+        if sort_by != None and sort_by != "":
+            sort = {
+                "$sort" : {
+                    sort_by : int(sort_by_value)
+                }
+            }
+        else:
+            sort =  {
+                "$sort" : {
+                    "order_date" : -1
+                }
+            }
+        pipeline.append(sort)
+        pipeline.extend([
+            {
+            "$skip": skip
+        },
+        {
+            "$limit": limit + skip
+        }
+        ])
         pipeline.extend([
 
             {
@@ -489,27 +510,7 @@ def fetchAllorders(request):
                 }
             }
         ])
-        if sort_by != None and sort_by != "":
-            sort = {
-                "$sort" : {
-                    sort_by : int(sort_by_value)
-                }
-            }
-        else:
-            sort =  {
-                "$sort" : {
-                    "order_date" : -1
-                }
-            }
-        pipeline.append(sort)
-        pipeline.extend([
-            {
-            "$skip": skip
-        },
-        {
-            "$limit": limit + skip
-        }
-        ])
+        
         orders = list(Order.objects.aggregate(*(pipeline)))
         count_pipeline.extend([
             {
