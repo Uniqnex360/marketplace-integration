@@ -22,7 +22,7 @@ def getOrdersListBasedonProductId(productIds,start_date=None, end_date=None):
         pipeline.append({
             "$match": {
                 "order_date": {"$gte": start_date, "$lte": end_date},
-                "order_status": {"$in": ['Shipped', 'Delivered']}
+                "order_status": {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
             }
         })
     pipeline.extend([
@@ -182,7 +182,7 @@ def get_date_range(preset):
 def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacuture_name=[],fulfillment_channel=None):
     match=dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered']}
+    match['order_status'] = {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
@@ -378,7 +378,7 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
         {
             "$match": {
                 "order_date": {"$gte": start_date, "$lte": end_date},
-                "order_status": {"$in": ['Shipped', 'Delivered']}
+                "order_status": {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
             }
         },
         {
@@ -500,7 +500,7 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
     # Get all orders grouped by time bucket
     orders_by_bucket = {}
     match = dict()
-    match['order_status__in'] = ['Shipped', 'Delivered']
+    match['order_status__in'] = ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
 
