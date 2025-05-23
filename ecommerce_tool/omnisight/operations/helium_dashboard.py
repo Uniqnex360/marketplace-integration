@@ -939,7 +939,7 @@ def get_products_with_pagination(request):
                 ins['grossRevenue'] += p['total_price']
             ins['grossRevenue'] = round(ins['grossRevenue'], 2)
             ins['netprofit'] = round(((ins['grossRevenue'] - (ins['cogs'] * ins['unitsSoldForToday']))+ (ins['vendor_funding']* ins['unitsSoldForToday'])),2)
-            ins['margin'] = (ins['netprofit'] / ins['grossRevenue']) * 100 if ins['grossRevenue'] > 0 else 0
+            ins['margin'] = round((ins['netprofit'] / ins['grossRevenue']) * 100 if ins['grossRevenue'] > 0 else 0,2)
 
 
         # Prepare response data
