@@ -432,33 +432,35 @@ def LatestOrdersTodayAPIView(request):
         # Only process if the bucket exists in our chart
         if bk in chart:
             chart[bk]["ordersCount"] += 1
-            
-            # iterate each OrderItems instance referenced on this order
-            for item in order.order_items:
-                sku = item.ProductDetails.SKU
-                asin = item.ProductDetails.ASIN if hasattr(item.ProductDetails, 'ASIN') and item.ProductDetails.ASIN is not None else ""
-                qty = item.ProductDetails.QuantityOrdered
-                unit_price = item.Pricing.ItemPrice.Amount
-                title = item.ProductDetails.Title
-                # lazy-load the Product doc for image_url
-                prod_ref = item.ProductDetails.product_id
-                img_url = prod_ref.image_url if prod_ref else None
+            try:
+                # iterate each OrderItems instance referenced on this order
+                for item in order.order_items:
+                    sku = item.ProductDetails.SKU
+                    asin = item.ProductDetails.ASIN if hasattr(item.ProductDetails, 'ASIN') and item.ProductDetails.ASIN is not None else ""
+                    qty = item.ProductDetails.QuantityOrdered
+                    unit_price = item.Pricing.ItemPrice.Amount
+                    title = item.ProductDetails.Title
+                    # lazy-load the Product doc for image_url
+                    prod_ref = item.ProductDetails.product_id
+                    img_url = prod_ref.image_url if prod_ref else None
 
-                total_price = round(unit_price * qty, 2)
-                purchase_dt = order_local_time.strftime("%Y-%m-%d %H:%M:%S")
+                    total_price = round(unit_price * qty, 2)
+                    purchase_dt = order_local_time.strftime("%Y-%m-%d %H:%M:%S")
 
-                orders_out.append({
-                    "sellerSku": sku,
-                    "asin": asin,
-                    "title": title,
-                    "quantityOrdered": qty,
-                    "imageUrl": img_url,
-                    "price": total_price,
-                    "purchaseDate": purchase_dt
-                })
+                    orders_out.append({
+                        "sellerSku": sku,
+                        "asin": asin,
+                        "title": title,
+                        "quantityOrdered": qty,
+                        "imageUrl": img_url,
+                        "price": total_price,
+                        "purchaseDate": purchase_dt
+                    })
 
-                # add to units count
-                chart[bk]["unitsCount"] += qty
+                    # add to units count
+                    chart[bk]["unitsCount"] += qty
+            except:
+                pass
 
     # 5️⃣ sort orders by most recent purchaseDate
     orders_out.sort(key=lambda o: o["purchaseDate"], reverse=True)
