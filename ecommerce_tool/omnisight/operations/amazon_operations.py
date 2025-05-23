@@ -432,7 +432,7 @@ file_path2 = "/home/lexicon/walmart/Amazonorders.xlsx"
 def process_amazon_order(json_data,order_date=None):
     """Processes a single Amazon order item and saves it to the OrderItems collection."""
     try:
-        product = DatabaseModel.get_document(Product.objects, {"product_title": json_data.get("Title", "")}, ["id"])
+        product = DatabaseModel.get_document(Product.objects, {"sku": json_data.get("SellerSKU", "")}, ["id"])
         product_id = product.id if product else None
     except:
         product_id = None
@@ -561,7 +561,7 @@ def syncRecentAmazonOrders():
                     report_url = response.json().get("payload", {})
                     order_details =  report_url.get('OrderItems', [])
                     for order_ins in order_details:
-                        order_items.append(process_amazon_order(order_ins),order_date)
+                        order_items.append(process_amazon_order(order_ins,order_date))
 
 
                 order = Order(
