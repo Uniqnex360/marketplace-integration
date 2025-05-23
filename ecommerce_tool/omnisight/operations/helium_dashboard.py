@@ -737,6 +737,8 @@ def get_products_with_pagination(request):
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
     parent = json_request.get('parent',True)
+    sort_by = json_request.get('sort_by', 'units_sold')  # 'price', 'refund', etc.
+    sort_by_value = json_request.get('sort_by_value', -1)  # 'asc' or 'desc'
 
 
     if start_date != None and start_date != "":
@@ -883,16 +885,16 @@ def get_products_with_pagination(request):
                 "else": "FBM"
                 }
                 },
-                "price": {"$ifNull": ["$price", "0.0"]},
+                "price": {"$ifNull": [{"$round":["$price",2]}, "0.0"]},
                 "stock" : {"$ifNull": ["$quantity", 0]},
                 "listingScore": {"$ifNull": ["$listingScore", "N/A"]},
-                "cogs": {
+                "cogs": {"$round" :[{
                 "$cond": {
                 "if": {"$eq": ["$marketplace_ins.name", "Amazon"]},
                 "then": {"$ifNull": ["$total_cogs", 0]},
                 "else": {"$ifNull": ["$w_total_cogs", 0]}
                 }
-                },
+                },2]},
                 "category": {"$ifNull": ["$category", "N/A"]},
                 "salesForToday": {"$ifNull": ["$salesForToday", 0]},
                 "salesForTodayPeriod": {"$ifNull": ["$unitsSoldForPeriod", 0]},
@@ -909,13 +911,13 @@ def get_products_with_pagination(request):
                 "margin": {"$ifNull": ["$margin", "0%"]},
                 "marginforPeriod": {"$ifNull": ["$margin", "0%"]},
                 "vendor_funding" : {"$ifNull": ["$vendor_funding", 0]},
-                "totalchannelFees": {
+                "totalchannelFees": {"$round" : [{
                 "$cond": {
                 "if": {"$eq": ["$marketplace_ins.name", "Amazon"]},
                 "then": {"$sum":["$referral_fee","$a_shipping_cost"]},
                 "else": {"$sum":["$walmart_fee","$w_shiping_cost"]}
                 }
-                },
+                },2]},
                 }
             }
             ]
@@ -935,7 +937,8 @@ def get_products_with_pagination(request):
                 ins['salesForToday'] += p['total_price']
                 ins['unitsSoldForToday'] += p['total_quantity']
                 ins['grossRevenue'] += p['total_price']
-            ins['netprofit'] = (ins['grossRevenue'] - (ins['cogs'] * ins['unitsSoldForToday']))+ (ins['vendor_funding']* ins['unitsSoldForToday'])
+            ins['grossRevenue'] = round(ins['grossRevenue'], 2)
+            ins['netprofit'] = round(((ins['grossRevenue'] - (ins['cogs'] * ins['unitsSoldForToday']))+ (ins['vendor_funding']* ins['unitsSoldForToday'])),2)
             ins['margin'] = (ins['netprofit'] / ins['grossRevenue']) * 100 if ins['grossRevenue'] > 0 else 0
 
 
