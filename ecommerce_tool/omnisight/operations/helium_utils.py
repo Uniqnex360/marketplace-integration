@@ -597,7 +597,7 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
                 if result:
                     temp_other_price += result[0]['price']
                     
-                    if order.manufacture_id.name == "Amazon":
+                    if order.marketplace_id.name == "Amazon":
                         total_cogs += result[0]['total_cogs'] 
                     else:
                         total_cogs += result[0]['w_total_cogs']
@@ -698,7 +698,7 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None,brand_id=N
                     tax_price += result[0]['tax_price']
                     temp_other_price += result[0]['price']
                     
-                    if ins['manufacture_name'] == "Amazon":
+                    if ins['marketplace_name'] == "Amazon":
                         total_cogs += result[0]['total_cogs'] 
                     else:
                         total_cogs += result[0]['w_total_cogs']

@@ -2505,7 +2505,7 @@ def allMarketplaceDataxl(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        if order['manufacture_name'] == "Amazon":
+                        if order['marketplace_name'] == "Amazon":
                             total_cogs += item_data['total_cogs'] 
                         else:
                             total_cogs += item_data['w_total_cogs']
@@ -2661,7 +2661,7 @@ def downloadMarketplaceDataCSV(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        if order['manufacture_name'] == "Amazon":
+                        if order['marketplace_name'] == "Amazon":
                             total_cogs += item_data['total_cogs'] 
                         else:
                             total_cogs += item_data['w_total_cogs']
@@ -3185,7 +3185,7 @@ def calculate_metrics(start_date, end_date):
                     item_data = item_result[0]
                     temp_price += item_data['price']
                     tax_price += item_data['tax_price']
-                    if order['manufacture_name'] == "Amazon":
+                    if order['marketplace_name'] == "Amazon":
                         total_cogs += item_data['total_cogs'] 
                     else:
                         total_cogs += item_data['w_total_cogs']
@@ -3306,7 +3306,7 @@ def getProfitAndLossDetails(request):
                         item_data = item_result[0]
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
-                        if order['manufacture_name'] == "Amazon":
+                        if order['marketplace_name'] == "Amazon":
                             total_cogs += item_data['total_cogs'] 
                         else:
                             total_cogs += item_data['w_total_cogs']
@@ -3571,7 +3571,7 @@ def profit_loss_chart(request):
                     temp_price += item.get("price", 0)
                     tax_price += item.get("tax_price", 0)
                     
-                    if order['manufacture_name'] == "Amazon":
+                    if order['marketplace_name'] == "Amazon":
                         total_cogs += item.get("total_cogs", 0) 
                     else:
                         total_cogs += item.get("w_total_cogs", 0)
@@ -3749,7 +3749,7 @@ def profitLossExportXl(request):
                     item = item_result[0]
                     temp_price += item.get("price", 0)
                     tax_price += item.get("tax_price", 0)
-                    if order['manufacture_name'] == "Amazon":
+                    if order['marketplace_name'] == "Amazon":
                         total_cogs += item.get("total_cogs", 0) 
                     else:
                         total_cogs += item.get("w_total_cogs", 0)
@@ -3969,7 +3969,7 @@ def profitLossChartCsv(request):
                     item = item_result[0]
                     temp_price += item.get("price", 0)
                     tax_price += item.get("tax_price", 0)
-                    if order['manufacture_name'] == "Amazon":
+                    if order['marketplace_name'] == "Amazon":
                         total_cogs += item.get("total_cogs", 0) 
                     else:
                         total_cogs += item.get("w_total_cogs", 0)
