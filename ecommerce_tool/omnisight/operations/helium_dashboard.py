@@ -388,7 +388,7 @@ def LatestOrdersTodayAPIView(request):
     match = dict()
     match['order_date__gte'] = start_of_day
     match['order_date__lte'] = end_of_day
-    match['order_status__in'] = ['Shipped', 'Delivered']
+    match['order_status__in'] = ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
@@ -597,7 +597,7 @@ def get_top_products(request):
     }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
     match = dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered']}
+    match['order_status'] = {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
     if metric == "refund":
