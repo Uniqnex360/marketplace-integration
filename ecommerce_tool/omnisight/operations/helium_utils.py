@@ -719,3 +719,114 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None,brand_id=N
         "refund_quantity": refund_quantity_ins
     }
     return total
+
+
+def calculate_metricss(
+    from_date,
+    to_date,
+    marketplace_id,
+    brand_id,
+    product_id,
+    manufacturer_name,
+    fulfillment_channel,
+    include_extra_fields=False
+):
+    gross_revenue = 0
+    total_cogs = 0
+    net_profit = 0
+    total_units = 0
+    vendor_funding = 0
+    temp_price = 0
+    refund = 0
+    tax_price = 0
+    sessions = 0
+    page_views = 0
+    unitSessionPercentage = 0
+    sku_set = set()
+
+    result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+    all_item_ids = [ObjectId(item_id) for order in result for item_id in order['order_items']]
+
+    item_pipeline = [
+        { "$match": { "_id": { "$in": all_item_ids } } },
+        {
+            "$lookup": {
+                "from": "product",
+                "localField": "ProductDetails.product_id",
+                "foreignField": "_id",
+                "as": "product_ins"
+            }
+        },
+        { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
+        {
+            "$project": {
+                "price": "$Pricing.ItemPrice.Amount",
+                "tax_price": "$Pricing.ItemTax.Amount",
+                "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
+                "sku": "$product_ins.sku",
+                "total_cogs": { "$ifNull": ["$product_ins.total_cogs", 0] },
+                "w_total_cogs": { "$ifNull": ["$product_ins.w_total_cogs", 0] },
+                "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] },
+                "page_views": "$product_ins.page_views",
+                "sessions": "$product_ins.sessions"
+            }
+        }
+    ]
+
+    item_details_map = {str(item['_id']): item for item in OrderItems.objects.aggregate(*item_pipeline)}
+
+    for order in result:
+        gross_revenue += order['order_total']
+        for item_id in order['order_items']:
+            item_data = item_details_map.get(str(item_id))
+            if item_data:
+                temp_price += item_data['price']
+                tax_price += item_data.get('tax_price', 0)
+
+                # Amazon vs Non-Amazon COGS
+                if order.get('marketplace_name') == "Amazon":
+                    total_cogs += item_data.get('total_cogs', 0)
+                else:
+                    total_cogs += item_data.get('w_total_cogs', 0)
+
+                vendor_funding += item_data.get('vendor_funding', 0)
+                total_units += 1
+
+                if item_data.get('sku'):
+                    sku_set.add(item_data['sku'])
+
+                # Sessions and Page Views (use last non-null)
+                if item_data.get("page_views"):
+                    page_views = item_data["page_views"]
+                if item_data.get("sessions"):
+                    sessions = item_data["sessions"]
+
+    net_profit = (temp_price - total_cogs) + vendor_funding
+    margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+    unitSessionPercentage = (total_units / sessions) * 100 if sessions else 0
+
+    base_result = {
+        "grossRevenue": round(gross_revenue, 2),
+        "expenses": round(total_cogs, 2),
+        "netProfit": round(net_profit, 2),
+        "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs > 0 else 0,
+        "unitsSold": total_units,
+        "refunds": refund,
+        "skuCount": len(sku_set),
+        "sessions": sessions,
+        "pageViews": page_views,
+        "unitSessionPercentage": round(unitSessionPercentage, 2),
+        "margin": round(margin, 2),
+        "orders": len(result)
+    }
+
+    if include_extra_fields:
+        base_result.update({
+            "seller": "",
+            "tax_price": round(tax_price, 2),
+            "total_cogs": round(total_cogs, 2),
+            "product_cost": 0,
+            "shipping_cost": 0,
+        })
+
+    return base_result

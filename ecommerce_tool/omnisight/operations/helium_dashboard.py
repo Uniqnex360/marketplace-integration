@@ -19,10 +19,12 @@ from bson import ObjectId
 from calendar import monthrange
 from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
 from django.db.models import Sum, Q
-from omnisight.operations.helium_utils import get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount, getproductIdListBasedonManufacture,totalRevenueCalculation,get_graph_data
+from omnisight.operations.helium_utils import calculate_metricss, get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount, getproductIdListBasedonManufacture,totalRevenueCalculation,get_graph_data
 from ecommerce_tool.crud import DatabaseModel
 from omnisight.operations.common_utils import calculate_listing_score
 import threading
+from concurrent.futures import ThreadPoolExecutor
+
 
 
 @csrf_exempt
@@ -959,136 +961,37 @@ def get_products_with_pagination(request):
 
 #########################SELVA WORKING APIS##########
 
-def calculate_metricss(start_date, end_date,marketplace_id=[],brand_id=[],product_id=[],manufacturer_name=None,fulfillment_channel=None):
-    gross_revenue = 0
-    total_cogs = 0
-    refund = 0
-    net_profit = 0
-    margin = 0
-    total_units = 0
-    sku_set = set()
-    result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-    order_total = 0
-    other_price = 0
-    tax_price = 0
-    page_views = 0
-    temp_price = 0
-    sessions = 0
-    vendor_funding = 0
-    unitSessionPercentage = 0
-    if result:
-        for order in result:
-            gross_revenue += order['order_total']
-            order_total = order['order_total']
-            # temp_price = 0
-            tax_price = 0
-            for item_id in order['order_items']:
-                item_pipeline = [
-                    { "$match": { "_id": item_id } },
-                    {
-                        "$lookup": {
-                            "from": "product",
-                            "localField": "ProductDetails.product_id",
-                            "foreignField": "_id",
-                            "as": "product_ins"
-                        }
-                    },
-                    { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
-                    {
-                        "$project": {
-                            "_id": 0,
-                            "price": "$Pricing.ItemPrice.Amount",
-                            "tax_price": "$Pricing.ItemTax.Amount",
-                            "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
-                            "sku": "$product_ins.sku",
-                            "page_views": "$product_ins.page_views",
-                            "sessions": "$product_ins.sessions",
-                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
-                        }
-                    }
-                ]
-                item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-                if item_result:
-                    item_data = item_result[0]
-                    temp_price += item_data['price']
-                    tax_price += item_data['tax_price']
-                    if item_data.get('page_views') and item_data.get('sessions'):
-                        page_views = item_data['page_views']
-                        sessions = item_data['sessions']
-                    
-                    if order['marketplace_name'] == "Amazon":
-                        total_cogs += item_data['total_cogs']
-                    else:
-                        total_cogs += item_data['w_total_cogs']
-                    vendor_funding +=  item_data['vendor_funding']
-                    total_units += 1
-                    if item_data.get('sku'):
-                        sku_set.add(item_data['sku'])
-            # other_price += (order_total - temp_price) + total_cogs
-        # other_price += order_total - temp_price - tax_price
-        net_profit = (temp_price - total_cogs) + vendor_funding
-
-
-        
-        margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-        if sessions != 0:
-                unitSessionPercentage = (total_units/sessions )*100
-    return {
-        "grossRevenue": round(gross_revenue, 2),
-        "expenses": round((total_cogs) , 2),
-        "netProfit": round(net_profit, 2),
-        "roi": round((net_profit / (total_cogs)) * 100, 2) if total_cogs > 0 else 0,
-        "unitsSold": total_units,
-        "refunds": refund,  
-        "skuCount": len(sku_set),
-        "sessions": sessions,
-        "pageViews": page_views,
-        "unitSessionPercentage": unitSessionPercentage,
-        "margin": round(margin, 2)
-    }
-
 @csrf_exempt
 def getPeriodWiseData(request):
     json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id',None)
+    marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
-    product_id = json_request.get('product_id',[])
-    manufacturer_name = json_request.get('manufacturer_name',[])
-    fulfillment_channel = json_request.get('fulfillment_channel',None)
+    product_id = json_request.get('product_id', [])
+    manufacturer_name = json_request.get('manufacturer_name', [])
+    fulfillment_channel = json_request.get('fulfillment_channel', None)
 
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    def format_period_metrics(label, current_start, current_end, prev_start, prev_end,marketplace_id=[],brand_id=[],product_id=[],manufacturer_name=None,fulfillment_channel=None):
-        current_metrics = calculate_metricss(current_start, current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        previous_metrics = calculate_metricss(prev_start, prev_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+
+    def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
+        current_metrics = calculate_metricss(current_start, current_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+        previous_metrics = calculate_metricss(prev_start, prev_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+
         if label in ['Today', 'Yesterday']:
-            output = {
-                "label": label,
-                "period": {
-                    "current": {
-                        "from": to_utc_format(current_start)
-                    },
-                    "previous": {
-                        "from": to_utc_format(prev_start)
-                    }
-                }
+            period = {
+                "current": { "from": to_utc_format(current_start) },
+                "previous": { "from": to_utc_format(prev_start) }
             }
         else:
-            output = {
-                "label": label,
-                "period": {
-                    "current": {
-                        "from": to_utc_format(current_start),
-                        "to": to_utc_format(current_end)
-                    },
-                    "previous": {
-                        "from": to_utc_format(prev_start),
-                        "to": to_utc_format(prev_end)
-                    }
-                }
+            period = {
+                "current": { "from": to_utc_format(current_start), "to": to_utc_format(current_end) },
+                "previous": { "from": to_utc_format(prev_start), "to": to_utc_format(prev_end) }
             }
+
+        output = {
+            "label": label,
+            "period": period
+        }
 
         for key in current_metrics:
             output[key] = {
@@ -1099,145 +1002,65 @@ def getPeriodWiseData(request):
 
         return output
 
-    # Yesterday
+    # Date ranges
     yes_current_start, yes_current_end = get_date_range("Yesterday")
-    
-    
     yes_previous_start = yes_current_start - timedelta(days=1)
-    yes_previous_end = yes_current_end + timedelta(hours=23, minutes=59, seconds=59)
+    yes_previous_end = yes_current_start - timedelta(seconds=1)
 
     l7_current_start, l7_current_end = get_date_range("Last 7 days")
     l7_previous_start = l7_current_start - timedelta(days=7)
     l7_previous_end = l7_current_start - timedelta(seconds=1)
 
     l30_current_start, l30_current_end = get_date_range("Last 30 days")
-
     l30_previous_start = l30_current_start - timedelta(days=30)
     l30_previous_end = l30_current_start - timedelta(seconds=1)
-
-    l30_current_start, l30_current_end = get_date_range("Last 30 days")
 
     y_current_start, y_current_end = get_date_range("This Year")
     ly_current_start, ly_current_end = get_date_range("Last Year")
 
-    # ytd_previous_start = datetime(y_current_end, 1, 1)
-    # ytd_previous_end = datetime(last_year, y_current_start.month, y_current_start.day, 23, 59, 59)
-    
-    response_data = {
-        "yesterday": format_period_metrics("Yesterday", yes_current_start, yes_current_end, yes_previous_start, yes_previous_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        "last7Days": format_period_metrics("Last 7 Days", l7_current_start, l7_current_end, l7_previous_start, l7_previous_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        "last30Days": format_period_metrics("Last 30 Days", l30_current_start, l30_current_end, l30_previous_start, l30_previous_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        "yearToDate": format_period_metrics("Year to Date", y_current_start, y_current_end, ly_current_start, ly_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-    }
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            "yesterday": executor.submit(format_period_metrics, "Yesterday", yes_current_start, yes_current_end, yes_previous_start, yes_previous_end),
+            "last7Days": executor.submit(format_period_metrics, "Last 7 Days", l7_current_start, l7_current_end, l7_previous_start, l7_previous_end),
+            "last30Days": executor.submit(format_period_metrics, "Last 30 Days", l30_current_start, l30_current_end, l30_previous_start, l30_previous_end),
+            "yearToDate": executor.submit(format_period_metrics, "Year to Date", y_current_start, y_current_end, ly_current_start, ly_current_end),
+        }
+        response_data = {key: future.result() for key, future in futures.items()}
+
     return JsonResponse(response_data, safe=False)
 
 @csrf_exempt
 def getPeriodWiseDataXl(request):
     json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id',None)
+    marketplace_id = json_request.get('marketplace_id')
     brand_id = json_request.get('brand_id', [])
-    product_id = json_request.get('product_id',[])
-    manufacturer_name = json_request.get('manufacturer_name',[])
-    fulfillment_channel = json_request.get('fulfillment_channel',None)
+    product_id = json_request.get('product_id', [])
+    manufacturer_name = json_request.get('manufacturer_name', [])
+    fulfillment_channel = json_request.get('fulfillment_channel')
 
-    current_date = datetime.today() - timedelta(days=1)
-    def calculate_metrics(start_date, end_date,marketplace_id=[],brand_id=[],product_id=[],manufacturer_name=None,fulfillment_channel=None):
-        gross_revenue = 0
-        total_cogs = 0
-        refund = 0
-        net_profit = 0
-        margin = 0
-        total_units = 0
-        sku_set = set()
-        tax_price = 0
-        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        order_total = 0
-        other_price = 0
-        page_views = 0
-        sessions = 0
-        unitSessionPercentage = 0
-        vendor_funding = 0
-        marketplace_name = ""
-        temp_price = 0
-        if result:
-            for order in result:
-                marketplace_name = order['marketplace_name']
-                gross_revenue += order['order_total']
-                order_total = order['order_total']
-                # temp_price = 0
-                tax_price = 0
-                for item_id in order['order_items']:
-                    item_pipeline = [
-                        { "$match": { "_id": item_id } },
-                        {
-                            "$lookup": {
-                                "from": "product",
-                                "localField": "ProductDetails.product_id",
-                                "foreignField": "_id",
-                                "as": "product_ins"
-                            }
-                        },
-                        { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
-                        {
-                            "$project": {
-                                "_id": 0,
-                                "price": "$Pricing.ItemPrice.Amount",
-                                "tax_price": "$Pricing.ItemTax.Amount",
-                                "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
-                                "sku": "$product_ins.sku",
-                                 "page_views": "$product_ins.page_views",
-                            "sessions": "$product_ins.sessions",
-                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
-                            }
-                        }
-                    ]
-                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-                    if item_result:
-                        item_data = item_result[0]
-                        temp_price += item_data['price']
-                        tax_price += item_data['tax_price']
-                        if order['marketplace_name'] == "Amazon":
-                            total_cogs += item_data['total_cogs']
-                        else:
-                            total_cogs += item_data['w_total_cogs']
-                        vendor_funding += item_data['vendor_funding']
-                        if item_data.get('page_views') and item_data.get('sessions'):
-                            page_views = item_data['page_views']
-                            sessions = item_data['sessions']
-                        total_units += 1
-                        if item_data.get('sku'):
-                            sku_set.add(item_data['sku'])
-                # other_price += (order_total - temp_price) + total_cogs
-            # other_price += order_total - temp_price - tax_price
-            net_profit = (temp_price - total_cogs) + vendor_funding
-            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-            if sessions != 0:
-                unitSessionPercentage = (total_units/sessions )*100
-            
-        return {
-            "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((total_cogs), 2),
-            "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / (total_cogs)) * 100, 2) if total_cogs > 0 else 0,
-            "unitsSold": total_units,
-            "refunds": refund,  
-            "skuCount": len(sku_set),
-            "sessions": sessions,
-            "pageViews": page_views,
-            "unitSessionPercentage": unitSessionPercentage,
-            "margin": round(margin, 2),
-            "seller":SELLER_ID,
-            "marketplace":marketplace_name
-        }
+    # Define periods and date ranges
+    periods = {
+        "Yesterday": get_date_range("Yesterday"),
+        "Last 7 Days": get_date_range("Last 7 days"),
+        "Last 30 Days": get_date_range("Last 30 days"),
+        "Month to Date": get_date_range("This Month"),
+        "Year to Date": get_date_range("This Year"),
+    }
 
-    def create_period_row(label, start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
-        data = calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+    def create_row(label, start, end):
+        data = calculate_metricss(
+            start, end,
+            marketplace_id,
+            brand_id,
+            product_id,
+            manufacturer_name,
+            fulfillment_channel,
+            include_extra_fields=True
+        )
         return [
             label,
-            data["seller"],
-            data["marketplace"],
+            data.get("seller", ""),
+            data.get("marketplace", ""),
             start.strftime("%Y-%m-%d"),
             end.strftime("%Y-%m-%d"),
             data["grossRevenue"],
@@ -1253,21 +1076,13 @@ def getPeriodWiseDataXl(request):
             data["margin"]
         ]
 
-    yesterday, yesterday_end = get_date_range("Yesterday")
-    l7_current_start, l7_current_end = get_date_range("Last 7 days")
-
-    l30_current_start, l30_current_end = get_date_range("Last 30 days")
-
-    m30_current_start, m30_current_end = get_date_range("This Month")
-    y_current_start, y_current_end = get_date_range("This Year")
-
-    period_rows = [
-        create_period_row("Yesterday", yesterday, yesterday_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        create_period_row("Last 7 Days", l7_current_start, l7_current_end ,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        create_period_row("Last 30 Days", l30_current_start,l30_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        create_period_row("Month to Date", m30_current_start, m30_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        create_period_row("Year to Date", y_current_start, y_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-    ]
+    # Use threads to process all periods in parallel
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {
+            label: executor.submit(create_row, label, start, end)
+            for label, (start, end) in periods.items()
+        }
+        period_rows = [futures[label].result() for label in periods]
 
     headers = [
         "Period", "Seller", "Marketplace", "Start Date", "End Date",
@@ -1280,27 +1095,26 @@ def getPeriodWiseDataXl(request):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Period Metrics"
+
+    # Write headers
     for col_num, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col_num)
-        cell.value = header
+        cell = ws.cell(row=1, column=col_num, value=header)
         cell.font = Font(bold=True)
-    # ws.append(headers)
+
+    # Write data rows
     for row in period_rows:
         ws.append(row)
 
-    # Format columns for better readability
+    # Auto-adjust column widths
     for col in ws.columns:
-        max_length = 0
-        column = col[0].column_letter
-        for cell in col:
-            try:
-                max_length = max(max_length, len(str(cell.value)))
-            except:
-                pass
-        ws.column_dimensions[column].width = max_length + 2
+        max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in col)
+        col_letter = col[0].column_letter
+        ws.column_dimensions[col_letter].width = max_length + 2
 
     # Return Excel as response
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
     response['Content-Disposition'] = 'attachment; filename=PeriodWiseMetrics.xlsx'
     wb.save(response)
     return response
@@ -1308,145 +1122,58 @@ def getPeriodWiseDataXl(request):
 @csrf_exempt
 def exportPeriodWiseCSV(request):
     json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id',None)
+    marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
-    product_id = json_request.get('product_id',[])
-    manufacturer_name = json_request.get('manufacturer_name',[])
-    fulfillment_channel = json_request.get('fulfillment_channel',None)
+    product_id = json_request.get('product_id', [])
+    manufacturer_name = json_request.get('manufacturer_name', [])
+    fulfillment_channel = json_request.get('fulfillment_channel', None)
 
-    current_date = datetime.today() - timedelta(days=1)
-    
-    def calculate_metrics(start_date, end_date,marketplace_id,brand_id=[],product_id=[],manufacturer_name=None,fulfillment_channel=None):
-        gross_revenue = 0
-        total_cogs = 0
-        refund = 0
-        net_profit = 0
-        margin = 0
-        total_units = 0
-        sku_set = set()
-        tax_price = 0
-        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        order_total = 0
-        other_price = 0
-        marketplace_name = ""
-        page_views = 0
-        sessions = 0
-        unitSessionPercentage = 0
-        temp_price = 0
-        vendor_funding = 0
+    # Define time periods and their date ranges
+    periods = {
+        "Yesterday": get_date_range("Yesterday"),
+        "Last 7 Days": get_date_range("Last 7 days"),
+        "Last 30 Days": get_date_range("Last 30 days"),
+        "Month to Date": get_date_range("This Month"),
+        "Year to Date": get_date_range("This Year"),
+    }
 
-        if result:
-            for order in result:
-                marketplace_name = order['marketplace_name']
-                gross_revenue += order['order_total']
-                order_total = order['order_total']
-                tax_price = 0
-                
-                for item_id in order['order_items']:
-                    item_pipeline = [
-                        { "$match": { "_id": item_id } },
-                        {
-                            "$lookup": {
-                                "from": "product",
-                                "localField": "ProductDetails.product_id",
-                                "foreignField": "_id",
-                                "as": "product_ins"
-                            }
-                        },
-                        { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
-                        {
-                            "$project": {
-                                "_id": 0,
-                                "price": "$Pricing.ItemPrice.Amount",
-                                "tax_price": "$Pricing.ItemTax.Amount",
+    def create_row(label, start, end):
+        data = calculate_metricss(
+            start, end,
+            marketplace_id,
+            brand_id,
+            product_id,
+            manufacturer_name,
+            fulfillment_channel,
+            include_extra_fields=True
+        )
 
-                                "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
-                                "sku": "$product_ins.sku",
-                                "page_views": "$product_ins.page_views",
-                            "sessions": "$product_ins.sessions",
-                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
-                                
-                            }
-                        }
-                    ]
-                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-                    if item_result:
-                        item_data = item_result[0]
-                        temp_price += item_data['price']
-                        tax_price += item_data['tax_price']
-                        if order['marketplace_name'] == "Amazon":
-                            total_cogs += item_data['total_cogs']
-                        else:
-                            total_cogs += item_data['w_total_cogs']
-                        vendor_funding += item_data['vendor_funding']
-                        if item_data.get('page_views') and item_data.get('sessions'):
-                            page_views = item_data['page_views']
-                            sessions = item_data['sessions']
-                        total_units += 1
-                        if item_data.get('sku'):
-                            sku_set.add(item_data['sku'])
-                # other_price += (order_total - temp_price) + total_cogs
-            # other_price += order_total - temp_price - tax_price
-            net_profit = (temp_price - total_cogs) + vendor_funding
-            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-            if sessions != 0:
-                unitSessionPercentage = (total_units/sessions )*100
-            
-        return {
-            "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((total_cogs) , 2),
-            "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / (total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
-            "unitsSold": total_units,
-            "refunds": refund,  
-            "skuCount": len(sku_set),
-            "sessions": sessions,
-            "pageViews": page_views,
-            "unitSessionPercentage": unitSessionPercentage,
-            "margin": round(margin, 2),
-            "seller":SELLER_ID,
-            "marketplace":marketplace_name
-        }
-
-    def create_period_row(label, start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
-        data = calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        
         return [
             label,
-            data["seller"],
-            data["marketplace"],
+            data.get("seller", ""),
+            data.get("marketplace", ""),
             start.strftime("%Y-%m-%d"),
             end.strftime("%Y-%m-%d"),
-            str(data["grossRevenue"]),  # Ensuring the value is converted to string
-            str(data["expenses"]),     # Ensuring the value is converted to string
-            str(data["netProfit"]),    # Ensuring the value is converted to string
-            str(data["roi"]),         # Ensuring the value is converted to string
-            str(data["unitsSold"]),   # Ensuring the value is converted to string
-            str(data["refunds"]),     # Ensuring the value is converted to string
-            str(data["skuCount"]),    # Ensuring the value is converted to string
-            str(data["sessions"]),    # Ensuring the value is converted to string
-            str(data["pageViews"]),   # Ensuring the value is converted to string
-            str(data["unitSessionPercentage"]),  # Ensuring the value is converted to string
-            str(data["margin"])      # Ensuring the value is converted to string
+            str(data["grossRevenue"]),
+            str(data["expenses"]),
+            str(data["netProfit"]),
+            str(data["roi"]),
+            str(data["unitsSold"]),
+            str(data["refunds"]),
+            str(data["skuCount"]),
+            str(data["sessions"]),
+            str(data["pageViews"]),
+            str(data["unitSessionPercentage"]),
+            str(data["margin"])
         ]
 
-    yesterday, yesterday_end = get_date_range("Yesterday")
-    l7_current_start, l7_current_end = get_date_range("Last 7 days")
-
-    l30_current_start, l30_current_end = get_date_range("Last 30 days")
-
-    m30_current_start, m30_current_end = get_date_range("This Month")
-    y_current_start, y_current_end = get_date_range("This Year")
-
-    period_rows = [
-        create_period_row("Yesterday", yesterday, yesterday_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        create_period_row("Last 7 Days", l7_current_start, l7_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        create_period_row("Last 30 Days", l30_current_start, l30_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        create_period_row("Month to Date", m30_current_start, m30_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        create_period_row("Year to Date", y_current_start,y_current_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-    ]
+    # Parallel processing of metric calculations
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {
+            label: executor.submit(create_row, label, start, end)
+            for label, (start, end) in periods.items()
+        }
+        period_rows = [futures[label].result() for label in periods]
 
     headers = [
         "Period", "Seller", "Marketplace", "Start Date", "End Date",
@@ -1455,12 +1182,12 @@ def exportPeriodWiseCSV(request):
         "Page Views", "Unit Session %", "Margin %"
     ]
 
+    # Generate CSV response
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="PeriodWiseMetrics.csv"'
     writer = csv.writer(response)
     writer.writerow(headers)
-    for row in period_rows:
-        writer.writerow(row)
+    writer.writerows(period_rows)
 
     return response
 
@@ -1470,242 +1197,103 @@ def to_utc_format(dt):
 @csrf_exempt
 def getPeriodWiseDataCustom(request):
     json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
-    brand_id = json_request.get('brand_id', [])
-    product_id = json_request.get('product_id',[])
-    manufacturer_name = json_request.get('manufacturer_name',[])
-    fulfillment_channel = json_request.get('fulfillment_channel',None)
-    preset = json_request.get('preset')
 
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
-    if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
-    else:
-        from_date, to_date = get_date_range(preset)
+    # Extract filters
+    filters = {
+        "marketplace_id": json_request.get("marketplace_id"),
+        "brand_id": json_request.get("brand_id", []),
+        "product_id": json_request.get("product_id", []),
+        "manufacturer_name": json_request.get("manufacturer_name", []),
+        "fulfillment_channel": json_request.get("fulfillment_channel")
+    }
 
+    preset = json_request.get("preset")
+    start_date = json_request.get("start_date")
+    end_date = json_request.get("end_date")
 
-    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
-        gross_revenue = 0
-        total_cogs = 0
-        refund = 0
-        net_profit = 0
-        margin = 0
-        total_units = 0
-        sku_set = set()
- 
-        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        order_total = 0
-        other_price = 0
-        tax_price = 0
-        temp_price = 0
-        vendor_funding = 0
-        if result:
-            for order in result:
-                gross_revenue += order['order_total']
-                order_total = order['order_total']
-                tax_price = 0
-                
-                for item_id in order['order_items']:
-                    item_pipeline = [
-                        { "$match": { "_id": item_id } },
-                        {
-                            "$lookup": {
-                                "from": "product",
-                                "localField": "ProductDetails.product_id",
-                                "foreignField": "_id",
-                                "as": "product_ins"
-                            }
-                        },
-                        { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
-                        {
-                            "$project": {
-                                "_id": 0,
-                                "price": "$Pricing.ItemPrice.Amount",
-                                "tax_price": "$Pricing.ItemTax.Amount",
-                                "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
-                                "sku": "$product_ins.sku",
-                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
-                            }
-                        }
-                    ]
-                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-                    if item_result:
-                        item_data = item_result[0]
-                        temp_price += item_data['price']
-                        tax_price += item_data['tax_price']
-                        if order['marketplace_name'] == "Amazon":
-                            total_cogs += item_result[0]['total_cogs']
-                        else:
-                            total_cogs += item_result[0]['w_total_cogs']
-                        vendor_funding += item_result[0]['vendor_funding']
-                        total_units += 1
-                        if item_data.get('sku'):
-                            sku_set.add(item_data['sku'])
-                # other_price += (order_total - temp_price) + total_cogs
-            # other_price += order_total - temp_price - tax_price
-            net_profit = (temp_price - total_cogs) + vendor_funding
-            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-            
-        return {
-            "grossRevenue": round(gross_revenue, 2),
-            "expenses": round((total_cogs) , 2),
-            "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / (total_cogs)) * 100, 2) if other_price+ total_cogs > 0 else 0,
-            "unitsSold": total_units,
-            "refunds": refund,  
-            "skuCount": len(sku_set),
-            "sessions": 0,
-            "pageViews": 0,
-            "unitSessionPercentage": 0,
-            "margin": round(margin, 2),
-            "seller":"",
-            "tax_price":tax_price,
-            "total_cogs":total_cogs,
-            "product_cost":order_total,
-            "shipping_cost":0,
-            'orders':len(result)
-        }
-    
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
-        current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+    # Determine custom or preset date range
+    try:
+        if start_date:
+            from_date = datetime.strptime(start_date, "%Y-%m-%d")
+            to_date = datetime.strptime(end_date, "%Y-%m-%d")
+        else:
+            from_date, to_date = get_date_range(preset)
+    except Exception:
+        return JsonResponse({"error": "Invalid date format. Use YYYY-MM-DD."}, status=400)
 
-        def with_delta(metric):
+    # Compute previous period
+    duration = to_date - from_date
+    prev_from, prev_to = from_date - duration, to_date - duration
+
+    # Get base periods
+    today_start, today_end = get_date_range("Today")
+    yesterday_start, yesterday_end = get_date_range("Yesterday")
+    last7_start, last7_end = get_date_range("Last 7 days")
+    last7_prev_start = today_start - timedelta(days=14)
+    last7_prev_end = last7_start - timedelta(seconds=1)
+
+    # Helper to generate period response
+    def period_response(label, cur_from, cur_to, prev_from, prev_to):
+        def format_metrics(metric):
             return {
                 "current": current[metric],
                 "previous": previous[metric],
                 "delta": round(current[metric] - previous[metric], 2)
             }
-        if label in ['Today', 'Yesterday']:
-            return {
-            "dateRanges": {
-                "current": {"from": to_utc_format(cur_from),},
-                "previous": {"from": to_utc_format(prev_from)}
-            },
-            "summary": {
-                "grossRevenue": with_delta("grossRevenue"),
-                "netProfit": with_delta("netProfit"),
-                "expenses": with_delta("expenses"),
-                "unitsSold": with_delta("unitsSold"),
-                "refunds": with_delta("refunds"),
-                "skuCount": with_delta("skuCount"),
-                "sessions": with_delta("sessions"),
-                "pageViews": with_delta("pageViews"),
-                "unitSessionPercentage": with_delta("unitSessionPercentage"),
-                "margin": with_delta("margin"),
-                "roi": with_delta("roi"),
-                "orders": with_delta("orders"),
-            },
-            "netProfitCalculation": {
-                "current": {
-                    "gross": current["grossRevenue"],
-                    "totalCosts": current["expenses"],
-                    "productRefunds": current["refunds"],
-                    "totalTax": current["tax_price"] if 'tax_price' in current else 0,
-                    "totalTaxWithheld": 0,
-                    "ppcProductCost": 0,
-                    "ppcBrandsCost": 0,
-                    "ppcDisplayCost": 0,
-                    "ppcStCost": 0,
-                    "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
-                    "product_cost": current["product_cost"] ,
-                    "shipping_cost": current["shipping_cost"] ,
-                },
-                "previous": {
-                    "gross": previous["grossRevenue"],
-                    "totalCosts": previous["expenses"],
-                    "productRefunds": previous["refunds"],
-                    "totalTax": previous["total_cogs"] if 'total_cogs' in previous else 0,
-                    "totalTaxWithheld": 0,
-                    "ppcProductCost": 0,
-                    "ppcBrandsCost": 0,
-                    "ppcDisplayCost": 0,
-                    "ppcStCost": 0,
-                    "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
-                    "product_cost": previous["product_cost"] ,
-                    "shipping_cost": previous["shipping_cost"] ,
-                }
-            }
-        }
-        else:
-            return {
-            "dateRanges": {
-                "current": {"from": to_utc_format(cur_from),"to": to_utc_format(cur_to)},
-                "previous": {"from": to_utc_format(prev_from), "to": to_utc_format(prev_to) }
-            },
-            "summary": {
-                "grossRevenue": with_delta("grossRevenue"),
-                "netProfit": with_delta("netProfit"),
-                "expenses": with_delta("expenses"),
-                "unitsSold": with_delta("unitsSold"),
-                "refunds": with_delta("refunds"),
-                "skuCount": with_delta("skuCount"),
-                "sessions": with_delta("sessions"),
-                "pageViews": with_delta("pageViews"),
-                "unitSessionPercentage": with_delta("unitSessionPercentage"),
-                "margin": with_delta("margin"),
-                "roi": with_delta("roi"),
-                "orders": with_delta("orders"),
-            },
-            "netProfitCalculation": {
-                "current": {
-                    "gross": current["grossRevenue"],
-                    "totalCosts": current["expenses"],
-                    "productRefunds": current["refunds"],
-                    "totalTax": current["tax_price"] if 'tax_price' in current else 0,
-                    "totalTaxWithheld": 0,
-                    "ppcProductCost": 0,
-                    "ppcBrandsCost": 0,
-                    "ppcDisplayCost": 0,
-                    "ppcStCost": 0,
-                    "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
-                    "product_cost": current["product_cost"] ,
-                    "shipping_cost": current["shipping_cost"] ,
-                },
-                "previous": {
-                    "gross": previous["grossRevenue"],
-                    "totalCosts": previous["expenses"],
-                    "productRefunds": previous["refunds"],
-                    "totalTax": previous["total_cogs"] if 'total_cogs' in previous else 0,
-                    "totalTaxWithheld": 0,
-                    "ppcProductCost": 0,
-                    "ppcBrandsCost": 0,
-                    "ppcDisplayCost": 0,
-                    "ppcStCost": 0,
-                    "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
-                    "product_cost": previous["product_cost"] ,
-                    "shipping_cost": previous["shipping_cost"] ,
-                }
-            }
-        }
- 
-    today_start, today_end = get_date_range("Today")
 
-    yesterday_start = today_start - timedelta(days=1)
-    yesterday_end = today_start - timedelta(seconds=1)
-    last_7_start = today_start - timedelta(days=7)
-    
-    
-    custom_duration = to_date - from_date
-    prev_from_date = from_date - custom_duration
-    prev_to_date = to_date - custom_duration
-    today_start, today_end = get_date_range('Today')
-    yesterday_start, yesterday_end = get_date_range('Yesterday')
-    last_7_start, last_7_end = get_date_range('Last 7 days')
-    last_7_prev_start = today_start - timedelta(days=14)
-    last_7_prev_end = last_7_start - timedelta(seconds=1)
+        current = calculate_metricss(cur_from, cur_to, **filters)
+        previous = calculate_metricss(prev_from, prev_to, **filters)
+
+        date_ranges = {
+            "current": {"from": to_utc_format(cur_from)},
+            "previous": {"from": to_utc_format(prev_from)}
+        }
+
+        if label not in ['Today', 'Yesterday']:
+            date_ranges["current"]["to"] = to_utc_format(cur_to)
+            date_ranges["previous"]["to"] = to_utc_format(prev_to)
+
+        summary_metrics = [
+            "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds", "skuCount",
+            "sessions", "pageViews", "unitSessionPercentage", "margin", "roi", "orders"
+        ]
+        summary = {metric: format_metrics(metric) for metric in summary_metrics}
+
+        def net_profit_calc(metrics):
+            return {
+                "gross": metrics["grossRevenue"],
+                "totalCosts": metrics["expenses"],
+                "productRefunds": metrics["refunds"],
+                "totalTax": metrics.get("tax_price", 0),
+                "totalTaxWithheld": 0,
+                "ppcProductCost": 0,
+                "ppcBrandsCost": 0,
+                "ppcDisplayCost": 0,
+                "ppcStCost": 0,
+                "cogs": metrics.get("total_cogs", 0),
+                "product_cost": metrics.get("product_cost", 0),
+                "shipping_cost": metrics.get("shipping_cost", 0),
+            }
+
+        return {
+            "dateRanges": date_ranges,
+            "summary": summary,
+            "netProfitCalculation": {
+                "current": net_profit_calc(current),
+                "previous": net_profit_calc(previous),
+            }
+        }
+
     response_data = {
-        "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1),marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        "last7Days": create_period_response("Last 7 Days", last_7_start, last_7_end , last_7_prev_start, last_7_prev_end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
-        "custom": create_period_response(preset, from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        "today": period_response("Today", today_start, today_end, yesterday_start, yesterday_end),
+        "yesterday": period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1)),
+        "last7Days": period_response("Last 7 Days", last7_start, last7_end, last7_prev_start, last7_prev_end),
+        "custom": period_response(preset, from_date, to_date, prev_from, prev_to),
     }
+
     return JsonResponse(response_data, safe=False)
- 
+
+
 @csrf_exempt
 def allMarketplaceData(request):
     json_request = JSONParser().parse(request)
