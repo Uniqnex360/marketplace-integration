@@ -197,7 +197,15 @@ REFRESH_TOKEN = os.getenv('AMAZON_REFRESH_TOKEN')
 MARKETPLACE_ID = os.getenv('MARKETPLACE_ID')
 SELLER_ID = os.getenv('SELLER_ID')
 
+
+#SENDGRID API KEYS
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
+
+# Sellercloud API credentials
+SELLERCLOUD_USERNAME = os.getenv('SELLERCLOUD_USERNAME')
+SELLERCLOUD_PASSWORD = os.getenv('SELLERCLOUD_PASSWORD')
+SELLERCLOUD_COMPANY_ID = os.getenv('SELLERCLOUD_COMPANY_ID')  # Replace with your actual company ID
+SELLERCLOUD_SERVER_ID = os.getenv('SELLERCLOUD_SERVER_ID')  # Replace with your actual server ID
 
 
 # SECURITY WARNING: keep the secret key used in production secret!

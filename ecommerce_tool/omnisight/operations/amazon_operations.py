@@ -7,9 +7,11 @@ import pandas as pd
 from ecommerce_tool.crud import DatabaseModel
 from bson import ObjectId
 import json
-from ecommerce_tool.settings import MARKETPLACE_ID
+from ecommerce_tool.settings import MARKETPLACE_ID,SELLERCLOUD_USERNAME, SELLERCLOUD_PASSWORD
 import ast
 from datetime import datetime, timedelta
+import sys
+import math
 
 
 
@@ -682,3 +684,88 @@ class ShipStationShippingCostAPIView(APIView):
             return Response(cost_info, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+
+
+
+
+
+# Sellercloud API endpoints
+TOKEN_URL = "https://onetree.api.sellercloud.us/rest/api/token"
+INVENTORY_URL = "https://onetree.api.sellercloud.us/rest/api/Inventory"
+
+def get_access_token():
+    payload = {
+        "username": SELLERCLOUD_USERNAME,
+        "password": SELLERCLOUD_PASSWORD
+    }
+    headers = {
+        "Content-Type": "application/json"
+    }
+    response = requests.post(TOKEN_URL, json=payload, headers=headers)
+    if response.status_code == 200:
+        return response.json().get("access_token")
+    else:
+        raise Exception(f"Token fetch failed: {response.text}")
+
+def fetch_all_inventory(token):
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json"
+    }
+
+    page = 1
+    page_size = 50
+    all_inventory = []
+
+    # First call to get total items
+    params = {
+        "pageNumber": page,
+        "pageSize": page_size,
+        "sortBy": "ProductID",         # Fix here
+        "sortDirection": "Ascending"   # Fix here
+    }
+
+    first_response = requests.get(INVENTORY_URL, headers=headers, params=params)
+    if first_response.status_code != 200:
+        raise Exception(f"Initial request failed: {first_response.text}")
+
+    first_data = first_response.json()
+    total_results = first_data.get("TotalResults", 0)
+    total_pages = math.ceil(total_results / page_size)
+
+    print(f"Total items: {total_results} | Total pages: {total_pages}")
+    all_inventory.extend(first_data.get("Items", []))
+
+    # Fetch rest of the pages
+    for page in range(2, total_pages + 1):
+        print("page",page)
+        params.update({"pageNumber": page})
+        print("params", params)
+        response = requests.get(INVENTORY_URL, headers=headers, params=params)
+        if response.status_code == 200:
+            items = response.json().get("Items", [])
+            all_inventory.extend(items)
+            print(f"Fetched page {page} — {len(items)} items")
+        else:
+            print(f"Failed page {page}: {response.text}")
+            break
+
+    return all_inventory
+
+
+# Main runner
+def sync_inventory():
+    print("Starting Sellercloud inventory sync...")
+    try:
+        token = get_access_token()
+        inventory = fetch_all_inventory(token)
+        for ins in inventory:
+            try:
+                DatabaseModel.update_documents(Product.objects,{"sku" : str(ins['ID'])},{'quantity' : ins['InventoryAvailableQty']})
+            except:
+                print(f"Failed to update product with SKU {ins['ID']}: {sys.exc_info()[0]}")
+            
+    except Exception as e:
+        print("❌ Error:", e)
