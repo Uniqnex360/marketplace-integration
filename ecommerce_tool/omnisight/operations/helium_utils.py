@@ -635,7 +635,7 @@ def get_graph_data(start_date, end_date, preset,marketplace_id,brand_id=None,pro
     return graph_data
 
 
-def totalRevenueCalculation(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacturer_name=None,fulfillment_channel=None):
+def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None):
     total = dict()
     gross_revenue = 0
     total_cogs = 0
@@ -645,68 +645,82 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None,brand_id=N
     total_orders = 0
     temp_other_price = 0
     vendor_funding = 0
-
-    result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-    refund_ins = refundOrder(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
     refund_quantity_ins = 0
-    if refund_ins != []:
+
+    result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+    refund_ins = refundOrder(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+
+    if refund_ins:
         for ins in refund_ins:
             refund += ins['order_total']
             refund_quantity_ins += len(ins['order_items'])
+
     total_orders = len(result)
-    if result != []:
-        for ins in result:
-            tax_price = 0
-            gross_revenue += ins['order_total']
-            # other_price = 0
-            # temp_other_price = 0 
-            for j in ins['order_items']:                  
-                pipeline = [
-                    {
-                        "$match": {
-                            "_id": j
-                        }
-                    },
-                    {
-                        "$lookup": {
-                            "from": "product",
-                            "localField": "ProductDetails.product_id",
-                            "foreignField": "_id",
-                            "as": "product_ins"
-                        }
-                    },
-                    {
+
+    def process_order(order):
+        nonlocal gross_revenue, total_cogs, total_units, temp_other_price, vendor_funding
+
+        tax_price = 0
+        gross_revenue += order['order_total']
+
+        for j in order['order_items']:
+            pipeline = [
+                {
+                    "$match": {
+                        "_id": j
+                    }
+                },
+                {
+                    "$lookup": {
+                        "from": "product",
+                        "localField": "ProductDetails.product_id",
+                        "foreignField": "_id",
+                        "as": "product_ins"
+                    }
+                },
+                {
                     "$unwind": {
                         "path": "$product_ins",
                         "preserveNullAndEmptyArrays": True
                     }
-                    },
-                    {
-                        "$project": {
-                            "_id" : 0,
-                            "price": {"$ifNull":["$Pricing.ItemPrice.Amount",0]},
-                            "cogs": {"$ifNull":["$product_ins.cogs",0.0]},
-                            "tax_price": {"$ifNull":["$Pricing.ItemTax.Amount",0]},
-                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
-                        }
+                },
+                {
+                    "$project": {
+                        "_id": 0,
+                        "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                        "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+                        "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                        "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                        "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
                     }
-                ]
-                result = list(OrderItems.objects.aggregate(*pipeline))
-                if result != []:
-                    tax_price += result[0]['tax_price']
-                    temp_other_price += result[0]['price']
-                    
-                    if ins['marketplace_name'] == "Amazon":
-                        total_cogs += result[0]['total_cogs'] 
-                    else:
-                        total_cogs += result[0]['w_total_cogs']
-                    total_units += 1
-                    vendor_funding += result[0]['vendor_funding'] 
-        # other_price += ins['order_total'] - temp_other_price - tax_price
+                }
+            ]
+            result = list(OrderItems.objects.aggregate(*pipeline))
+            if result:
+                tax_price += result[0]['tax_price']
+                temp_other_price += result[0]['price']
 
-        net_profit = (temp_other_price - total_cogs) + vendor_funding
+                if order['marketplace_name'] == "Amazon":
+                    total_cogs += result[0]['total_cogs']
+                else:
+                    total_cogs += result[0]['w_total_cogs']
+                total_units += 1
+                vendor_funding += result[0]['vendor_funding']
+
+    # Create threads for processing orders
+    threads = []
+    for order in result:
+        thread = threading.Thread(target=process_order, args=(order,))
+        threads.append(thread)
+        thread.start()
+
+    # Wait for all threads to complete
+    for thread in threads:
+        thread.join()
+
+    # Calculate net profit
+    net_profit = (temp_other_price - total_cogs) + vendor_funding
 
     # Total values
     total = {

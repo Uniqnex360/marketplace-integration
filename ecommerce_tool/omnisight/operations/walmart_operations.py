@@ -8,6 +8,7 @@ from ecommerce_tool.crud import DatabaseModel
 from bson import ObjectId
 import json
 from datetime import datetime, timedelta
+import threading
 
 
 
@@ -467,7 +468,7 @@ def update_product_images_from_csv(file_path):
 # update_product_images_from_csv(file_path)
 
 
-from datetime import datetime
+
 
 def process_walmart_order(json_data,order_date=None):
     """Processes a single Walmart order item and saves it to the OrderItems collection."""
@@ -567,53 +568,62 @@ def updateOrdersItemsDetails(request):
 def syncRecentWalmartOrders():
     orders = []
     access_token = oauthFunction()
-    marketplace_id = DatabaseModel.get_document(Marketplace.objects,{'name' : "Walmart"},['id']).id
-    
+    marketplace_id = DatabaseModel.get_document(Marketplace.objects, {'name': "Walmart"}, ['id']).id
+
     base_url = "https://marketplace.walmartapis.com/v3/orders"
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "WM_SEC.ACCESS_TOKEN": access_token,  
-        "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),  
-        "WM_SVC.NAME": "Walmart Marketplace",  
+        "WM_SEC.ACCESS_TOKEN": access_token,
+        "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),
+        "WM_SVC.NAME": "Walmart Marketplace",
         "Accept": "application/json"
     }
     # Get today's date
     today = datetime.utcnow()
     # Fetch last 1 day of orders
-    start_date = (today - timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
+    start_date = (today - timedelta(days=3)).strftime("%Y-%m-%dT00:00:00Z")
     end_date = today.strftime("%Y-%m-%dT23:59:59Z")
 
     url = f"{base_url}?createdStartDate={start_date}&createdEndDate={end_date}&limit=100"
     fetched_orders = []
     next_cursor = None
+    lock = threading.Lock()
 
-    while True:
-        if next_cursor:
-            url = f"{base_url}{next_cursor}"  # Use the nextCursor for pagination
+    def fetch_orders(url):
+        nonlocal next_cursor
+        while True:
+            if next_cursor:
+                url = f"{base_url}{next_cursor}"  # Use the nextCursor for pagination
 
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            result = response.json()
-            fetched_orders.extend(result.get('list', {}).get('elements', {}).get('order', []))
-            orders.extend(fetched_orders)
-            next_cursor = result.get("list", {}).get("meta", {}).get("nextCursor")
-            if not next_cursor:
-                break  # No more pages left
-        else:
-            print(f"❌ Error fetching orders: [HTTP {response.status_code}] {response.text}")
-            break
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                result = response.json()
+                with lock:
+                    fetched_orders.extend(result.get('list', {}).get('elements', {}).get('order', []))
+                    next_cursor = result.get("list", {}).get("meta", {}).get("nextCursor")
+                if not next_cursor:
+                    break  # No more pages left
+            else:
+                print(f"❌ Error fetching orders: [HTTP {response.status_code}] {response.text}")
+                break
 
-       
-        
+    # Start threads for fetching orders
+    threads = []
+    for _ in range(5):  # Adjust the number of threads as needed
+        thread = threading.Thread(target=fetch_orders, args=(url,))
+        threads.append(thread)
+        thread.start()
 
-    for row in orders:
+    for thread in threads:
+        thread.join()
+
+    orders.extend(fetched_orders)
+
+    def process_order(row):
         order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": str(row.get('purchaseOrderId', ""))})
         if order_obj is not None:
             print(f"Order with purchase order ID {row['purchaseOrderId']} already exists. Skipping...")
-            try:
-                DatabaseModel.update_documents(Order.objects, {"purchase_order_id": str(row.get('purchaseOrderId', ""))}, {"order_status": row['orderLines']['orderLine'][0]['orderLineStatuses']['orderLineStatus'][0]['status']})
-            except:
-                pass
+            DatabaseModel.update_documents(Order.objects, {"purchase_order_id": str(row.get('purchaseOrderId', ""))}, {"order_status": row['orderLines']['orderLine'][0]['orderLineStatuses']['orderLineStatus'][0]['status']})
         else:
             print(f"Creating order with purchase order ID {row['purchaseOrderId']}...")
             order_date = row.get('orderDate', "")
@@ -632,14 +642,14 @@ def syncRecentWalmartOrders():
                         tax = float(charge_ins['tax']['taxAmount']['amount'])
                     order_total += float(charge_ins['chargeAmount']['amount']) + tax
                     currency = charge_ins['chargeAmount']['currency']
-                order_items.append(process_walmart_order(order_line_ins,order_date))
+                order_items.append(process_walmart_order(order_line_ins, order_date))
 
             order_status = order_line_ins.get('orderLineStatuses', {}).get('orderLineStatus', [{}])[0].get('status', "")
             try:
-                shipping_information=eval(row['shippingInfo']) if row.get('shippingInfo') else "",
+                shipping_information = eval(row['shippingInfo']) if row.get('shippingInfo') else "",
             except:
                 shipping_information = {}
-            
+
             order = Order(
                 marketplace_id=marketplace_id,
                 purchase_order_id=str(row.get('purchaseOrderId', "")),
@@ -649,10 +659,21 @@ def syncRecentWalmartOrders():
                 shipping_information=shipping_information,
                 fulfillment_channel=shipNode.get('type', ""),
                 order_details=order_details.get('orderLine', []),
-                order_items = order_items,
+                order_items=order_items,
                 order_total=order_total,
                 currency=currency,
                 order_status=order_status,
             )
             order.save()
+
+    # Process orders using threads
+    process_threads = []
+    for row in orders:
+        thread = threading.Thread(target=process_order, args=(row,))
+        process_threads.append(thread)
+        thread.start()
+
+    for thread in process_threads:
+        thread.join()
+
     return orders
