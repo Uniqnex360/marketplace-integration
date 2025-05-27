@@ -478,6 +478,7 @@ def LatestOrdersTodayAPIView(request):
 
 @csrf_exempt
 def RevenueWidgetAPIView(request):
+    from django.utils import timezone
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
     compare_startdate = json_request.get("compare_startdate")
@@ -496,59 +497,79 @@ def RevenueWidgetAPIView(request):
     else:
         start_date, end_date = get_date_range(preset)
 
-
     comapre_past = get_previous_periods(start_date, end_date)
-    total = totalRevenueCalculation(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-    graph_data = get_graph_data(start_date, end_date, preset,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-    
-    data = dict()
+
+    # Use threading to fetch data concurrently
+
+    def fetch_total():
+        return totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+
+    def fetch_graph_data():
+        return get_graph_data(start_date, end_date, preset, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+
+    def fetch_compare_total():
+        return totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+
+    def fetch_compare_graph_data():
+        return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_total = executor.submit(fetch_total)
+        future_graph_data = executor.submit(fetch_graph_data)
+
+        compare_total = None
+        compare_graph = None
+        if compare_startdate != None and compare_startdate != "":
+            compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
+            compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
+            initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
+
+            future_compare_total = executor.submit(fetch_compare_total)
+            future_compare_graph_data = executor.submit(fetch_compare_graph_data)
+
+    # Wait for results
+    total = future_total.result()
+    graph_data = future_graph_data.result()
+
+    if compare_startdate != None and compare_startdate != "":
+        compare_total = future_compare_total.result()
+        compare_graph = future_compare_graph_data.result()
+
     data = {
         "total": total,
         "graph": graph_data,
-        "comapre_past" : comapre_past
+        "comapre_past": comapre_past
     }
-    if compare_startdate != None and compare_startdate != "":
 
-        compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
-        compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
-
-        compare_total = totalRevenueCalculation(compare_startdate, compare_enddate,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
-        
-
-        
+    if compare_total:
         difference = {
-        "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
-        "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
-        "profit_margin": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0, 2),
-        "orders": round(((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0, 2),
-        "units_sold": round(((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0, 2),
-        "refund_amount": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0, 2),
-        "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
+            "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
+            "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
+            "profit_margin": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0, 2),
+            "orders": round(((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0, 2),
+            "units_sold": round(((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0, 2),
+            "refund_amount": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0, 2),
+            "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
         }
         data['compare_total'] = difference
         data['previous_total'] = compare_total
-        compare_graph = get_graph_data(compare_startdate, compare_enddate, initial,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         data['compare_graph'] = compare_graph
-        # data['']
+
+    # Apply filters based on chooseMatrix
     name = "Revenue"
     item_pipeline = [
-                        { "$match": { "name": name } }
-                    ]
+        {"$match": {"name": name}}
+    ]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
     if item_result:
         item_result = item_result[0]
-    
+
         if item_result['select_all']:
             pass
         if item_result['gross_revenue'] == False:
             del data['total']["gross_revenue"]
         if item_result['units_sold'] == False:
             del data['total']["units_sold"]
-        # if item_result['acos'] == False:
-        #     del data['total']["acos"]
-        # if item_result['tacos'] == False:
-        #     del data['total']["tacos"]
         if item_result['refund_quantity'] == False:
             del data['total']["refund_quantity"]
         if item_result['refund_amount'] == False:
@@ -557,12 +578,9 @@ def RevenueWidgetAPIView(request):
             del data['total']["net_profit"]
         if item_result['profit_margin'] == False:
             del data['total']["profit_margin"]
-        # if item_result['roas'] == False:
-        #     del data['total']["roas"]
         if item_result['orders'] == False:
             del data['total']["orders"]
-        # if item_result['ppc_spend'] == False:
-        #     del data['total']["ppc_spend"]
+
     return data
 
 
@@ -4101,9 +4119,6 @@ def format_date_label(preset, start_date, end_date):
 
 
 def productsSalesOverview(request):
-    from django.utils import timezone
-    from datetime import datetime, timedelta
-
     product_id = request.GET.get("product_id")
     preset = request.GET.get("preset", "").strip().title()  # Normalize preset
     now = timezone.now()
