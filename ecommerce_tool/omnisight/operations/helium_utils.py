@@ -355,7 +355,6 @@ def AnnualizedRevenueAPIView(target_date):
     return annualized_revenue
 
 
-
 def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
     """
     Fetch total quantity and price of a product sold between start_date and end_date,
@@ -370,10 +369,8 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
     Returns:
         list: List of dicts with keys 'date', 'total_quantity', and 'total_price'.
     """
- 
-    # Choose the date format for grouping based on is_hourly
     date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
- 
+
     pipeline = [
         {
             "$match": {
@@ -389,9 +386,7 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
                 "as": "order_items_ins"
             }
         },
-        {
-            "$unwind": "$order_items_ins"
-        },
+        {"$unwind": "$order_items_ins"},
         {
             "$match": {
                 "order_items_ins.ProductDetails.product_id": ObjectId(product_id)
@@ -417,14 +412,11 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
                 "total_price": {"$round": ["$total_price", 2]}
             }
         },
-        {
-            "$sort": {"date": 1}  # Sort ascending by date/hour
-        }
+        {"$sort": {"date": 1}}
     ]
- 
+
     orders = list(Order.objects.aggregate(*pipeline))
     return orders
-
 
 
 def pageViewsandSessionCount(start_date,end_date,product_id):

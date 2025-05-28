@@ -215,162 +215,109 @@ def get_metrics_by_date_range(request):
     return metrics
 
 
-def LatestOrdersTodayAPIView(request):
-    marketplace_id = request.GET.get('marketplace_id', None)
-    product_id = request.GET.get('product_id', None)
-    brand_id = request.GET.get('brand_id', None)
-    manufacturer_name = request.GET.getlist('manufacturer_name',[])
-    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+# @csrf_exempt
+# def LatestOrdersTodayAPIView(request):
+#     marketplace_id = request.GET.get('marketplace_id', None)
+#     product_id = request.GET.getlist('product_id', [])
+#     brand_id = request.GET.getlist('brand_id', [])
+#     manufacturer_name = request.GET.getlist('manufacturer_name', [])
+#     fulfillment_channel = request.GET.get('fulfillment_channel',None)
+#     # 1️⃣ Compute bounds for "today" based on the user's local timezone
+#     user_timezone = request.GET.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
+#     local_tz = timezone(user_timezone)
 
-    today = datetime.utcnow().date()
-    start_of_day = datetime.combine(today, datetime.min.time())
-    end_of_day = datetime.combine(today, datetime.max.time())
+#     now = datetime.now(local_tz)
+#     # For a 24-hour period ending now
+#     start_of_day = now - timedelta(hours=24)
+#     end_of_day = now
 
-    match = dict()
-    match['order_date'] = {"$gte": start_of_day, "$lte": end_of_day}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered']}
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
+#     # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
+#     match = dict()
+#     match['order_date__gte'] = start_of_day
+#     match['order_date__lte'] = end_of_day
+#     match['order_status__in'] = ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']
+#     if fulfillment_channel:
+#         match['fulfillment_channel'] = fulfillment_channel
+#     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+#         match['marketplace_id'] = ObjectId(marketplace_id)
 
-    if product_id != None and product_id != "" and product_id != []:
-        product_id = [ObjectId(pid) for pid in product_id]
-        ids = getOrdersListBasedonProductId(product_id)
-        match["_id"] = {"$in": ids}
+#     if manufacturer_name != None and manufacturer_name != "" and manufacturer_name != []:
+#         ids = getproductIdListBasedonManufacture(manufacturer_name)
+#         match["_id"] = {"$in": ids}
 
-    elif brand_id != None and brand_id != "" and brand_id != []:
-        brand_id = [ObjectId(bid) for bid in brand_id]
-        ids = getproductIdListBasedonbrand(brand_id)
-        match["_id"] = {"$in": ids}
+#     elif product_id != None and product_id != "" and product_id != []:
+#         product_id = [ObjectId(pid) for pid in product_id]
+#         ids = getOrdersListBasedonProductId(product_id)
+#         match["id__in"] = ids
 
-    # 1️⃣ Hourly aggregation: Use order-level date for bucket, sum quantities from items
-    hourly_pipeline = [
-        {
-            "$match": match
-        },
-        {
-            "$lookup": {
-                "from": "order_items",
-                "localField": "order_items",
-                "foreignField": "_id",
-                "as": "items"
-            }
-        },
-        {
-            "$addFields": {
-                "bucket": {
-                    "$dateToString": {
-                        "format": "%Y-%m-%d %H:00:00",
-                        "date": "$order_date",
-                        "timezone": "UTC"
-                    }
-                },
-                "unitsCount": {
-                    "$sum": {
-                        "$map": {
-                            "input": "$items",
-                            "as": "it",
-                            "in": "$$it.ProductDetails.QuantityOrdered"
-                        }
-                    }
-                }
-            }
-        },
-        {
-            "$group": {
-                "_id": "$bucket",
-                "unitsCount": { "$sum": "$unitsCount" },
-                "ordersCount": { "$sum": 1 }
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "k": "$_id",
-                "v": {
-                    "unitsCount": "$unitsCount",
-                    "ordersCount": "$ordersCount"
-                }
-            }
-        },
-        {
-            "$sort": { "k": 1 }
-        }
-    ]
+#     elif brand_id != None and brand_id != "" and brand_id != []:
+#         brand_id = [ObjectId(bid) for bid in brand_id]
+#         ids = getproductIdListBasedonbrand(brand_id)
+#         match["id__in"] = ids
 
-    raw = list(Order.objects.aggregate(*hourly_pipeline))
-    chart_dict = {r["k"]: r["v"] for r in raw}
+#     qs = DatabaseModel.list_documents(Order.objects,match)
 
-    # Fill missing hours
-    filled = {}
-    bucket_time = start_of_day.replace(minute=0, second=0, microsecond=0)
-    for i in range(25):
-        key = bucket_time.strftime("%Y-%m-%d %H:00:00")
-        filled[key] = chart_dict.get(key, {"unitsCount": 0, "ordersCount": 0})
-        bucket_time += timedelta(hours=1)
+#     # 3️⃣ Pre-fill a 24-slot OrderedDict for every hour in the time range
+#     chart = OrderedDict()
+#     bucket = start_of_day.replace(minute=0, second=0, microsecond=0)
+#     for _ in range(25):  # 25 to include the current hour
+#         key = bucket.strftime("%Y-%m-%d %H:00:00")
+#         chart[key] = {"ordersCount": 0, "unitsCount": 0}
+#         bucket += timedelta(hours=1)
 
-    # 2️⃣ Detailed order info
-    detail_pipeline = [
-        {
-            "$match": match
-        },
-        {
-            "$lookup": {
-                "from": "order_items",
-                "localField": "order_items",
-                "foreignField": "_id",
-                "as": "items"
-            }
-        },
-        { "$unwind": "$items" },
-        {
-            "$lookup": {
-                "from": "product",
-                "localField": "items.ProductDetails.product_id",
-                "foreignField": "_id",
-                "as": "product"
-            }
-        },
-        { "$unwind": { "path": "$product", "preserveNullAndEmptyArrays": True } },
-        {
-            "$addFields": {
-                "sellerSku": "$items.ProductDetails.SKU",
-                "unitPrice": "$items.Pricing.ItemPrice.Amount",
-                "quantityOrdered": "$items.ProductDetails.QuantityOrdered",
-                "title": "$items.ProductDetails.Title",
-                "imageUrl": "$product.image_url",
-                "purchaseDate": "$order_date",
-                "orderId": "$purchase_order_id"
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "sellerSku": 1,
-                "title": 1,
-                "quantityOrdered": 1,
-                "imageUrl": 1,
-                "price": { "$multiply": ["$unitPrice", "$quantityOrdered"] },
-                "purchaseDate": {
-                    "$dateToString": {
-                        "format": "%Y-%m-%d %H:%M:%S",
-                        "date": "$purchaseDate",
-                        "timezone": "UTC"
-                    }
-                }
-            }
-        },
-        {
-            "$sort": { "purchaseDate": -1 }
-        }
-    ]
+#     # 4️⃣ Build the detail array + populate chart
+#     orders_out = []
+#     for order in qs:
+#         # Convert order_date to user's timezone for consistent bucketing
+#         order_local_time = order.order_date.astimezone(local_tz)
+        
+#         # hour bucket for this order
+#         bk = order_local_time.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:00:00")
+        
+#         # Only process if the bucket exists in our chart
+#         if bk in chart:
+#             chart[bk]["ordersCount"] += 1
+#             try:
+#                 # iterate each OrderItems instance referenced on this order
+#                 for item in order.order_items:
+#                     sku = item.ProductDetails.SKU
+#                     asin = item.ProductDetails.ASIN if hasattr(item.ProductDetails, 'ASIN') and item.ProductDetails.ASIN is not None else ""
+#                     qty = item.ProductDetails.QuantityOrdered
+#                     unit_price = item.Pricing.ItemPrice.Amount
+#                     title = item.ProductDetails.Title
+#                     # lazy-load the Product doc for image_url
+#                     prod_ref = item.ProductDetails.product_id
+#                     img_url = prod_ref.image_url if prod_ref else None
 
-    orders = list(Order.objects.aggregate(*detail_pipeline))
-    data = dict()
-    data = {
-        "orders": orders,
-        "hourly_order_count": filled
-    }
-    return data
+#                     total_price = round(unit_price * qty, 2)
+#                     purchase_dt = order_local_time.strftime("%Y-%m-%d %H:%M:%S")
+
+#                     orders_out.append({
+#                         "sellerSku": sku,
+#                         "asin": asin,
+#                         "title": title,
+#                         "quantityOrdered": qty,
+#                         "imageUrl": img_url,
+#                         "price": total_price,
+#                         "purchaseDate": purchase_dt
+#                     })
+
+#                     # add to units count
+#                     chart[bk]["unitsCount"] += qty
+#             except:
+#                 pass
+
+#     # 5️⃣ sort orders by most recent purchaseDate
+#     orders_out.sort(key=lambda o: o["purchaseDate"], reverse=True)
+    
+#     # Convert chart to list format for easier frontend consumption
+#     chart_list = [{"hour": hour, **data} for hour, data in chart.items()]
+    
+#     data = {
+#         "orders": orders_out,
+#         "hourly_order_count": chart_list
+#     }
+#     return data
 
 @csrf_exempt
 def LatestOrdersTodayAPIView(request):
@@ -390,29 +337,41 @@ def LatestOrdersTodayAPIView(request):
 
     # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
     match = dict()
-    match['order_date__gte'] = start_of_day
-    match['order_date__lte'] = end_of_day
-    match['order_status__in'] = ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']
+    match['order_date'] = {"$gte": start_of_day, "$lte": end_of_day}
+    match['order_status'] = {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
 
     if manufacturer_name != None and manufacturer_name != "" and manufacturer_name != []:
-        ids = getproductIdListBasedonManufacture(manufacturer_name)
+        ids = getproductIdListBasedonManufacture(manufacturer_name,start_of_day, end_of_day)
         match["_id"] = {"$in": ids}
-
+    
     elif product_id != None and product_id != "" and product_id != []:
         product_id = [ObjectId(pid) for pid in product_id]
-        ids = getOrdersListBasedonProductId(product_id)
-        match["id__in"] = ids
+        ids = getOrdersListBasedonProductId(product_id,start_of_day, end_of_day)
+        match["_id"] = {"$in": ids}
 
     elif brand_id != None and brand_id != "" and brand_id != []:
         brand_id = [ObjectId(bid) for bid in brand_id]
-        ids = getproductIdListBasedonbrand(brand_id)
-        match["id__in"] = ids
+        ids = getproductIdListBasedonbrand(brand_id,start_of_day, end_of_day)
+        match["_id"] = {"$in": ids}
 
-    qs = DatabaseModel.list_documents(Order.objects,match)
+    pipeline = [
+            {
+                "$match": match
+            },
+            {
+                "$project": {
+                    "_id" : 1,
+                    "order_date": 1,
+                    "order_items": 1
+                }
+            }
+        ]
+    qs = list(Order.objects.aggregate(*pipeline))
+
 
     # 3️⃣ Pre-fill a 24-slot OrderedDict for every hour in the time range
     chart = OrderedDict()
@@ -426,7 +385,7 @@ def LatestOrdersTodayAPIView(request):
     orders_out = []
     for order in qs:
         # Convert order_date to user's timezone for consistent bucketing
-        order_local_time = order.order_date.astimezone(local_tz)
+        order_local_time = order['order_date'].astimezone(local_tz)
         
         # hour bucket for this order
         bk = order_local_time.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:00:00")
@@ -436,31 +395,62 @@ def LatestOrdersTodayAPIView(request):
             chart[bk]["ordersCount"] += 1
             try:
                 # iterate each OrderItems instance referenced on this order
-                for item in order.order_items:
-                    sku = item.ProductDetails.SKU
-                    asin = item.ProductDetails.ASIN if hasattr(item.ProductDetails, 'ASIN') and item.ProductDetails.ASIN is not None else ""
-                    qty = item.ProductDetails.QuantityOrdered
-                    unit_price = item.Pricing.ItemPrice.Amount
-                    title = item.ProductDetails.Title
-                    # lazy-load the Product doc for image_url
-                    prod_ref = item.ProductDetails.product_id
-                    img_url = prod_ref.image_url if prod_ref else None
+                for item in order['order_items']:
+                    item_pipeline = [
+                        {"$match": {"_id": {"$in": order['order_items']}}},
+                        {
+                            "$lookup": {
+                                "from": "product",
+                                "localField": "ProductDetails.product_id",
+                                "foreignField": "_id",
+                                "as": "product_ins"
+                            }
+                        },
+                        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "sku": {
+                                    "$ifNull": ["$ProductDetails.SKU", ""]
+                                },
+                                "asin": {
+                                    "$ifNull": ["$ProductDetails.ASIN", ""]
+                                },
+                                "quantityOrdered":{"$ifNull": ["$ProductDetails.QuantityOrdered",""]},
+                                "unitPrice": "$Pricing.ItemPrice.Amount",
+                                "title": "$ProductDetails.Title",
+                                "imageUrl": "$product_ins.image_url",
+                                "totalPrice": {
+                                    "$round": [
+                                        {"$multiply": ["$Pricing.ItemPrice.Amount", "$ProductDetails.QuantityOrdered"]},
+                                        2
+                                    ]
+                                },
+                                "purchaseDate": {
+                                    "$dateToString": {
+                                        "format": "%Y-%m-%d %H:%M:%S",
+                                        "date": order_local_time
+                                    }
+                                }
+                            }
+                        }
+                    ]
 
-                    total_price = round(unit_price * qty, 2)
-                    purchase_dt = order_local_time.strftime("%Y-%m-%d %H:%M:%S")
+                    item_results = list(OrderItems.objects.aggregate(*item_pipeline))
+                    for item in item_results:
+                        orders_out.append({
+                            "sellerSku": item["sku"],
+                            "asin": item["asin"],
+                            "title": item["title"],
+                            "quantityOrdered": item["quantityOrdered"],
+                            "imageUrl": item["imageUrl"],
+                            "price": item["totalPrice"],
+                            "purchaseDate": item["purchaseDate"]
+                        })
 
-                    orders_out.append({
-                        "sellerSku": sku,
-                        "asin": asin,
-                        "title": title,
-                        "quantityOrdered": qty,
-                        "imageUrl": img_url,
-                        "price": total_price,
-                        "purchaseDate": purchase_dt
-                    })
+                        # add to units count
+                        chart[bk]["unitsCount"] += item["quantityOrdered"]
 
-                    # add to units count
-                    chart[bk]["unitsCount"] += qty
             except:
                 pass
 
@@ -897,8 +887,8 @@ def get_products_with_pagination(request):
                 "$project": {
                 "_id": 0,
                 "id": {"$toString":"$_id"},
-                "asin": {"$ifNull": ["$product_id", "N/A"]},
-                "sellerSku": {"$ifNull": ["$sku", "N/A"]},
+                "product_id": {"$ifNull": ["$product_id", "N/A"]},
+                "parent_sku": {"$ifNull": ["$sku", "N/A"]},
                 "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
                 "title": {"$ifNull": ["$product_title", "N/A"]},
                 "marketplace": {"$ifNull": ["$marketplace_ins.name", "N/A"]},
@@ -955,16 +945,24 @@ def get_products_with_pagination(request):
         # Extract total count and products
         total_products = result[0]["total_count"][0]["count"] if result[0]["total_count"] else 0
         products = result[0]["products"]
-        for ins in products:
+        def process_product(ins):
             p_ins = getdaywiseproductssold(start_date, end_date, ins['id'], False)
             for p in p_ins:
                 ins['salesForToday'] += p['total_price']
                 ins['unitsSoldForToday'] += p['total_quantity']
                 ins['grossRevenue'] += p['total_price']
-            ins['grossRevenue'] = round(ins['grossRevenue'], 2)
-            ins['netprofit'] = round(((ins['grossRevenue'] - (ins['cogs'] * ins['unitsSoldForToday']))+ (ins['vendor_funding']* ins['unitsSoldForToday'])),2)
-            ins['margin'] = round((ins['netprofit'] / ins['grossRevenue']) * 100 if ins['grossRevenue'] > 0 else 0,2)
+                ins['grossRevenue'] = round(ins['grossRevenue'], 2)
+                ins['netprofit'] = round(((ins['grossRevenue'] - (ins['cogs'] * ins['unitsSoldForToday'])) + (ins['vendor_funding'] * ins['unitsSoldForToday'])), 2)
+                ins['margin'] = round((ins['netprofit'] / ins['grossRevenue']) * 100 if ins['grossRevenue'] > 0 else 0, 2)
 
+        threads = []
+        for ins in products:
+            thread = threading.Thread(target=process_product, args=(ins,))
+            threads.append(thread)
+            thread.start()
+
+        for thread in threads:
+            thread.join()
 
         # Prepare response data
         response_data = {
@@ -4116,10 +4114,39 @@ def format_date_label(preset, start_date, end_date):
         return f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
     
 
+def getdaywiseproductssold_dict(start_date, end_date, product_id, is_hourly=False):
+    results = getdaywiseproductssold(start_date, end_date, product_id, is_hourly)
+    return {item["date"]: item for item in results}
+
+
+def get_val_from_dict(date_obj, data_dict):
+    date_str = date_obj.strftime("%Y-%m-%d")
+    entry = data_dict.get(date_str)
+    if entry:
+        return entry["total_quantity"], float(entry["total_price"])
+    return 0, 0.0
+
+
+def sum_period_from_dict(start_day, end_day, data_dict):
+    qty, price = 0, 0.0
+    day = start_day
+    while day <= end_day:
+        q, p = get_val_from_dict(day, data_dict)
+        qty += q
+        price += p
+        day += timedelta(days=1)
+    return qty, round(price, 2)
+
+
+def calc_diff_trend(current, previous):
+    diff = round(current - previous, 2)
+    trend = "up" if diff > 0 else "down" if diff < 0 else "neutral"
+    return diff, trend
 
 
 def productsSalesOverview(request):
     from django.utils import timezone
+
     product_id = request.GET.get("product_id")
     preset = request.GET.get("preset", "").strip().title()  # Normalize preset
     now = timezone.now()
@@ -4133,12 +4160,19 @@ def productsSalesOverview(request):
     prev_7days_start = last_7days_start - timedelta(days=7)
     prev_7days_end = last_7days_start - timedelta(days=1)
 
-    filled_graph = []
     label = None
+    filled_graph = []
+
+    # Preload last 15 days of data for stats
+    stats_data_dict = getdaywiseproductssold_dict(
+        datetime.combine(login_date - timedelta(days=15), datetime.min.time()),
+        datetime.combine(login_date - timedelta(days=1), datetime.max.time()),
+        product_id,
+        is_hourly=False
+    )
 
     if preset:
         is_hourly = preset in ["Today", "Yesterday"]
-
         if preset == "Today":
             start_date = datetime.combine(login_date, datetime.min.time())
             end_date = now
@@ -4158,7 +4192,7 @@ def productsSalesOverview(request):
             label = format_date_label(preset, start_date, end_date)
             graph_data = getdaywiseproductssold(start_date, end_date, product_id, is_hourly)
 
-            # Normalize dates
+            # Normalize date formats
             for item in graph_data:
                 raw_date = item.get("date")
                 try:
@@ -4190,36 +4224,12 @@ def productsSalesOverview(request):
                     }))
                     current += timedelta(days=1)
 
-    def get_val(date_obj):
-        start = datetime.combine(date_obj, datetime.min.time())
-        end = datetime.combine(date_obj, datetime.max.time())
-        daily = getdaywiseproductssold(start, end, product_id, is_hourly=False)
-        if daily:
-            return daily[0]["total_quantity"], float(daily[0]["total_price"])
-        return 0, 0.0
+    # Final metrics using preloaded daywise data
+    y_qty, y_price = get_val_from_dict(yesterday, stats_data_dict)
+    p_qty, p_price = get_val_from_dict(prev_day, stats_data_dict)
+    curr_qty, curr_price = sum_period_from_dict(last_7days_start, last_7days_end, stats_data_dict)
+    prev_qty, prev_price = sum_period_from_dict(prev_7days_start, prev_7days_end, stats_data_dict)
 
-    def sum_period(start_day, end_day):
-        qty, price = 0, 0.0
-        day = start_day
-        while day <= end_day:
-            q, p = get_val(day)
-            qty += q
-            price += p
-            day += timedelta(days=1)
-        return qty, round(price, 2)
-
-    def calc_diff_trend(current, previous):
-        diff = round(current - previous, 2)
-        trend = "up" if diff > 0 else "down" if diff < 0 else "neutral"
-        return diff, trend
-
-    # Fetch values
-    y_qty, y_price = get_val(yesterday)
-    p_qty, p_price = get_val(prev_day)
-    curr_qty, curr_price = sum_period(last_7days_start, last_7days_end)
-    prev_qty, prev_price = sum_period(prev_7days_start, prev_7days_end)
-
-    # Build final dicts
     units = {
         "yesterday": {
             "value": y_qty,
@@ -4257,13 +4267,11 @@ def productsSalesOverview(request):
     }
 
     return {
-                "label": label,
-                "units": units,
-                "sales": sales,
-                "graph": filled_graph
-            }
-
- 
+        "label": label,
+        "units": units,
+        "sales": sales,
+        "graph": filled_graph
+    }
 
 
 def productsListingQualityScore(request):
