@@ -4116,9 +4116,39 @@ def format_date_label(preset, start_date, end_date):
         return f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
     
 
+def getdaywiseproductssold_dict(start_date, end_date, product_id, is_hourly=False):
+    results = getdaywiseproductssold(start_date, end_date, product_id, is_hourly)
+    return {item["date"]: item for item in results}
+
+
+def get_val_from_dict(date_obj, data_dict):
+    date_str = date_obj.strftime("%Y-%m-%d")
+    entry = data_dict.get(date_str)
+    if entry:
+        return entry["total_quantity"], float(entry["total_price"])
+    return 0, 0.0
+
+
+def sum_period_from_dict(start_day, end_day, data_dict):
+    qty, price = 0, 0.0
+    day = start_day
+    while day <= end_day:
+        q, p = get_val_from_dict(day, data_dict)
+        qty += q
+        price += p
+        day += timedelta(days=1)
+    return qty, round(price, 2)
+
+
+def calc_diff_trend(current, previous):
+    diff = round(current - previous, 2)
+    trend = "up" if diff > 0 else "down" if diff < 0 else "neutral"
+    return diff, trend
 
 
 def productsSalesOverview(request):
+    from django.utils import timezone
+
     product_id = request.GET.get("product_id")
     preset = request.GET.get("preset", "").strip().title()  # Normalize preset
     now = timezone.now()
@@ -4132,12 +4162,19 @@ def productsSalesOverview(request):
     prev_7days_start = last_7days_start - timedelta(days=7)
     prev_7days_end = last_7days_start - timedelta(days=1)
 
-    filled_graph = []
     label = None
+    filled_graph = []
+
+    # Preload last 15 days of data for stats
+    stats_data_dict = getdaywiseproductssold_dict(
+        datetime.combine(login_date - timedelta(days=15), datetime.min.time()),
+        datetime.combine(login_date - timedelta(days=1), datetime.max.time()),
+        product_id,
+        is_hourly=False
+    )
 
     if preset:
         is_hourly = preset in ["Today", "Yesterday"]
-
         if preset == "Today":
             start_date = datetime.combine(login_date, datetime.min.time())
             end_date = now
@@ -4157,7 +4194,7 @@ def productsSalesOverview(request):
             label = format_date_label(preset, start_date, end_date)
             graph_data = getdaywiseproductssold(start_date, end_date, product_id, is_hourly)
 
-            # Normalize dates
+            # Normalize date formats
             for item in graph_data:
                 raw_date = item.get("date")
                 try:
@@ -4189,36 +4226,12 @@ def productsSalesOverview(request):
                     }))
                     current += timedelta(days=1)
 
-    def get_val(date_obj):
-        start = datetime.combine(date_obj, datetime.min.time())
-        end = datetime.combine(date_obj, datetime.max.time())
-        daily = getdaywiseproductssold(start, end, product_id, is_hourly=False)
-        if daily:
-            return daily[0]["total_quantity"], float(daily[0]["total_price"])
-        return 0, 0.0
+    # Final metrics using preloaded daywise data
+    y_qty, y_price = get_val_from_dict(yesterday, stats_data_dict)
+    p_qty, p_price = get_val_from_dict(prev_day, stats_data_dict)
+    curr_qty, curr_price = sum_period_from_dict(last_7days_start, last_7days_end, stats_data_dict)
+    prev_qty, prev_price = sum_period_from_dict(prev_7days_start, prev_7days_end, stats_data_dict)
 
-    def sum_period(start_day, end_day):
-        qty, price = 0, 0.0
-        day = start_day
-        while day <= end_day:
-            q, p = get_val(day)
-            qty += q
-            price += p
-            day += timedelta(days=1)
-        return qty, round(price, 2)
-
-    def calc_diff_trend(current, previous):
-        diff = round(current - previous, 2)
-        trend = "up" if diff > 0 else "down" if diff < 0 else "neutral"
-        return diff, trend
-
-    # Fetch values
-    y_qty, y_price = get_val(yesterday)
-    p_qty, p_price = get_val(prev_day)
-    curr_qty, curr_price = sum_period(last_7days_start, last_7days_end)
-    prev_qty, prev_price = sum_period(prev_7days_start, prev_7days_end)
-
-    # Build final dicts
     units = {
         "yesterday": {
             "value": y_qty,
@@ -4256,13 +4269,11 @@ def productsSalesOverview(request):
     }
 
     return {
-                "label": label,
-                "units": units,
-                "sales": sales,
-                "graph": filled_graph
-            }
-
- 
+        "label": label,
+        "units": units,
+        "sales": sales,
+        "graph": filled_graph
+    }
 
 
 def productsListingQualityScore(request):
