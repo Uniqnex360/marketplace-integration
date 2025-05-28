@@ -578,85 +578,78 @@ def syncRecentWalmartOrders():
         "WM_SVC.NAME": "Walmart Marketplace",
         "Accept": "application/json"
     }
-    # Get today's date
+
     today = datetime.utcnow()
-    # Fetch last 1 day of orders
     start_date = (today - timedelta(days=3)).strftime("%Y-%m-%dT00:00:00Z")
     end_date = today.strftime("%Y-%m-%dT23:59:59Z")
-
     url = f"{base_url}?createdStartDate={start_date}&createdEndDate={end_date}&limit=100"
+
     fetched_orders = []
     next_cursor = None
-    lock = threading.Lock()
 
-    def fetch_orders(url):
-        nonlocal next_cursor
-        while True:
-            if next_cursor:
-                url = f"{base_url}{next_cursor}"  # Use the nextCursor for pagination
-
-            response = requests.get(url, headers=headers)
-            if response.status_code == 200:
-                result = response.json()
-                with lock:
-                    fetched_orders.extend(result.get('list', {}).get('elements', {}).get('order', []))
-                    next_cursor = result.get("list", {}).get("meta", {}).get("nextCursor")
-                if not next_cursor:
-                    break  # No more pages left
-            else:
-                print(f"❌ Error fetching orders: [HTTP {response.status_code}] {response.text}")
+    while True:
+        paged_url = f"{base_url}{next_cursor}" if next_cursor else url
+        response = requests.get(paged_url, headers=headers)
+        if response.status_code == 200:
+            result = response.json()
+            new_orders = result.get('list', {}).get('elements', {}).get('order', [])
+            fetched_orders.extend(new_orders)
+            next_cursor = result.get("list", {}).get("meta", {}).get("nextCursor")
+            if not next_cursor:
                 break
+        else:
+            print(f"❌ Error fetching orders: [HTTP {response.status_code}] {response.text}")
+            break
 
-    # Start threads for fetching orders
-    threads = []
-    for _ in range(5):  # Adjust the number of threads as needed
-        thread = threading.Thread(target=fetch_orders, args=(url,))
-        threads.append(thread)
-        thread.start()
+    # Remove duplicate purchase order IDs
+    unique_orders = {}
+    for order in fetched_orders:
+        po_id = order.get('purchaseOrderId')
+        if po_id and po_id not in unique_orders:
+            unique_orders[po_id] = order
 
-    for thread in threads:
-        thread.join()
-
-    orders.extend(fetched_orders)
+    orders = list(unique_orders.values())
 
     def process_order(row):
-        order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": str(row.get('purchaseOrderId', ""))})
+        po_id = str(row.get('purchaseOrderId', ""))
+        order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": po_id})
         if order_obj is not None:
-            print(f"Order with purchase order ID {row['purchaseOrderId']} already exists. Skipping...")
-            DatabaseModel.update_documents(Order.objects, {"purchase_order_id": str(row.get('purchaseOrderId', ""))}, {"order_status": row['orderLines']['orderLine'][0]['orderLineStatuses']['orderLineStatus'][0]['status']})
+            print(f"Order with purchase order ID {po_id} already exists. Skipping...")
+            DatabaseModel.update_documents(Order.objects, {"purchase_order_id": po_id},
+                                           {"order_status": row['orderLines']['orderLine'][0]['orderLineStatuses']['orderLineStatus'][0]['status']})
         else:
-            print(f"Creating order with purchase order ID {row['purchaseOrderId']}...")
+            print(f"Creating order with purchase order ID {po_id}...")
             order_date = row.get('orderDate', "")
             if order_date:
                 order_date = datetime.fromtimestamp(int(order_date) / 1000)
-            order_items = list()
+
             shipNode = eval(str(row['shipNode'])) if row.get('shipNode') else {}
             order_details = eval(str(row['orderLines'])) if row.get('orderLines') else []
+            order_items = []
             order_total = 0
             currency = "USD"
             order_status = ""
-            for order_line_ins in order_details.get('orderLine', []):
-                for charge_ins in order_line_ins.get('charges', {}).get('charge', []):
-                    tax = 0
-                    if charge_ins.get('tax') is not None:
-                        tax = float(charge_ins['tax']['taxAmount']['amount'])
-                    order_total += float(charge_ins['chargeAmount']['amount']) + tax
-                    currency = charge_ins['chargeAmount']['currency']
-                order_items.append(process_walmart_order(order_line_ins, order_date))
 
-            order_status = order_line_ins.get('orderLineStatuses', {}).get('orderLineStatus', [{}])[0].get('status', "")
+            for order_line in order_details.get('orderLine', []):
+                for charge in order_line.get('charges', {}).get('charge', []):
+                    tax = float(charge['tax']['taxAmount']['amount']) if charge.get('tax') else 0
+                    order_total += float(charge['chargeAmount']['amount']) + tax
+                    currency = charge['chargeAmount']['currency']
+                order_items.append(process_walmart_order(order_line, order_date))
+
+            order_status = order_line.get('orderLineStatuses', {}).get('orderLineStatus', [{}])[0].get('status', "")
             try:
-                shipping_information = eval(row['shippingInfo']) if row.get('shippingInfo') else "",
+                shipping_info = eval(row['shippingInfo']) if row.get('shippingInfo') else {}
             except:
-                shipping_information = {}
+                shipping_info = {}
 
             order = Order(
                 marketplace_id=marketplace_id,
-                purchase_order_id=str(row.get('purchaseOrderId', "")),
+                purchase_order_id=po_id,
                 customer_order_id=str(row.get('customerOrderId', "")),
                 customer_email_id=str(row.get('customerEmailId', "")),
                 order_date=order_date,
-                shipping_information=shipping_information,
+                shipping_information=shipping_info,
                 fulfillment_channel=shipNode.get('type', ""),
                 order_details=order_details.get('orderLine', []),
                 order_items=order_items,
@@ -666,14 +659,14 @@ def syncRecentWalmartOrders():
             )
             order.save()
 
-    # Process orders using threads
-    process_threads = []
+    # Optional: process in threads
+    threads = []
     for row in orders:
         thread = threading.Thread(target=process_order, args=(row,))
-        process_threads.append(thread)
+        threads.append(thread)
         thread.start()
 
-    for thread in process_threads:
+    for thread in threads:
         thread.join()
 
     return orders
