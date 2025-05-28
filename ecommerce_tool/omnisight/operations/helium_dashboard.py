@@ -4119,6 +4119,7 @@ def format_date_label(preset, start_date, end_date):
 
 
 def productsSalesOverview(request):
+    from django.utils import timezone
     product_id = request.GET.get("product_id")
     preset = request.GET.get("preset", "").strip().title()  # Normalize preset
     now = timezone.now()
