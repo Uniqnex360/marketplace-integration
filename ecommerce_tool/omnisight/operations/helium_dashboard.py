@@ -813,7 +813,7 @@ def get_products_with_pagination(request):
                 stock = 0
                 price_range = []
                 cogs = 0
-                p_list = DatabaseModel.list_documents(Product.objects,{"parent_sku":ins},['quantity','price','product_title','image_url','parent_sku','marketplace_id','id','total_cogs','w_total_cogs'])
+                p_list = DatabaseModel.list_documents(Product.objects,{"parent_sku":ins},['quantity','price','product_title','image_url','parent_sku','marketplace_id','id','total_cogs','w_total_cogs','category'])
                 p_exist = False
                 for p_ins in p_list:
                     stock += p_ins.quantity
@@ -831,6 +831,7 @@ def get_products_with_pagination(request):
                             "imageUrl" : p_ins.image_url,
                             "parent_sku" : p_ins.parent_sku,
                             "marketplace" : p_ins.marketplace_id.name,
+                            "category" : p_ins.category
                         }
                         p_exist = True
                 p_dict['sku_count'] = len(p_list)
@@ -861,6 +862,7 @@ def get_products_with_pagination(request):
             "page": page,
             "page_size": page_size,
             "products": products,
+            "tab_type" : "parent"
         }
 
     else:
@@ -970,6 +972,7 @@ def get_products_with_pagination(request):
             "page": page,
             "page_size": page_size,
             "products": products,
+            "tab_type" : "sku"
         }
 
     return JsonResponse(response_data, safe=False)
@@ -1609,6 +1612,7 @@ def getProductPerformanceSummary(request):
     for order in orders:
         order_total = order.get("order_total", 0.0)
         item_ids = order.get("order_items", [])
+        fulfillmentChannel = ""
         temp_price = 0.0
         total_cogs = 0.0
         sku_set = set()
@@ -1635,6 +1639,13 @@ def getProductPerformanceSummary(request):
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
+                        "fulfillmentChannel": {
+                            "$cond": {
+                            "if": {"$eq": ["$product_ins.fullfillment_by_channel", True]},
+                            "then": "FBA",
+                            "else": "FBM"
+                            }
+                            },
                         "images": "$product_ins.image_url",
                         "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
                         "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
@@ -1658,6 +1669,7 @@ def getProductPerformanceSummary(request):
                  
                 temp_price += price
                 total_cogs += cogs
+                fulfillmentChannel = item_data.get("fulfillmentChannel", 0.0)
                 if sku:
                     sku_set.add(sku)
 
@@ -1667,6 +1679,7 @@ def getProductPerformanceSummary(request):
                     sku_summary[sku]["unitsSold"] += 1
                     sku_summary[sku]["grossRevenue"] += price
                     sku_summary[sku]["totalCogs"] += cogs
+                    sku_summary[sku]["fulfillmentChannel"] = fulfillmentChannel
 
         # other_price = order_total - temp_price - tax_price
 
@@ -1717,14 +1730,15 @@ def downloadProductPerformanceSummary(request):
         "totalCogs": 0.0,
         "netProfit": 0.0,
         "margin": 0.0,
-        "Trend" :""      
+        "Trend" :"",
+        "vendor_funding" : 0      
     })
  
     for order in orders:
         order_total = order.get("order_total", 0.0)
         item_ids = order.get("order_items", [])
         m_name = order.get("marketplace_name", "")
-        fulfillment_channel = order.get("fulfillment_channel", "")
+        fulfillment_channel = ""
         temp_price = 0.0
         total_cogs = 0.0
         tax_price = 0
@@ -1749,6 +1763,13 @@ def downloadProductPerformanceSummary(request):
                         "tax_price": "$Pricing.ItemPrice.tax_price",
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                         "sku": "$product_ins.sku",
+                        "fulfillmentChannel": {
+                            "$cond": {
+                            "if": {"$eq": ["$product_ins.fullfillment_by_channel", True]},
+                            "then": "FBA",
+                            "else": "FBM"
+                            }
+                            },
                         "product_name": "$product_ins.product_title",
                         "images": "$product_ins.image_urls",
                         "asin": "$product_ins.asin",
@@ -1775,6 +1796,7 @@ def downloadProductPerformanceSummary(request):
                 temp_price += price
                 total_cogs += cogs
                 vendor_funding += item_data.get("vendor_funding", 0.0)
+                fulfillment_channel = item_data.get("fulfillmentChannel", 0.0)
                 if sku:
                     sku_set.add(sku)
  
@@ -1890,13 +1912,14 @@ def downloadProductPerformanceCSV(request):
         "totalCogs": 0.0,
         "netProfit": 0.0,
         "margin": 0.0,
-        "Trend":""
+        "Trend":"",
+        "vendor_funding" : 0
     })
  
     for order in orders:
         order_total = order.get("order_total", 0.0)
         item_ids = order.get("order_items", [])
-        fulfillment_channel = order.get("fulfillment_channel", "")
+        fulfillment_channel = ""
         temp_price = 0.0
         total_cogs = 0.0
         tax_price = 0
@@ -1925,6 +1948,13 @@ def downloadProductPerformanceCSV(request):
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
                         "images": "$product_ins.image_urls",
+                        "fulfillmentChannel": {
+                            "$cond": {
+                            "if": {"$eq": ["$product_ins.fullfillment_by_channel", True]},
+                            "then": "FBA",
+                            "else": "FBM"
+                            }
+                            },
                         "asin": "$product_ins.asin",
                         "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
                         "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
@@ -1949,6 +1979,7 @@ def downloadProductPerformanceCSV(request):
                 temp_price += price
                 total_cogs += cogs
                 vendor_funding += item_data.get("vendor_funding", 0.0)
+                fulfillment_channel = item_data.get("fulfillmentChannel", 0.0)
                 if sku:
                     sku_set.add(sku)
  
