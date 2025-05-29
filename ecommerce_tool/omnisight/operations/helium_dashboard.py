@@ -217,13 +217,14 @@ def get_metrics_by_date_range(request):
 
 # @csrf_exempt
 # def LatestOrdersTodayAPIView(request):
-#     marketplace_id = request.GET.get('marketplace_id', None)
-#     product_id = request.GET.getlist('product_id', [])
-#     brand_id = request.GET.getlist('brand_id', [])
-#     manufacturer_name = request.GET.getlist('manufacturer_name', [])
-#     fulfillment_channel = request.GET.get('fulfillment_channel',None)
+#     json_request = JSONParser().parse(request)
+#     marketplace_id = json_request.get('marketplace_id', None)
+#     product_id = json_request.get('product_id', [])
+#     brand_id = json_request.get('brand_id', [])
+#     manufacturer_name = json_request.get('manufacturer_name', [])
+#     fulfillment_channel = json_request.get('fulfillment_channel',None)
 #     # 1️⃣ Compute bounds for "today" based on the user's local timezone
-#     user_timezone = request.GET.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
+#     user_timezone = json_request.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
 #     local_tz = timezone(user_timezone)
 
 #     now = datetime.now(local_tz)
@@ -321,13 +322,14 @@ def get_metrics_by_date_range(request):
 
 @csrf_exempt
 def LatestOrdersTodayAPIView(request):
-    marketplace_id = request.GET.get('marketplace_id', None)
-    product_id = request.GET.getlist('product_id', [])
-    brand_id = request.GET.getlist('brand_id', [])
-    manufacturer_name = request.GET.getlist('manufacturer_name', [])
-    fulfillment_channel = request.GET.get('fulfillment_channel',None)
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id', None)
+    product_id = json_request.get('product_id', [])
+    brand_id = json_request.get('brand_id', [])
+    manufacturer_name = json_request.get('manufacturer_name', [])
+    fulfillment_channel = json_request.get('fulfillment_channel',None)
     # 1️⃣ Compute bounds for "today" based on the user's local timezone
-    user_timezone = request.GET.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
+    user_timezone = json_request.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
     local_tz = timezone(user_timezone)
 
     now = datetime.now(local_tz)
@@ -395,61 +397,73 @@ def LatestOrdersTodayAPIView(request):
             chart[bk]["ordersCount"] += 1
             try:
                 # iterate each OrderItems instance referenced on this order
-                for item in order['order_items']:
-                    item_pipeline = [
-                        {"$match": {"_id": {"$in": order['order_items']}}},
-                        {
-                            "$lookup": {
-                                "from": "product",
-                                "localField": "ProductDetails.product_id",
-                                "foreignField": "_id",
-                                "as": "product_ins"
-                            }
-                        },
-                        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                        {
-                            "$project": {
-                                "_id": 0,
-                                "sku": {
-                                    "$ifNull": ["$ProductDetails.SKU", ""]
-                                },
-                                "asin": {
-                                    "$ifNull": ["$ProductDetails.ASIN", ""]
-                                },
-                                "quantityOrdered":{"$ifNull": ["$ProductDetails.QuantityOrdered",""]},
-                                "unitPrice": "$Pricing.ItemPrice.Amount",
-                                "title": "$ProductDetails.Title",
+                
+                item_pipeline = [
+                    {"$match": {"_id": {"$in": order['order_items']}}},
+                    {
+                        "$lookup": {
+                            "from": "product",
+                            "localField": "ProductDetails.product_id",
+                            "foreignField": "_id",
+                            "as": "product_ins"
+                        }
+                    },
+                    {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                    {
+                        "$group": {
+                            "_id": {
+                                "id" : "$product_ins._id",
+                                "sku": {"$ifNull": ["$product_ins.sku", ""]},
+                                "asin": {"$ifNull": ["$product_ins.product_id", ""]},
+                                "title": "$product_ins.product_title",
                                 "imageUrl": "$product_ins.image_url",
-                                "totalPrice": {
-                                    "$round": [
-                                        {"$multiply": ["$Pricing.ItemPrice.Amount", "$ProductDetails.QuantityOrdered"]},
-                                        2
-                                    ]
-                                },
                                 "purchaseDate": {
                                     "$dateToString": {
                                         "format": "%Y-%m-%d %H:%M:%S",
                                         "date": order_local_time
                                     }
                                 }
+                            },
+                            "quantityOrdered": {"$sum": "$ProductDetails.QuantityOrdered"},
+                            "unitPrice": {"$first": "$Pricing.ItemPrice.Amount"},
+                            "totalPrice": {
+                                "$sum": {
+                                    "$multiply": ["$Pricing.ItemPrice.Amount", "$ProductDetails.QuantityOrdered"]
+                                }
                             }
                         }
-                    ]
+                    },
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "id" : "$_id.id",
+                            "sku": "$_id.sku",
+                            "asin": "$_id.asin",
+                            "title": "$_id.title",
+                            "imageUrl": "$_id.imageUrl",
+                            "quantityOrdered": "$quantityOrdered",
+                            "unitPrice": "$unitPrice",
+                            "totalPrice": {"$round": ["$totalPrice", 2]},
+                            "purchaseDate": "$_id.purchaseDate"
+                        }
+                    }
+                ]
 
-                    item_results = list(OrderItems.objects.aggregate(*item_pipeline))
-                    for item in item_results:
-                        orders_out.append({
-                            "sellerSku": item["sku"],
-                            "asin": item["asin"],
-                            "title": item["title"],
-                            "quantityOrdered": item["quantityOrdered"],
-                            "imageUrl": item["imageUrl"],
-                            "price": item["totalPrice"],
-                            "purchaseDate": item["purchaseDate"]
-                        })
+                item_results = list(OrderItems.objects.aggregate(*item_pipeline))
+                for item in item_results:
+                    orders_out.append({
+                        "id" : str(item["id"]),
+                        "sellerSku": item["sku"],
+                        "asin": item["asin"],
+                        "title": item["title"],
+                        "quantityOrdered": item["quantityOrdered"],
+                        "imageUrl": item["imageUrl"],
+                        "price": item["totalPrice"],
+                        "purchaseDate": item["purchaseDate"]
+                    })
 
-                        # add to units count
-                        chart[bk]["unitsCount"] += item["quantityOrdered"]
+                    # add to units count
+                    chart[bk]["unitsCount"] += item["quantityOrdered"]
 
             except:
                 pass
@@ -806,7 +820,7 @@ def get_products_with_pagination(request):
         if result != []:
             sku_list = result[0]['parent_sku_list']
             total_products = len(sku_list)
-            parent_sku = sku_list[((page - 1) * page_size):page_size] 
+            parent_sku = sku_list[((page - 1) ):(page-1)+10] 
             products = []
             for ins in parent_sku:
                 p_dict = {}
@@ -872,8 +886,8 @@ def get_products_with_pagination(request):
             "$facet": {
             "total_count": [{"$count": "count"}],
             "products": [
-            {"$skip": (page - 1) * page_size},
-            {"$limit": page_size},
+            {"$skip": (page - 1)},
+            {"$limit": (page-1)+ 10},
             {
                 "$lookup" : {
                 "from" : "marketplace",
