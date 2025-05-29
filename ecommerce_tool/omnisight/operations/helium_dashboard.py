@@ -618,12 +618,12 @@ def get_top_products(request):
         match['order_status'] = "Refunded"
     if product_id != None and product_id != "" and product_id != []:
         product_id = [ObjectId(pid) for pid in product_id]
-        ids = getOrdersListBasedonProductId(product_id)
+        ids = getOrdersListBasedonProductId(product_id,start_date, end_date)
         match["_id"] = {"$in": ids}
 
     elif brand_id != None and brand_id != "" and brand_id != []:
         brand_id = [ObjectId(bid) for bid in brand_id]
-        ids = getproductIdListBasedonbrand(brand_id)
+        ids = getproductIdListBasedonbrand(brand_id,start_date, end_date)
         match["_id"] = {"$in": ids}
     
 
