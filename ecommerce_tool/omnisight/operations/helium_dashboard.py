@@ -672,10 +672,10 @@ def get_top_products(request):
         },
         {
             "$group": {
-                "_id": "$order_items_ins.ProductDetails.product_id",
-                "product": {"$first": "$order_items_ins.ProductDetails.Title"},
-                "asin": {"$first": "$order_items_ins.ProductDetails.ASIN"},
-                "sku": {"$first": "$order_items_ins.ProductDetails.SKU"},
+                "_id": "$product_ins._id",
+                "product": {"$first": "$product_ins.product_title"},
+                "asin": {"$first": "$product_ins.product_id"},
+                "sku": {"$first": "$product_ins.sku"},
                 "product_image": {"$first": "$product_ins.image_url"},
                 "total_units": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
                 "total_price": {
