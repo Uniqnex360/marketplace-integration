@@ -814,7 +814,11 @@ def get_products_with_pagination(request):
             match["sku"] = {"$regex": sku_search, "$options": "i"}
 
     if search_query:
-        match['product_title'] = {"$regex": search_query, "$options": "i"}
+        search_query = search_query.strip() 
+        match["$or"] = [
+            {"product_title": {"$regex": search_query, "$options": "i"}},
+            {"sku": {"$regex": search_query, "$options": "i"}},
+        ]
 
     if match != {}:
         pipeline.append({
