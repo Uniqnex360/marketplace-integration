@@ -1034,8 +1034,8 @@ def get_products_with_pagination(request):
             "$facet": {
                 "total_count": [{"$count": "count"}],
                 "products": [
-                {"$skip": (page - 1) * page_size},  # Correct skip logic for pagination
-                {"$limit": page_size},  # Limit based on page size
+                {"$skip": (page - 1)},  # Correct skip logic for pagination
+                {"$limit": (page + page_size)},  # Limit based on page size
                 {
                     "$lookup": {
                     "from": "marketplace",
