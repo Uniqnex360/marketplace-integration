@@ -251,7 +251,16 @@ def fetchProductDetails(request):
                 "image_url" : {"$ifNull" : ["$image_url", ""]},
                 "image_urls" : {"$ifNull" : ["$image_urls", []]},
                 "vendor_funding" : {"$ifNull" : ["$vendor_funding", 0.0]},
-                "veddor_discount" : {"$ifNull" : ["$vendor_discount", 0.0]}
+                "veddor_discount" : {"$ifNull" : ["$vendor_discount", 0.0]},
+                "product_cost": {"$ifNull": ["$product_cost", 0]},
+                "referral_fee": {"$ifNull": ["$referral_fee", 0]},
+                "a_shipping_cost": {"$ifNull": ["$a_shipping_cost", 0]},
+                "total_cogs": {"$ifNull": ["$total_cogs", 0]},
+                "w_product_cost": {"$ifNull": ["$w_product_cost", 0]},
+                "walmart_fee": {"$ifNull": ["$walmart_fee", 0]},
+                "w_shiping_cost": {"$ifNull": ["$w_shiping_cost", 0]},
+                "w_total_cogs": {"$ifNull": ["$w_total_cogs", 0]},
+                "pack_size": {"$ifNull": ["$pack_size", ""]},
             }
         }
     ]
@@ -2484,13 +2493,16 @@ def fetchSalesSummary(request):
 def getProductVariant(request):
     variant_list = list()
     product_id = request.GET.get('product_id')
+    is_duplicate = request.GET.get('is_duplicate',False)
     parant_sku = DatabaseModel.get_document(Product.objects,{"id" : product_id},['parent_sku']).parent_sku
+    match = {}
+    match['parent_sku'] = parant_sku
+    if is_duplicate == "true":
+        match['_id'] = {"$ne" : ObjectId(product_id)}
     if parant_sku != None:
         pipeline = [
             {
-                "$match" : {
-                    "parent_sku" : parant_sku
-                }
+                "$match" : match
             },
             {
                 "$lookup": {
