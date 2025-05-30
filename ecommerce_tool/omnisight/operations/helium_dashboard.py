@@ -779,7 +779,7 @@ def get_products_with_pagination(request):
     sort_by_value = json_request.get('sort_by_value')
     parent_search = json_request.get('parent_search')
     sku_search = json_request.get('sku_search')
-    search_query = json_request.get('sku_search')
+    search_query = json_request.get('search_query')
     
 
 
@@ -809,9 +809,9 @@ def get_products_with_pagination(request):
 
     if parent_search:
         match["parent_sku"] = {"$regex": parent_search, "$options": "i"}
-
-    if sku_search:
-        match["sku"] = {"$regex": sku_search, "$options": "i"}
+    if parent != True:
+        if sku_search:
+            match["sku"] = {"$regex": sku_search, "$options": "i"}
 
     if search_query:
         match['product_title'] = {"$regex": search_query, "$options": "i"}
