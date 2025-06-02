@@ -1831,6 +1831,7 @@ def getProductPerformanceSummary(request):
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
+                        "product_id" : {"$ifNull" : ["$product_ins.product_id",2]},
                         "fulfillmentChannel": {
                             "$cond": {
                             "if": {"$eq": ["$product_ins.fullfillment_by_channel", True]},
@@ -1850,6 +1851,7 @@ def getProductPerformanceSummary(request):
                 item_data = item_result[0]
                 sku = item_data.get("sku")
                 product_name = item_data.get("product_name", "")
+                product_id = item_data.get("product_id", "")
                 tax_price += item_data['tax_price']
 
                 images = item_data.get("images", [])
@@ -1867,6 +1869,7 @@ def getProductPerformanceSummary(request):
 
                     sku_summary[sku]["sku"] = sku
                     sku_summary[sku]["product_name"] = product_name
+                    sku_summary[sku]["asin"] = product_id
                     sku_summary[sku]["images"] = images
                     sku_summary[sku]["unitsSold"] += 1
                     sku_summary[sku]["grossRevenue"] += price
@@ -5053,3 +5056,404 @@ def InsightsProductWise(request):
     ]
 })
 
+
+# def get_bulk_sales_data(product_ids, start_date, end_date):
+#     """
+#     Bulk fetch sales data for multiple products
+#     Returns: {product_id: [sales_data]}
+#     """
+#     # Convert string product_ids to ObjectIds
+#     object_ids = [ObjectId(pid) for pid in product_ids]
+    
+#     pipeline = [
+#         {
+#             "$match": {
+#                 "order_date": {"$gte": start_date, "$lte": end_date},
+#                 "order_status": {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
+#             }
+#         },
+#         {
+#             "$lookup": {
+#                 "from": "order_items",
+#                 "localField": "order_items",
+#                 "foreignField": "_id",
+#                 "as": "order_items_ins"
+#             }
+#         },
+#         {"$unwind": "$order_items_ins"},
+#         {
+#             "$match": {
+#                 "order_items_ins.ProductDetails.product_id": {"$in": object_ids}
+#             }
+#         },
+#         {
+#             "$group": {
+#                 "_id": {
+#                     "product_id": "$order_items_ins.ProductDetails.product_id",
+#                     "date": {
+#                         "$dateToString": {
+#                             "format": "%Y-%m-%d",
+#                             "date": "$order_date"
+#                         }
+#                     }
+#                 },
+#                 "total_quantity": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
+#                 "total_price": {"$sum": "$order_items_ins.Pricing.ItemPrice.Amount"}
+#             }
+#         },
+#         {
+#             "$project": {
+#                 "_id": 0,
+#                 "product_id": {"$toString": "$_id.product_id"},
+#                 "date": "$_id.date",
+#                 "total_quantity": 1,
+#                 "total_price": {"$round": ["$total_price", 2]}
+#             }
+#         }
+#     ]
+
+#     orders = list(Order.objects.aggregate(*pipeline))
+    
+#     # Group by product_id
+#     result = defaultdict(list)
+#     for order in orders:
+#         result[order['product_id']].append({
+#             'date': order['date'],
+#             'total_quantity': order['total_quantity'],
+#             'total_price': order['total_price']
+#         })
+        
+#     return result
+
+# @csrf_exempt
+# def get_products_with_pagination(request):
+#     json_request = JSONParser().parse(request)
+#     pipeline = []
+#     match = {}
+    
+#     # Extract parameters (maintaining original names)
+#     marketplace_id = json_request.get('marketplace_id')
+#     brand_id = json_request.get('brand_id')
+#     product_id = json_request.get('product_id')
+#     manufacturer_name = json_request.get('manufacturer_name', [])
+#     page = int(json_request.get("page", 1))
+#     page_size = int(json_request.get("page_size", 10))
+#     preset = json_request.get("preset", "Today")
+#     start_date = json_request.get("start_date")
+#     end_date = json_request.get("end_date")
+#     parent = json_request.get('parent', True)
+#     sort_by = json_request.get('sort_by')
+#     sort_by_value = int(json_request.get('sort_by_value', 1)) if json_request.get('sort_by_value') else 1
+#     parent_search = json_request.get('parent_search')
+#     sku_search = json_request.get('sku_search')
+#     search_query = json_request.get('search_query')
+
+#     # Date handling
+#     if start_date and start_date != "":
+#         start_date = datetime.strptime(start_date, '%Y-%m-%d')
+#         end_date = datetime.strptime(end_date, '%Y-%m-%d')
+#     else:
+#         start_date, end_date = get_date_range(preset)
+    
+#     today_start_date, today_end_date = get_date_range("Today")
+#     compare_start, compare_end = getPreviousDateRange(start_date, end_date)
+
+#     # Build match query
+#     if marketplace_id and marketplace_id not in ["all", "custom"]:
+#         match['marketplace_id'] = ObjectId(marketplace_id)
+    
+#     if product_id and product_id != []:
+#         match["_id"] = {"$in": [ObjectId(pid) for pid in product_id]}
+#     elif brand_id and brand_id != []:
+#         match["brand_id"] = {"$in": [ObjectId(bid) for bid in brand_id]}
+#     elif manufacturer_name and manufacturer_name != []:
+#         match["manufacturer_name"] = {"$in": manufacturer_name}
+    
+#     if parent_search:
+#         match["parent_sku"] = {"$regex": parent_search, "$options": "i"}
+    
+#     if not parent and sku_search:
+#         match["sku"] = {"$regex": sku_search, "$options": "i"}
+    
+#     if search_query:
+#         search_query = search_query.strip()
+#         match["$or"] = [
+#             {"product_title": {"$regex": search_query, "$options": "i"}},
+#             {"sku": {"$regex": search_query, "$options": "i"}},
+#         ]
+
+#     if match:
+#         pipeline.append({"$match": match})
+
+#     # Parent products view
+#     if parent:
+#         # Get distinct parent SKUs
+#         pipeline.extend([
+#             {"$group": {"_id": 0, "parent_sku_list": {"$addToSet": "$parent_sku"}}},
+#             {"$project": {"_id": 0, "parent_sku_list": 1}}
+#         ])
+        
+#         result = list(Product.objects.aggregate(*pipeline))
+#         sku_list = result[0]['parent_sku_list'] if result else []
+#         total_products = len(sku_list)
+        
+#         # Apply pagination
+#         start_idx = (page - 1) * page_size
+#         end_idx = start_idx + page_size
+#         parent_sku_page = sku_list[start_idx:end_idx]
+        
+#         products = []
+#         # Prefetch all child products in bulk
+#         child_products = list(Product.objects.filter(parent_sku__in=parent_sku_page))
+#         child_map = defaultdict(list)
+#         for p in child_products:
+#             child_map[p['parent_sku']].append(p)
+        
+#         # Precompute sales data in bulk
+#         all_product_ids = [str(p.id) for p in child_products]
+#         today_sales_map = get_bulk_sales_data(all_product_ids, today_start_date, today_end_date)
+#         period_sales_map = get_bulk_sales_data(all_product_ids, start_date, end_date)
+#         compare_sales_map = get_bulk_sales_data(all_product_ids, compare_start, compare_end)
+        
+#         for parent_sku in parent_sku_page:
+#             p_list = child_map.get(parent_sku, [])
+#             if not p_list:
+#                 continue
+                
+#             p_dict = {
+#                 "id": str(p_list[0]['_id']),
+#                 "title": p_list[0].get('product_title', ''),
+#                 "imageUrl": p_list[0].get('image_url', ''),
+#                 "parent_sku": parent_sku,
+#                 "marketplace": p_list[0].get('marketplace_name', ''),
+#                 "category": p_list[0].get('category', ''),
+#                 "product_id": p_list[0].get('product_id', ''),
+#                 "sku_count": len(p_list),
+#             }
+            
+#             # Initialize aggregates
+#             stock = 0
+#             price_range = []
+#             cogs = 0
+#             sales_today = 0
+#             units_today = 0
+#             units_period = 0
+#             revenue = 0
+#             net_profit = 0
+            
+#             for p in p_list:
+#                 # Process each child product
+#                 stock += p.get('quantity', 0)
+#                 price = p.get('price', 0)
+#                 if price: price_range.append(price)
+                
+#                 # Determine COGS
+#                 if p.get('marketplace_name') == "Amazon":
+#                     cogs += p.get('total_cogs', 0)
+#                     temp_cogs = p.get('total_cogs', 0)
+#                 else:
+#                     cogs += p.get('w_total_cogs', 0)
+#                     temp_cogs = p.get('w_total_cogs', 0)
+                
+#                 # Get sales data from precomputed maps
+#                 pid = str(p['_id'])
+#                 today_sales = today_sales_map.get(pid, [])
+#                 period_sales = period_sales_map.get(pid, [])
+#                 compare_sales = compare_sales_map.get(pid, [])
+                
+#                 # Calculate metrics
+#                 for sale in today_sales:
+#                     sales_today += sale.get('total_price', 0)
+#                     units_today += sale.get('total_quantity', 0)
+                
+#                 period_units = sum(sale.get('total_quantity', 0) for sale in period_sales)
+#                 period_revenue = sum(sale.get('total_price', 0) for sale in period_sales)
+#                 period_revenue = round(period_revenue, 2)
+                
+#                 vendor_funding = p.get('vendor_funding', 0)
+#                 period_net_profit = period_revenue - (temp_cogs * period_units) + (vendor_funding * period_units)
+                
+#                 # Comparison period calculations
+#                 comp_units = sum(sale.get('total_quantity', 0) for sale in compare_sales)
+#                 comp_revenue = sum(sale.get('total_price', 0) for sale in compare_sales)
+#                 comp_net_profit = comp_revenue - (temp_cogs * comp_units) + (vendor_funding * comp_units)
+                
+#                 # Aggregate values
+#                 revenue += period_revenue
+#                 net_profit += period_net_profit
+#                 units_period += (comp_units - period_units)
+            
+#             # Finalize parent product metrics
+#             p_dict.update({
+#                 "stock": stock,
+#                 "price_start": min(price_range) if price_range else 0,
+#                 "price_end": max(price_range) if price_range else 0,
+#                 "cogs": cogs,
+#                 "salesForToday": sales_today,
+#                 "unitsSoldForToday": units_today,
+#                 "unitsSoldForPeriod": units_period,
+#                 "grossRevenue": revenue,
+#                 "grossRevenueforPeriod": round(comp_revenue - revenue, 2),
+#                 "netProfit": round(net_profit, 2),
+#                 "netProfitforPeriod": round(comp_net_profit - net_profit, 2),
+#                 "margin": round((net_profit / revenue * 100) if revenue > 0 else 0, 2),
+#                 "marginforPeriod": round(((comp_net_profit - net_profit) / (comp_revenue - revenue) * 100) if (comp_revenue - revenue) > 0 else 0, 2),
+#                 "totalchannelFees": cogs,
+#                 # Refunds remain 0 as per original
+#                 "refunds": 0,
+#                 "refundsforPeriod": 0,
+#                 "refundsAmount": 0,
+#                 "refundsAmountforPeriod": 0
+#             })
+#             products.append(p_dict)
+        
+#         # Apply sorting if requested
+#         if sort_by and products and sort_by in products[0]:
+#             reverse_order = (sort_by_value == -1)
+#             products = sorted(products, key=lambda x: x[sort_by], reverse=reverse_order)
+
+#         response_data = {
+#             "total_products": total_products,
+#             "page": page,
+#             "page_size": page_size,
+#             "products": products,
+#             "tab_type": "parent"
+#         }
+
+#     # SKU products view
+#     else:
+#         # Add sorting if specified
+#         if sort_by:
+#             pipeline.append({"$sort": {sort_by: sort_by_value}})
+        
+#         # Add pagination and projection
+#         pipeline.extend([
+#             {"$facet": {
+#                 "total_count": [{"$count": "count"}],
+#                 "products": [
+#                     {"$skip": (page - 1) * page_size},
+#                     {"$limit": page_size},
+#                     {"$lookup": {
+#                         "from": "marketplace",
+#                         "localField": "marketplace_id",
+#                         "foreignField": "_id",
+#                         "as": "marketplace_ins"
+#                     }},
+#                     {"$unwind": "$marketplace_ins"},
+#                     {"$project": {
+#                         "_id": 0,
+#                         "id": {"$toString": "$_id"},
+#                         "product_id": {"$ifNull": ["$product_id", "N/A"]},
+#                         "parent_sku": {"$ifNull": ["$sku", "N/A"]},
+#                         "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
+#                         "title": {"$ifNull": ["$product_title", "N/A"]},
+#                         "marketplace": {"$ifNull": ["$marketplace_ins.name", "N/A"]},
+#                         "fulfillmentChannel": {
+#                             "$cond": {
+#                                 "if": {"$eq": ["$fullfillment_by_channel", True]},
+#                                 "then": "FBA",
+#                                 "else": "FBM"
+#                             }
+#                         },
+#                         "price": {"$ifNull": [{"$round": ["$price", 2]}, 0.0]},
+#                         "stock": {"$ifNull": ["$quantity", 0]},
+#                         "listingScore": {"$ifNull": ["$listing_quality_score", 0]},
+#                         "cogs": {
+#                             "$round": [{
+#                                 "$cond": {
+#                                     "if": {"$eq": ["$marketplace_ins.name", "Amazon"]},
+#                                     "then": {"$ifNull": ["$total_cogs", 0]},
+#                                     "else": {"$ifNull": ["$w_total_cogs", 0]}
+#                                 }
+#                             }, 2]
+#                         },
+#                         "category": {"$ifNull": ["$category", "N/A"]},
+#                         "vendor_funding": {"$ifNull": ["$vendor_funding", 0]},
+#                         "totalchannelFees": {
+#                             "$round": [{
+#                                 "$cond": {
+#                                     "if": {"$eq": ["$marketplace_ins.name", "Amazon"]},
+#                                     "then": {"$sum": ["$referral_fee", "$a_shipping_cost"]},
+#                                     "else": {"$sum": ["$walmart_fee", "$w_shiping_cost"]}
+#                                 }
+#                             }, 2]
+#                         },
+#                         # FIXED: Use $literal for initialized fields
+#                         "salesForToday": {"$literal": 0},
+#                         "unitsSoldForToday": {"$literal": 0},
+#                         "unitsSoldForPeriod": {"$literal": 0},
+#                         "grossRevenue": {"$literal": 0},
+#                         "grossRevenueforPeriod": {"$literal": 0},
+#                         "netProfit": {"$literal": 0},
+#                         "netProfitforPeriod": {"$literal": 0},
+#                         "margin": {"$literal": 0},
+#                         "marginforPeriod": {"$literal": 0},
+#                         "refunds": {"$literal": 0},
+#                         "refundsforPeriod": {"$literal": 0},
+#                         "refundsAmount": {"$literal": 0},
+#                         "refundsAmountforPeriod": {"$literal": 0}
+#                     }}
+#                 ]
+#             }}
+#         ])
+        
+#         # Execute pipeline
+#         result = list(Product.objects.aggregate(*pipeline))
+#         total_products = result[0]["total_count"][0]["count"] if result[0]["total_count"] else 0
+#         products = result[0]["products"]
+#         product_ids = [p['id'] for p in products]
+        
+#         # Bulk fetch sales data
+#         today_sales = get_bulk_sales_data(product_ids, today_start_date, today_end_date)
+#         period_sales = get_bulk_sales_data(product_ids, start_date, end_date)
+#         compare_sales = get_bulk_sales_data(product_ids, compare_start, compare_end)
+        
+#         # Process products
+#         for p in products:
+#             pid = p['id']
+            
+#             # Today's sales
+#             for sale in today_sales.get(pid, []):
+#                 p['salesForToday'] += sale.get('total_price', 0)
+            
+#             # Current period sales
+#             period_units = 0
+#             period_revenue = 0
+#             for sale in period_sales.get(pid, []):
+#                 period_units += sale.get('total_quantity', 0)
+#                 period_revenue += sale.get('total_price', 0)
+            
+#             # Comparison period sales
+#             comp_units = 0
+#             comp_revenue = 0
+#             for sale in compare_sales.get(pid, []):
+#                 comp_units += sale.get('total_quantity', 0)
+#                 comp_revenue += sale.get('total_price', 0)
+            
+#             # Calculate financial metrics
+#             vendor_funding = p['vendor_funding']
+#             cogs_val = p['cogs']
+            
+#             p['unitsSoldForToday'] = period_units
+#             p['grossRevenue'] = round(period_revenue, 2)
+#             p['netProfit'] = round(period_revenue - (cogs_val * period_units) + (vendor_funding * period_units), 2)
+#             p['margin'] = round((p['netProfit'] / p['grossRevenue']) * 100 if p['grossRevenue'] > 0 else 0, 2)
+            
+#             p['unitsSoldForPeriod'] = comp_units - period_units
+#             p['grossRevenueforPeriod'] = round(comp_revenue - period_revenue, 2)
+#             comp_net_profit = comp_revenue - (cogs_val * comp_units) + (vendor_funding * comp_units)
+#             p['netProfitforPeriod'] = round(comp_net_profit - p['netProfit'], 2)
+#             p['marginforPeriod'] = round(
+#                 (p['netProfitforPeriod'] / p['grossRevenueforPeriod'] * 100) if p['grossRevenueforPeriod'] > 0 else 0, 
+#                 2
+#             )
+
+#         response_data = {
+#             "total_products": total_products,
+#             "page": page,
+#             "page_size": page_size,
+#             "products": products,
+#             "tab_type": "sku"
+#         }
+
+#     return JsonResponse(response_data, safe=False)

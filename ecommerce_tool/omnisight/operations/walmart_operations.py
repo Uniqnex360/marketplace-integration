@@ -470,7 +470,7 @@ def update_product_images_from_csv(file_path):
 
 
 
-def process_walmart_order(json_data,order_date=None):
+def process_walmart_order(json_data,order_date=None,po_id =""):
     """Processes a single Walmart order item and saves it to the OrderItems collection."""
     try:
         product = DatabaseModel.get_document(Product.objects, {"sku": json_data.get("item", {}).get("sku", "Unknown SKU"),}, ["id"])
@@ -506,7 +506,7 @@ def process_walmart_order(json_data,order_date=None):
     tracking_info = order_line_status.get("trackingInfo", {})
 
     order_item = OrderItems(
-        OrderId=json_data.get("lineNumber", ""),
+        OrderId=po_id,
         created_date=order_date if order_date else datetime.now(),
         Platform="Walmart",
         ProductDetails=ProductDetails(
@@ -635,7 +635,7 @@ def syncRecentWalmartOrders():
                     tax = float(charge['tax']['taxAmount']['amount']) if charge.get('tax') else 0
                     order_total += float(charge['chargeAmount']['amount']) + tax
                     currency = charge['chargeAmount']['currency']
-                order_items.append(process_walmart_order(order_line, order_date))
+                order_items.append(process_walmart_order(order_line, order_date,po_id))
 
             order_status = order_line.get('orderLineStatuses', {}).get('orderLineStatus', [{}])[0].get('status', "")
             try:

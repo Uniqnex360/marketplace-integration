@@ -273,7 +273,10 @@ def fetchProductDetails(request):
 def getOrdersBasedOnProduct(request):
     data = dict()
     product_id = request.GET.get('product_id')
-    pipeline = [
+    skip = int(request.GET.get('skip',0))  # Default skip = 0 if not provided
+    limit = int(request.GET.get('limit', 10))  # Default limit = 100 if not provided
+
+    count_pipeline = [
         {
             "$match": {
                 "order_items": {"$exists": True, "$ne": []}
@@ -296,14 +299,54 @@ def getOrdersBasedOnProduct(request):
             }
         },
         {
-            "$project": {
-                "_id": 1,
-                "purchase_order_id": 1,
-                "order_date": 1,
-                "order_status": 1,
-                "order_total": 1,
-                "currency": 1,
-                "marketplace_id": 1
+            "$count": "total_count"
+        }
+    ]
+    total_count_result = list(Order.objects.aggregate(*count_pipeline))
+    total_count = total_count_result[0]['total_count'] if total_count_result else 0
+
+    pipeline = [
+        {
+            "$match": {
+                "order_items": {"$exists": True, "$ne": []}
+            }
+        },
+        {
+            "$lookup": {
+                "from": "order_items",
+                "localField": "order_items",
+                "foreignField": "_id",
+                "as": "order_items_ins"
+            }
+        },
+        {
+            "$unwind": "$order_items_ins"
+        },
+        {
+            "$match": {
+                "order_items_ins.ProductDetails.product_id": ObjectId(product_id)
+            }
+        },
+        {
+            "$sort": {
+                "order_date": -1
+            }
+        },
+        {
+            "$skip": skip
+        },
+        {
+            "$limit": limit
+        },
+        {
+            "$group": {
+                "_id": "$_id",
+                "purchase_order_id": {"$first": "$purchase_order_id"},
+                "order_date": {"$first": "$order_date"},
+                "order_status": {"$first": "$order_status"},
+                "order_total": {"$first": "$order_total"},
+                "currency": {"$first": "$currency"},
+                "marketplace_id": {"$first": "$marketplace_id"}
             }
         },
         {
@@ -332,18 +375,16 @@ def getOrdersBasedOnProduct(request):
                     }
                 },
                 "order_status": 1,
-                "order_total": {"$round" : ["$order_total", 2]},
+                "order_total": {"$round": ["$order_total", 2]},
                 "currency": 1,
                 "marketplace_name": "$marketplace_ins.name"
-            }
-        },
-        {
-            "$sort": {
-                "order_date": -1
             }
         }
     ]
     orders = list(Order.objects.aggregate(*pipeline, allowDiskUse=True))
+
+    data['total_count'] = total_count
+    data['orders'] = orders
     custom_pipeline = [
         {
             "$match": {
@@ -368,6 +409,70 @@ def getOrdersBasedOnProduct(request):
 
     data['orders'] = orders
     return data
+
+
+
+def getOrdersBasedOnProduct(request):
+    data = {'total_count': 0, 'orders': []}
+    product_id = request.GET.get('product_id')
+    skip = int(request.GET.get('skip', 0))
+    limit = int(request.GET.get('limit', 10))
+
+    # Step 1: Get relevant order_item IDs based on product_id
+    matching_order_items = list(OrderItems.objects.filter(ProductDetails__product_id=ObjectId(product_id)).only('id'))
+
+    if not matching_order_items:
+        return data
+
+    # Step 2: Count total relevant orders
+    total_count = Order.objects.filter(order_items__in=matching_order_items).count()
+
+    # Step 3: Fetch orders with pagination
+    orders_queryset = Order.objects.filter(order_items__in=matching_order_items)\
+        .order_by("-order_date")\
+        .skip(skip).limit(limit)
+
+    # Step 4: Convert to dictionary and fetch marketplace in one go
+    order_list = list(orders_queryset)
+    marketplace_ids = [o.marketplace_id.id for o in order_list if o.marketplace_id]
+    marketplaces = {
+        m.id: m.name for m in Marketplace.objects.filter(id__in=marketplace_ids)
+    }
+
+    # Step 5: Format response
+    orders = []
+    for o in order_list:
+        orders.append({
+            "id": str(o.id),
+            "purchase_order_id": o.purchase_order_id,
+            "order_date": o.order_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')[:-3],
+            "order_status": o.order_status,
+            "order_total": round(o.order_total, 2) if o.order_total else 0.0,
+            "currency": o.currency,
+            "marketplace_name": marketplaces.get(o.marketplace_id.id, None),
+        })
+
+    # Step 6: Append custom orders if needed
+    custom_orders = list(custom_order.objects.filter(
+        ordered_products__product_id =  ObjectId(product_id)
+    ).only("order_id", "purchase_order_date", "order_status", "total_price", "currency"))
+
+    for c in custom_orders:
+        orders.append({
+            "id": str(c.id),
+            "purchase_order_id": c.order_id,
+            "order_date": c.purchase_order_date.strftime('%Y-%m-%dT%H:%M:%S.%fZ')[:-3],
+            "order_status": c.order_status,
+            "order_total": round(c.total_price, 2) if c.total_price else 0.0,
+            "currency": c.currency or "USD",
+            "marketplace_name": "custom"
+        })
+    data = {
+        "total_count": total_count,
+        "orders": orders
+    }
+    return data
+
 
 
 #---------------------------------ORDER APIS-------------------------------------------------------------------
