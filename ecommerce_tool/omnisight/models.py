@@ -453,7 +453,49 @@ class Refund(Document):
 
 
 class pageview_session_count(Document):
-    product_id = ReferenceField(Product)
-    date =  DateTimeField(default=datetime.now())
+    product_id = ListField(ReferenceField(Product), default=[])
+    date = DateTimeField(default=datetime.now())
     page_views = IntField(default=0)
     session_count = IntField(default=0)
+
+    # Additional fields based on the provided dictionary
+    asin = StringField()
+    
+    # Sales by ASIN
+    units_ordered = IntField(default=0)
+    units_ordered_b2b = IntField(default=0)
+    ordered_product_sales_amount = FloatField(default=0.0)
+    ordered_product_sales_currency_code = StringField(default="USD")
+    ordered_product_sales_b2b_amount = FloatField(default=0.0)
+    ordered_product_sales_b2b_currency_code = StringField(default="USD")
+    total_order_items = IntField(default=0)
+    total_order_items_b2b = IntField(default=0)
+    
+    # Traffic by ASIN
+    browser_sessions = IntField(default=0)
+    browser_sessions_b2b = IntField(default=0)
+    mobile_app_sessions = IntField(default=0)
+    mobile_app_sessions_b2b = IntField(default=0)
+    sessions = IntField(default=0)
+    sessions_b2b = IntField(default=0)
+    browser_session_percentage = FloatField(default=0.0)
+    browser_session_percentage_b2b = FloatField(default=0.0)
+    mobile_app_session_percentage = FloatField(default=0.0)
+    mobile_app_session_percentage_b2b = FloatField(default=0.0)
+    session_percentage = FloatField(default=0.0)
+    session_percentage_b2b = FloatField(default=0.0)
+    browser_page_views = IntField(default=0)
+    browser_page_views_b2b = IntField(default=0)
+    mobile_app_page_views = IntField(default=0)
+    mobile_app_page_views_b2b = IntField(default=0)
+    page_views_b2b = IntField(default=0)
+    browser_page_views_percentage = FloatField(default=0.0)
+    browser_page_views_percentage_b2b = FloatField(default=0.0)
+    mobile_app_page_views_percentage = FloatField(default=0.0)
+    mobile_app_page_views_percentage_b2b = FloatField(default=0.0)
+    page_views_percentage = FloatField(default=0.0)
+    page_views_percentage_b2b = FloatField(default=0.0)
+    buy_box_percentage = FloatField(default=0.0)
+    buy_box_percentage_b2b = FloatField(default=0.0)
+    unit_session_percentage = FloatField(default=0.0)
+    unit_session_percentage_b2b = FloatField(default=0.0)

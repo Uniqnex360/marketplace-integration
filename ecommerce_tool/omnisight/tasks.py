@@ -1,6 +1,6 @@
 from celery import shared_task
 from omnisight.operations.walmart_operations import syncRecentWalmartOrders
-from omnisight.operations.amazon_operations import syncRecentAmazonOrders,sync_inventory
+from omnisight.operations.amazon_operations import syncRecentAmazonOrders,sync_inventory, syncPageviews
 
 @shared_task
 def sync_orders():
@@ -12,3 +12,9 @@ def sync_orders():
     print("Inventory Sync completed........................")
     
     return f"Synced {len(walmart_orders) + len(amazon_orders)} orders"
+
+@shared_task
+def sync_products():
+    print("PageViews Sync starting........................")
+    syncPageviews()
+    return True

@@ -7,11 +7,16 @@ import pandas as pd
 from ecommerce_tool.crud import DatabaseModel
 from bson import ObjectId
 import json
-from ecommerce_tool.settings import MARKETPLACE_ID,SELLERCLOUD_USERNAME, SELLERCLOUD_PASSWORD
+from ecommerce_tool.settings import MARKETPLACE_ID,SELLERCLOUD_USERNAME, SELLERCLOUD_PASSWORD, Role_ARN, Acccess_Key, Secret_Access_Key,AMAZON_API_KEY, AMAZON_SECRET_KEY, REFRESH_TOKEN, SELLER_ID
 import ast
 from datetime import datetime, timedelta
 import sys
 import math
+import requests
+import boto3
+import time
+import gzip
+import io
 
 
 
@@ -769,3 +774,194 @@ def sync_inventory():
             
     except Exception as e:
         print("❌ Error:", e)
+
+def save_or_update_pageview_session_count(data, today_date):
+    try:
+        # Extract data from the input dictionary
+        product_id = data.get("parentAsin")
+        sales_by_asin = data.get("salesByAsin", {})
+        traffic_by_asin = data.get("trafficByAsin", {})
+        ids = DatabaseModel.list_documents(Product.objects,{"product_id" : product_id},['id'])
+        if ids:
+            ids = [ins.id for ins in ids]
+
+
+
+            # Check if a document with the same ASIN and today's date already exists
+            existing_record = pageview_session_count.objects(asin=product_id, date=today_date).first()
+
+            if existing_record:
+                # Update the existing record
+                existing_record.update(
+                    units_ordered=sales_by_asin.get("unitsOrdered", existing_record.units_ordered),
+                    units_ordered_b2b=sales_by_asin.get("unitsOrderedB2B", existing_record.units_ordered_b2b),
+                    ordered_product_sales_amount=sales_by_asin.get("orderedProductSales", {}).get("amount", existing_record.ordered_product_sales_amount),
+                    ordered_product_sales_currency_code=sales_by_asin.get("orderedProductSales", {}).get("currencyCode", existing_record.ordered_product_sales_currency_code),
+                    ordered_product_sales_b2b_amount=sales_by_asin.get("orderedProductSalesB2B", {}).get("amount", existing_record.ordered_product_sales_b2b_amount),
+                    ordered_product_sales_b2b_currency_code=sales_by_asin.get("orderedProductSalesB2B", {}).get("currencyCode", existing_record.ordered_product_sales_b2b_currency_code),
+                    total_order_items=sales_by_asin.get("totalOrderItems", existing_record.total_order_items),
+                    total_order_items_b2b=sales_by_asin.get("totalOrderItemsB2B", existing_record.total_order_items_b2b),
+                    browser_sessions=traffic_by_asin.get("browserSessions", existing_record.browser_sessions),
+                    browser_sessions_b2b=traffic_by_asin.get("browserSessionsB2B", existing_record.browser_sessions_b2b),
+                    mobile_app_sessions=traffic_by_asin.get("mobileAppSessions", existing_record.mobile_app_sessions),
+                    mobile_app_sessions_b2b=traffic_by_asin.get("mobileAppSessionsB2B", existing_record.mobile_app_sessions_b2b),
+                    sessions=traffic_by_asin.get("sessions", existing_record.sessions),
+                    sessions_b2b=traffic_by_asin.get("sessionsB2B", existing_record.sessions_b2b),
+                    browser_session_percentage=traffic_by_asin.get("browserSessionPercentage", existing_record.browser_session_percentage),
+                    browser_session_percentage_b2b=traffic_by_asin.get("browserSessionPercentageB2B", existing_record.browser_session_percentage_b2b),
+                    mobile_app_session_percentage=traffic_by_asin.get("mobileAppSessionPercentage", existing_record.mobile_app_session_percentage),
+                    mobile_app_session_percentage_b2b=traffic_by_asin.get("mobileAppSessionPercentageB2B", existing_record.mobile_app_session_percentage_b2b),
+                    session_percentage=traffic_by_asin.get("sessionPercentage", existing_record.session_percentage),
+                    session_percentage_b2b=traffic_by_asin.get("sessionPercentageB2B", existing_record.session_percentage_b2b),
+                    browser_page_views=traffic_by_asin.get("browserPageViews", existing_record.browser_page_views),
+                    browser_page_views_b2b=traffic_by_asin.get("browserPageViewsB2B", existing_record.browser_page_views_b2b),
+                    mobile_app_page_views=traffic_by_asin.get("mobileAppPageViews", existing_record.mobile_app_page_views),
+                    mobile_app_page_views_b2b=traffic_by_asin.get("mobileAppPageViewsB2B", existing_record.mobile_app_page_views_b2b),
+                    page_views=traffic_by_asin.get("pageViews", existing_record.page_views),
+                    page_views_b2b=traffic_by_asin.get("pageViewsB2B", existing_record.page_views_b2b),
+                    browser_page_views_percentage=traffic_by_asin.get("browserPageViewsPercentage", existing_record.browser_page_views_percentage),
+                    browser_page_views_percentage_b2b=traffic_by_asin.get("browserPageViewsPercentageB2B", existing_record.browser_page_views_percentage_b2b),
+                    mobile_app_page_views_percentage=traffic_by_asin.get("mobileAppPageViewsPercentage", existing_record.mobile_app_page_views_percentage),
+                    mobile_app_page_views_percentage_b2b=traffic_by_asin.get("mobileAppPageViewsPercentageB2B", existing_record.mobile_app_page_views_percentage_b2b),
+                    page_views_percentage=traffic_by_asin.get("pageViewsPercentage", existing_record.page_views_percentage),
+                    page_views_percentage_b2b=traffic_by_asin.get("pageViewsPercentageB2B", existing_record.page_views_percentage_b2b),
+                    buy_box_percentage=traffic_by_asin.get("buyBoxPercentage", existing_record.buy_box_percentage),
+                    buy_box_percentage_b2b=traffic_by_asin.get("buyBoxPercentageB2B", existing_record.buy_box_percentage_b2b),
+                    unit_session_percentage=traffic_by_asin.get("unitSessionPercentage", existing_record.unit_session_percentage),
+                    unit_session_percentage_b2b=traffic_by_asin.get("unitSessionPercentageB2B", existing_record.unit_session_percentage_b2b),
+                )
+                print("Record updated successfully!")
+            else:
+                # Create a new record
+                pageview_session = pageview_session_count(
+                    product_id = ids,
+                    asin=product_id,
+                    units_ordered=sales_by_asin.get("unitsOrdered", 0),
+                    units_ordered_b2b=sales_by_asin.get("unitsOrderedB2B", 0),
+                    ordered_product_sales_amount=sales_by_asin.get("orderedProductSales", {}).get("amount", 0.0),
+                    ordered_product_sales_currency_code=sales_by_asin.get("orderedProductSales", {}).get("currencyCode", "USD"),
+                    ordered_product_sales_b2b_amount=sales_by_asin.get("orderedProductSalesB2B", {}).get("amount", 0.0),
+                    ordered_product_sales_b2b_currency_code=sales_by_asin.get("orderedProductSalesB2B", {}).get("currencyCode", "USD"),
+                    total_order_items=sales_by_asin.get("totalOrderItems", 0),
+                    total_order_items_b2b=sales_by_asin.get("totalOrderItemsB2B", 0),
+                    browser_sessions=traffic_by_asin.get("browserSessions", 0),
+                    browser_sessions_b2b=traffic_by_asin.get("browserSessionsB2B", 0),
+                    mobile_app_sessions=traffic_by_asin.get("mobileAppSessions", 0),
+                    mobile_app_sessions_b2b=traffic_by_asin.get("mobileAppSessionsB2B", 0),
+                    sessions=traffic_by_asin.get("sessions", 0),
+                    sessions_b2b=traffic_by_asin.get("sessionsB2B", 0),
+                    browser_session_percentage=traffic_by_asin.get("browserSessionPercentage", 0.0),
+                    browser_session_percentage_b2b=traffic_by_asin.get("browserSessionPercentageB2B", 0.0),
+                    mobile_app_session_percentage=traffic_by_asin.get("mobileAppSessionPercentage", 0.0),
+                    mobile_app_session_percentage_b2b=traffic_by_asin.get("mobileAppSessionPercentageB2B", 0.0),
+                    session_percentage=traffic_by_asin.get("sessionPercentage", 0.0),
+                    session_percentage_b2b=traffic_by_asin.get("sessionPercentageB2B", 0.0),
+                    browser_page_views=traffic_by_asin.get("browserPageViews", 0),
+                    browser_page_views_b2b=traffic_by_asin.get("browserPageViewsB2B", 0),
+                    mobile_app_page_views=traffic_by_asin.get("mobileAppPageViews", 0),
+                    mobile_app_page_views_b2b=traffic_by_asin.get("mobileAppPageViewsB2B", 0),
+                    page_views=traffic_by_asin.get("pageViews", 0),
+                    page_views_b2b=traffic_by_asin.get("pageViewsB2B", 0),
+                    browser_page_views_percentage=traffic_by_asin.get("browserPageViewsPercentage", 0.0),
+                    browser_page_views_percentage_b2b=traffic_by_asin.get("browserPageViewsPercentageB2B", 0.0),
+                    mobile_app_page_views_percentage=traffic_by_asin.get("mobileAppPageViewsPercentage", 0.0),
+                    mobile_app_page_views_percentage_b2b=traffic_by_asin.get("mobileAppPageViewsPercentageB2B", 0.0),
+                    page_views_percentage=traffic_by_asin.get("pageViewsPercentage", 0.0),
+                    page_views_percentage_b2b=traffic_by_asin.get("pageViewsPercentageB2B", 0.0),
+                    buy_box_percentage=traffic_by_asin.get("buyBoxPercentage", 0.0),
+                    buy_box_percentage_b2b=traffic_by_asin.get("buyBoxPercentageB2B", 0.0),
+                    unit_session_percentage=traffic_by_asin.get("unitSessionPercentage", 0.0),
+                    unit_session_percentage_b2b=traffic_by_asin.get("unitSessionPercentageB2B", 0.0),
+                    date=today_date
+                )
+                pageview_session.save()
+                print("New record created successfully!")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+
+def fetch_sales_traffic_report(aws_access_key_id,aws_secret_access_key,role_arn,client_id,client_secret,refresh_token,report_date,region="us-east-1"):
+    # 1. Assume Role
+    sts_client = boto3.client(
+        'sts',
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        region_name=region
+    )
+    assumed_role = sts_client.assume_role(
+        RoleArn=role_arn,
+        RoleSessionName="SPAPISession"
+    )['Credentials']
+
+    # 2. Get LWA Access Token
+    token_url = "https://api.amazon.com/auth/o2/token"
+    token_data = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": client_id,
+        "client_secret": client_secret
+    }
+    lwa_token = requests.post(token_url, data=token_data).json()
+    access_token = lwa_token['access_token']
+
+    # 3. Create Report
+    create_report_url = "https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports"
+    headers = {
+        "x-amz-access-token": access_token,
+        "content-type": "application/json",
+        "host": "sellingpartnerapi-na.amazon.com"
+    }
+
+    body = {
+        "reportType": "GET_SALES_AND_TRAFFIC_REPORT",
+        "marketplaceIds": ["ATVPDKIKX0DER"],  # Amazon US marketplace
+        "dataStartTime": report_date + "T00:00:00Z",
+        "dataEndTime": report_date + "T23:59:59Z"
+    }
+
+    report_res = requests.post(create_report_url, headers=headers, data=json.dumps(body))
+    report_id = report_res.json().get("reportId")
+    print("pppppppppppppppppppppppp",report_id)
+    if not report_id:
+        raise Exception("Failed to create report: " + report_res.text)
+
+    # 4. Poll Report Status
+    status_url = f"https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports/{report_id}"
+    while True:
+        status_res = requests.get(status_url, headers=headers)
+        status_data = status_res.json()
+        processing_status = status_data.get("processingStatus")
+        print("1111111111111111111111",processing_status)
+
+        if processing_status == "DONE":
+            report_document_id = status_data.get("reportDocumentId")
+            break
+        elif processing_status in ("CANCELLED", "FATAL","IN_QUEUE"):
+            print(f"Report failed with status: {processing_status}")
+        time.sleep(30)
+
+    # 5. Get Report Document URL
+    document_url = f"https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/documents/{report_document_id}"
+    doc_res = requests.get(document_url, headers=headers)
+    report_url = doc_res.json().get("url")
+    compression_algo = doc_res.json().get("compressionAlgorithm", None)
+
+    # 6. Download and Parse Report
+    report_file = requests.get(report_url)
+    if compression_algo == "GZIP":
+        buf = gzip.GzipFile(fileobj=io.BytesIO(report_file.content))
+        content = buf.read().decode("utf-8")
+    else:
+        content = report_file.text
+
+    report_data = json.loads(content)
+    report_start_date = datetime.strptime(report_start_date, '%Y-%m-%d')
+    for ins in report_data.get('salesAndTrafficByAsin',[]):
+        save_or_update_pageview_session_count(ins, report_start_date)
+
+    return True  # full raw JSON report
+
+def syncPageviews():
+    start_date = datetime.today()
+    report_date = start_date.strftime("%Y-%m-%d")
+    fetch_sales_traffic_report(Acccess_Key, Secret_Access_Key, Role_ARN,AMAZON_API_KEY,AMAZON_SECRET_KEY,REFRESH_TOKEN,report_date,region="us-east-1")

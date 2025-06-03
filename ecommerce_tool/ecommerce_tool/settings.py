@@ -198,6 +198,11 @@ MARKETPLACE_ID = os.getenv('MARKETPLACE_ID')
 SELLER_ID = os.getenv('SELLER_ID')
 
 
+Role_ARN =  os.getenv('Role_ARN')
+Acccess_Key= os.getenv('Acccess_Key')
+Secret_Access_Key = os.getenv('Secret_Access_Key')
+
+
 #SENDGRID API KEYS
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
 

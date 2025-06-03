@@ -950,44 +950,44 @@ def get_products_with_pagination(request):
 
 
 
-                    today_ins = getdaywiseproductssold(today_start_date, today_end_date,p_ins['id'],False)
-                    for t_ins in today_ins:
-                        current_sales_today += t_ins['total_price']
-                    pr_ins = getdaywiseproductssold(start_date, end_date, p_ins['id'], False)
-                    compare_start, compare_end = getPreviousDateRange(start_date, end_date)
-                    compare_ins = getdaywiseproductssold(compare_start, compare_end, p_ins['id'], False)
-                    # p_compare
-                    for p in pr_ins:
-                        current_units += p['total_quantity']
-                        current_revenue += p['total_price']
-                    current_revenue = round(current_revenue, 2)
-                    current_netprofit = round(((current_revenue - (temp_cogs * current_units)) + (p_ins['vendor_funding'] * current_units)), 2)
-                    current_margin = round((current_netprofit / current_revenue) * 100 if current_revenue > 0 else 0, 2)
+                    # today_ins = getdaywiseproductssold(today_start_date, today_end_date,p_ins['id'],False)
+                    # for t_ins in today_ins:
+                    #     current_sales_today += t_ins['total_price']
+                    # pr_ins = getdaywiseproductssold(start_date, end_date, p_ins['id'], False)
+                    # compare_start, compare_end = getPreviousDateRange(start_date, end_date)
+                    # compare_ins = getdaywiseproductssold(compare_start, compare_end, p_ins['id'], False)
+                    # # p_compare
+                    # for p in pr_ins:
+                    #     current_units += p['total_quantity']
+                    #     current_revenue += p['total_price']
+                    # current_revenue = round(current_revenue, 2)
+                    # current_netprofit = round(((current_revenue - (temp_cogs * current_units)) + (p_ins['vendor_funding'] * current_units)), 2)
+                    # current_margin = round((current_netprofit / current_revenue) * 100 if current_revenue > 0 else 0, 2)
 
-                    for c in compare_ins:
-                        previous_units += c['total_quantity']
-                        previous_revenue += c['total_price']
+                    # for c in compare_ins:
+                    #     previous_units += c['total_quantity']
+                    #     previous_revenue += c['total_price']
 
                     
                     
-                    previous_netprofit = ((previous_revenue - (temp_cogs * previous_units)) + (p_ins['vendor_funding'] * previous_units))
-                    previous_margin = (previous_netprofit / previous_revenue) * 100 if previous_revenue > 0 else 0
-                    previous_netprofit = round((previous_netprofit - current_netprofit), 2)
-                    previous_margin = round((previous_margin - current_margin), 2)
+                    # previous_netprofit = ((previous_revenue - (temp_cogs * previous_units)) + (p_ins['vendor_funding'] * previous_units))
+                    # previous_margin = (previous_netprofit / previous_revenue) * 100 if previous_revenue > 0 else 0
+                    # previous_netprofit = round((previous_netprofit - current_netprofit), 2)
+                    # previous_margin = round((previous_margin - current_margin), 2)
 
-                    previous_revenue = round((previous_revenue - current_revenue), 2)
-                    previous_units = previous_units - current_units
+                    # previous_revenue = round((previous_revenue - current_revenue), 2)
+                    # previous_units = previous_units - current_units
 
 
-                    total_salesForToday += current_sales_today
-                    total_unitsSoldForToday += current_units
-                    total_grossRevenue += current_revenue
-                    total_netprofit += current_netprofit
-                    total_margin += current_margin
-                    total_unitsSoldForPeriod += previous_units
-                    total_grossRevenueforPeriod += previous_revenue
-                    total_netProfitforPeriod += previous_netprofit
-                    total_marginforPeriod += previous_margin
+                    # total_salesForToday += current_sales_today
+                    # total_unitsSoldForToday += current_units
+                    # total_grossRevenue += current_revenue
+                    # total_netprofit += current_netprofit
+                    # total_margin += current_margin
+                    # total_unitsSoldForPeriod += previous_units
+                    # total_grossRevenueforPeriod += previous_revenue
+                    # total_netProfitforPeriod += previous_netprofit
+                    # total_marginforPeriod += previous_margin
 
 
 
@@ -1825,6 +1825,7 @@ def getProductPerformanceSummary(request):
                 {
                     "$project": {
                         "_id": 0,
+                        "id" : "$product_ins._id",
                         "price": "$Pricing.ItemPrice.Amount",
                         "tax_price": "$Pricing.ItemTax.Amount",
 
@@ -1850,6 +1851,7 @@ def getProductPerformanceSummary(request):
             if item_result:
                 item_data = item_result[0]
                 sku = item_data.get("sku")
+                id = item_data.get("id")
                 product_name = item_data.get("product_name", "")
                 product_id = item_data.get("product_id", "")
                 tax_price += item_data['tax_price']
@@ -1866,7 +1868,7 @@ def getProductPerformanceSummary(request):
                 fulfillmentChannel = item_data.get("fulfillmentChannel", 0.0)
                 if sku:
                     sku_set.add(sku)
-
+                    sku_summary[sku]["id"] = str(id)
                     sku_summary[sku]["sku"] = sku
                     sku_summary[sku]["product_name"] = product_name
                     sku_summary[sku]["asin"] = product_id
@@ -1954,6 +1956,7 @@ def downloadProductPerformanceSummary(request):
                 {
                     "$project": {
                         "_id": 0,
+                        "id" : "$product_ins._id",
                         "price": "$Pricing.ItemPrice.Amount",
                         "tax_price": "$Pricing.ItemPrice.tax_price",
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
@@ -1978,6 +1981,7 @@ def downloadProductPerformanceSummary(request):
             if item_result:
                 item_data = item_result[0]
                 sku = item_data.get("sku")
+                id = item_data.get("id")
                 product_name = item_data.get("product_name", "")
                 images = item_data.get("images", [])
                 asin = item_data.get("asin", "")
@@ -1994,7 +1998,7 @@ def downloadProductPerformanceSummary(request):
                 fulfillment_channel = item_data.get("fulfillmentChannel", 0.0)
                 if sku:
                     sku_set.add(sku)
- 
+                    sku_summary[sku]["id"] = str(id)
                     sku_summary[sku]["sku"] = sku
                     sku_summary[sku]["product_name"] = product_name
                     sku_summary[sku]["images"] = images
@@ -4376,6 +4380,7 @@ def productsSalesOverview(request):
     product_id = request.GET.get("product_id")
     preset = request.GET.get("preset", "").strip().title()  # Normalize preset
     now = timezone.now()
+    is_hourly = False
 
     login_date = now.date()
     yesterday = login_date - timedelta(days=1)
@@ -4396,63 +4401,66 @@ def productsSalesOverview(request):
         product_id,
         is_hourly=False
     )
-
-    if preset:
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    if start_date and end_date:
+        start_date = datetime.strptime(start_date, "%Y-%m-%d")
+        end_date = datetime.strptime(end_date, "%Y-%m-%d")
+    else:
         is_hourly = preset in ["Today", "Yesterday"]
-        if preset == "Today":
-            start_date = datetime.combine(login_date, datetime.min.time())
-            end_date = now
-        elif preset == "Yesterday":
-            start_date = datetime.combine(yesterday, datetime.min.time())
-            end_date = datetime.combine(yesterday, datetime.max.time())
-        elif preset == "Last 7 Days":
-            start_date = datetime.combine(last_7days_start, datetime.min.time())
-            end_date = datetime.combine(last_7days_end, datetime.max.time())
-        elif preset == "Last 30 Days":
-            start_date = datetime.combine(login_date - timedelta(days=30), datetime.min.time())
-            end_date = datetime.combine(login_date - timedelta(days=1), datetime.max.time())
+        start_date, end_date = get_date_range(preset)
+    
+
+    if start_date and end_date:
+        label = format_date_label(preset, start_date, end_date)
+        graph_data = getdaywiseproductssold(start_date, end_date, product_id, is_hourly)
+
+        # Normalize date formats
+        for item in graph_data:
+            raw_date = item.get("date")
+            try:
+                dt = datetime.strptime(raw_date, "%Y-%m-%d %H:00") if is_hourly else datetime.strptime(raw_date, "%Y-%m-%d")
+                item["date"] = dt.strftime("%Y-%m-%d %H:00:00") if is_hourly else dt.strftime("%Y-%m-%d")
+            except Exception:
+                continue
+
+        sales_dict = {item["date"]: item for item in graph_data}
+
+        if is_hourly:
+            base_date = start_date.strftime("%Y-%m-%d")
+            hour_range = range(0, 25 if preset == "Today" else 24)
+            for hour in hour_range:
+                time_str = f"{base_date} {hour:02d}:00:00"
+                filled_graph.append(sales_dict.get(time_str, {
+                    "date": time_str,
+                    "total_quantity": 0,
+                    "total_price": 0.0
+                }))
         else:
-            start_date = end_date = None
+            current = start_date.date()
+            while current <= end_date.date():
+                date_str = current.strftime("%Y-%m-%d")
+                filled_graph.append(sales_dict.get(date_str, {
+                    "date": date_str,
+                    "total_quantity": 0,
+                    "total_price": 0.0
+                }))
+                current += timedelta(days=1)
 
-        if start_date and end_date:
-            label = format_date_label(preset, start_date, end_date)
-            graph_data = getdaywiseproductssold(start_date, end_date, product_id, is_hourly)
-
-            # Normalize date formats
-            for item in graph_data:
-                raw_date = item.get("date")
-                try:
-                    dt = datetime.strptime(raw_date, "%Y-%m-%d %H:00") if is_hourly else datetime.strptime(raw_date, "%Y-%m-%d")
-                    item["date"] = dt.strftime("%Y-%m-%d %H:00:00") if is_hourly else dt.strftime("%Y-%m-%d")
-                except Exception:
-                    continue
-
-            sales_dict = {item["date"]: item for item in graph_data}
-
-            if is_hourly:
-                base_date = start_date.strftime("%Y-%m-%d")
-                hour_range = range(0, 25 if preset == "Today" else 24)
-                for hour in hour_range:
-                    time_str = f"{base_date} {hour:02d}:00:00"
-                    filled_graph.append(sales_dict.get(time_str, {
-                        "date": time_str,
-                        "total_quantity": 0,
-                        "total_price": 0.0
-                    }))
-            else:
-                current = start_date.date()
-                while current <= end_date.date():
-                    date_str = current.strftime("%Y-%m-%d")
-                    filled_graph.append(sales_dict.get(date_str, {
-                        "date": date_str,
-                        "total_quantity": 0,
-                        "total_price": 0.0
-                    }))
-                    current += timedelta(days=1)
+    # Calculate dynamic date ranges based on today's date
+    today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
+    prev_day = yesterday - timedelta(days=1)
+    prev_prev_day = prev_day - timedelta(days=1)
+    last_7days_start = today - timedelta(days=7)
+    last_7days_end = yesterday
+    prev_7days_start = last_7days_start - timedelta(days=7)
+    prev_7days_end = last_7days_start - timedelta(days=1)
 
     # Final metrics using preloaded daywise data
     y_qty, y_price = get_val_from_dict(yesterday, stats_data_dict)
     p_qty, p_price = get_val_from_dict(prev_day, stats_data_dict)
+    p_p_qty, p_p_price = get_val_from_dict(prev_prev_day, stats_data_dict)
     curr_qty, curr_price = sum_period_from_dict(last_7days_start, last_7days_end, stats_data_dict)
     prev_qty, prev_price = sum_period_from_dict(prev_7days_start, prev_7days_end, stats_data_dict)
 
@@ -4464,8 +4472,8 @@ def productsSalesOverview(request):
         },
         "previous_day": {
             "value": p_qty,
-            "difference": calc_diff_trend(p_qty, 0)[0],
-            "trend": calc_diff_trend(p_qty, 0)[1],
+            "difference": calc_diff_trend(p_qty, p_p_qty)[0],
+            "trend": calc_diff_trend(p_qty, p_p_qty)[1],
         },
         "last_7_days": {
             "value": curr_qty,
@@ -4482,8 +4490,8 @@ def productsSalesOverview(request):
         },
         "previous_day": {
             "value": p_price,
-            "difference": calc_diff_trend(p_price, 0)[0],
-            "trend": calc_diff_trend(p_price, 0)[1],
+            "difference": calc_diff_trend(p_price, p_p_price)[0],
+            "trend": calc_diff_trend(p_price, p_p_price)[1],
         },
         "last_7_days": {
             "value": curr_price,
@@ -5221,7 +5229,7 @@ def InsightsProductWise(request):
 #                 continue
                 
 #             p_dict = {
-#                 "id": str(p_list[0]['_id']),
+#                 "id": str(p_list[0]['id']),
 #                 "title": p_list[0].get('product_title', ''),
 #                 "imageUrl": p_list[0].get('image_url', ''),
 #                 "parent_sku": parent_sku,
