@@ -229,7 +229,7 @@ def fetchProductDetails(request):
                 "product_id" : {"$ifNull" : ["$product_id", ""]},
                 "product_id_type" : {"$ifNull" : ["$product_id_type", ""]},
                 "sku" : {"$ifNull" : ["$sku", ""]},
-                "price" : {"$ifNull" : ["$price", 0]},
+                "price" : {"$round": [{"$ifNull" : ["$price", 0]}, 2]},
                 "currency" : {"$ifNull" : ["$currency", ""]},
                 "quantity" : {"$ifNull" : ["$quantity", 0]},
                 "published_status" : 1,
@@ -250,17 +250,17 @@ def fetchProductDetails(request):
                 "shelf_path" : {"$ifNull" : ["$shelf_path", ""]},
                 "image_url" : {"$ifNull" : ["$image_url", ""]},
                 "image_urls" : {"$ifNull" : ["$image_urls", []]},
-                "vendor_funding" : {"$ifNull" : ["$vendor_funding", 0.0]},
-                "veddor_discount" : {"$ifNull" : ["$vendor_discount", 0.0]},
-                "product_cost": {"$ifNull": ["$product_cost", 0]},
-                "referral_fee": {"$ifNull": ["$referral_fee", 0]},
-                "a_shipping_cost": {"$ifNull": ["$a_shipping_cost", 0]},
-                "total_cogs": {"$ifNull": ["$total_cogs", 0]},
-                "w_product_cost": {"$ifNull": ["$w_product_cost", 0]},
-                "walmart_fee": {"$ifNull": ["$walmart_fee", 0]},
-                "w_shiping_cost": {"$ifNull": ["$w_shiping_cost", 0]},
-                "w_total_cogs": {"$ifNull": ["$w_total_cogs", 0]},
-                "pack_size": {"$ifNull": ["$pack_size", ""]},
+                "vendor_funding" : {"$round": [{"$ifNull" : ["$vendor_funding", 0.0]}, 2]},
+                "veddor_discount" : {"$round": [{"$ifNull" : ["$vendor_discount", 0.0]}, 2]},
+                "product_cost": {"$round": [{"$ifNull": ["$product_cost", 0]}, 2]},
+                "referral_fee": {"$round": [{"$ifNull": ["$referral_fee", 0]}, 2]},
+                "a_shipping_cost": {"$round": [{"$ifNull": ["$a_shipping_cost", 0]}, 2]},
+                "total_cogs": {"$round": [{"$ifNull": ["$total_cogs", 0]}, 2]},
+                "w_product_cost": {"$round": [{"$ifNull": ["$w_product_cost", 0]}, 2]},
+                "walmart_fee": {"$round": [{"$ifNull": ["$walmart_fee", 0]}, 2]},
+                "w_shiping_cost": {"$round": [{"$ifNull": ["$w_shiping_cost", 0]}, 2]},
+                "w_total_cogs": {"$round": [{"$ifNull": ["$w_total_cogs", 0]}, 2]},
+                "pack_size": {"$ifNull" : ["$pack_size", ""]},
             }
         }
     ]
@@ -1197,25 +1197,25 @@ def ordersCountForDashboard(request):
                 "percentage": f"{percentage}%",
                 "order_value" : round(order_value,2)
             }
-        custom_pipeline = [
-                {"$match": {**match_conditions}},
-                {
-                    "$group": {
-                        "_id": None,
-                        "count": {"$sum": 1},
-                        "order_value": {"$sum": "$total_price"}
-                    }
-                }
-            ]
-        custom_order_status_count = list(custom_order.objects.aggregate(*(custom_pipeline)))
-        custom_order_count = custom_order_status_count[0].get('count', 0) if custom_order_status_count else 0
-        order_value = custom_order_status_count[0].get('order_value', 0) if custom_order_status_count else 0
-        percentage = round((custom_order_count / total_order_count) * 100, 2) if total_order_count else 0
-        data['custom'] = {
-            "value": custom_order_count,
-            "percentage": f"{percentage}%",
-            "order_value" : round(order_value,2)
-        }
+        # custom_pipeline = [
+        #         {"$match": {**match_conditions}},
+        #         {
+        #             "$group": {
+        #                 "_id": None,
+        #                 "count": {"$sum": 1},
+        #                 "order_value": {"$sum": "$total_price"}
+        #             }
+        #         }
+        #     ]
+        # custom_order_status_count = list(custom_order.objects.aggregate(*(custom_pipeline)))
+        # custom_order_count = custom_order_status_count[0].get('count', 0) if custom_order_status_count else 0
+        # order_value = custom_order_status_count[0].get('order_value', 0) if custom_order_status_count else 0
+        # percentage = round((custom_order_count / total_order_count) * 100, 2) if total_order_count else 0
+        # data['custom'] = {
+        #     "value": custom_order_count,
+        #     "percentage": f"{percentage}%",
+        #     "order_value" : round(order_value,2)
+        # }
     elif marketplace_id != "all" and marketplace_id != "custom":
         # Count for Order collection
         pipeline = [
