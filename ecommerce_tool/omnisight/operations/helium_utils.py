@@ -441,7 +441,7 @@ def pageViewsandSessionCount(start_date,end_date,product_id):
                 "_id": 0,
                 "date" : 1,
                 "page_views": 1,
-                "session_count": 1
+                "session_count": "$sessions"
             }
         }
     ]
