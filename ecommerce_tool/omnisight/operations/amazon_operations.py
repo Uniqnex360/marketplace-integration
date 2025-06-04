@@ -955,7 +955,7 @@ def fetch_sales_traffic_report(aws_access_key_id,aws_secret_access_key,role_arn,
         content = report_file.text
 
     report_data = json.loads(content)
-    report_start_date = datetime.strptime(report_start_date, '%Y-%m-%d')
+    report_start_date = datetime.strptime(report_date, '%Y-%m-%d')
     for ins in report_data.get('salesAndTrafficByAsin',[]):
         save_or_update_pageview_session_count(ins, report_start_date)
 
