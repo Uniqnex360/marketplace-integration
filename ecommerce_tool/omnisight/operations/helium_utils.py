@@ -135,47 +135,47 @@ def get_date_range(preset):
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
     if preset == "Today":
-        return today, today + timedelta(days=1)
+        return today, (today + timedelta(days=1)).replace(hour=23, minute=59, second=59)
     elif preset == "Yesterday":
-        return today - timedelta(days=1), today
+        return today - timedelta(days=1), today.replace(hour=23, minute=59, second=59)
     elif preset == "This Week":
         start = today - timedelta(days=today.weekday())
-        return start, today
+        return start, today.replace(hour=23, minute=59, second=59)
     elif preset == "This Month":
         start = today.replace(day=1)
-        return start, today
+        return start, today.replace(hour=23, minute=59, second=59)
     elif preset == "This Year":
-        return today.replace(month=1, day=1), today
+        return today.replace(month=1, day=1), today.replace(hour=23, minute=59, second=59)
     
     elif preset == "Last Week":
         start = today - timedelta(days=today.weekday() + 7)
-        return start, start + timedelta(days=7)
+        return start, (start + timedelta(days=6)).replace(hour=23, minute=59, second=59)
     elif preset == "Last 7 days":
-        return today - timedelta(days=7), today - timedelta(days=1)
+        return today - timedelta(days=7), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
     elif preset == "Last 14 days":
-        return today - timedelta(days=14), today - timedelta(days=1)
+        return today - timedelta(days=14), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
     elif preset == "Last 30 days":
-        return today - timedelta(days=30), today - timedelta(days=1)
+        return today - timedelta(days=30), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
     elif preset == "Last 60 days":
-        return today - timedelta(days=60), today - timedelta(days=1)
+        return today - timedelta(days=60), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
     elif preset == "Last 90 days":
-        return today - timedelta(days=90), today - timedelta(days=1)
+        return today - timedelta(days=90), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
     
     elif preset == "Last Month":
         start = (today.replace(day=1) - relativedelta(months=1))
-        return start, today.replace(day=1)
+        return start, (today.replace(day=1) - timedelta(days=1)).replace(hour=23, minute=59, second=59)
     elif preset == "This Quarter":
         quarter = (today.month - 1) // 3
         start = today.replace(month=quarter * 3 + 1, day=1)
-        return start, start + relativedelta(months=3)
+        return start, (start + relativedelta(months=3) - timedelta(days=1)).replace(hour=23, minute=59, second=59)
     elif preset == "Last Quarter":
         quarter = ((today.month - 1) // 3) - 1
         start = today.replace(month=quarter * 3 + 1, day=1)
-        return start, start + relativedelta(months=3)
+        return start, (start + relativedelta(months=3) - timedelta(days=1)).replace(hour=23, minute=59, second=59)
     
     elif preset == "Last Year":
-        return today.replace(year=today.year - 1, month=1, day=1), today.replace(month=1, day=1)
-    return today, today + timedelta(days=1)
+        return today.replace(year=today.year - 1, month=1, day=1), today.replace(year=today.year - 1, month=12, day=31, hour=23, minute=59, second=59)
+    return today, (today + timedelta(days=1)).replace(hour=23, minute=59, second=59)
 
 
 

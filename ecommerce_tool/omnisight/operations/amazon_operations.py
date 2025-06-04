@@ -763,12 +763,51 @@ def fetch_all_inventory(token):
 # Main runner
 def sync_inventory():
     print("Starting Sellercloud inventory sync...")
+    today_date = datetime.today()
     try:
         token = get_access_token()
         inventory = fetch_all_inventory(token)
         for ins in inventory:
             try:
-                DatabaseModel.update_documents(Product.objects,{"sku" : str(ins['ID'])},{'quantity' : ins['InventoryAvailableQty']})
+                product_obj = DatabaseModel.get_document(Product.objects,{"sku" : str(ins['ID'])},['id'])
+                if product_obj:
+                    # Check if an inventory log exists for today's date
+                    inventory_log = DatabaseModel.get_document(
+                        inventry_log.objects, 
+                        {"product_id": product_obj.id, "date": today_date}
+                    )
+                    
+                    if inventory_log:
+                        # Update the existing inventory log
+                        DatabaseModel.update_documents(
+                            inventry_log.objects, 
+                            {"id": inventory_log.id}, 
+                            {
+                                "available": ins['InventoryAvailableQty'],
+                                "reserved": ins['ReservedQty']
+                            }
+                        )
+                        print(f"Updated inventory log for product SKU {ins['ID']} on {today_date}")
+                    else:
+                        # Create a new inventory log for today's date
+                        new_inventory_log = inventry_log(
+                            product_id=product_obj,
+                            available=ins['InventoryAvailableQty'],
+                            reserved=ins['ReservedQty'],
+                            date=datetime.now()
+                        )
+                        new_inventory_log.save()
+                        print(f"Created new inventory log for product SKU {ins['ID']} on {today_date}")
+
+                    # Update the product's quantity
+                    DatabaseModel.update_documents(
+                        Product.objects, 
+                        {"sku": str(ins['ID'])}, 
+                        {'quantity': ins['InventoryAvailableQty']}
+                    )
+
+
+
             except:
                 print(f"Failed to update product with SKU {ins['ID']}: {sys.exc_info()[0]}")
             

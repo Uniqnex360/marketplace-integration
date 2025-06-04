@@ -499,3 +499,11 @@ class pageview_session_count(Document):
     buy_box_percentage_b2b = FloatField(default=0.0)
     unit_session_percentage = FloatField(default=0.0)
     unit_session_percentage_b2b = FloatField(default=0.0)
+
+
+
+class inventry_log(Document):
+    date = DateTimeField(default=datetime.now())
+    product_id = ReferenceField(Product)
+    available = IntField(default=0)
+    reserved = IntField(default=0)

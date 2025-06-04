@@ -205,53 +205,62 @@ def fetchProductDetails(request):
     product_id = request.GET.get('product_id')
     pipeline = [
         {
-            "$match" : {
-                "_id" : ObjectId(product_id)
+            "$match": {
+                "_id": ObjectId(product_id)
             }
         },
         {
             "$lookup": {
                 "from": "marketplace",
-                "localField": "marketplace_id",
+                "localField": "marketplace_ids",
                 "foreignField": "_id",
                 "as": "marketplace_ins"
             }
         },
         {
-            "$unwind": "$marketplace_ins"
-        },
-        {
-            "$project" : {
-                "_id" : 0,
-                "id" : {"$toString" : "$_id"},
-                "product_title" : {"$ifNull" : ["$product_title", ""]},
-                "product_description" : {"$ifNull" : ["$product_description", ""]},
-                "product_id" : {"$ifNull" : ["$product_id", ""]},
-                "product_id_type" : {"$ifNull" : ["$product_id_type", ""]},
-                "sku" : {"$ifNull" : ["$sku", ""]},
-                "price" : {"$round": [{"$ifNull" : ["$price", 0]}, 2]},
-                "currency" : {"$ifNull" : ["$currency", ""]},
-                "quantity" : {"$ifNull" : ["$quantity", 0]},
-                "published_status" : 1,
-                "marketplace_ins" : "$marketplace_ins.name",
-                "marketplace_image_url" : "$marketplace_ins.image_url",
-                "item_condition" : {"$ifNull" : ["$item_condition", ""]},
-                "item_note" : {"$ifNull" : ["$item_note", ""]},
-                "listing_id" : {"$ifNull" : ["$listing_id", ""]},
-                "upc" : {"$ifNull" : ["$upc", ""]},
-                "gtin" : {"$ifNull" : ["$gtin", ""]},
-                "asin" : {"$ifNull" : ["$asin", ""]},
-                "model_number" : {"$ifNull" : ["$model_number", ""]},
-                "category" : {"$ifNull" : ["$category", ""]},
-                "brand_name" : {"$ifNull" : ["$brand_name", ""]},
-                "manufacturer_name" : {"$ifNull" : ["$manufacturer_name", ""]},
-                "attributes" : {"$ifNull" : ["$attributes", {}]},
-                "features" : {"$ifNull" : ["$features", []]},
-                "shelf_path" : {"$ifNull" : ["$shelf_path", ""]},
-                "image_url" : {"$ifNull" : ["$image_url", ""]},
-                "image_urls" : {"$ifNull" : ["$image_urls", []]},
-                "vendor_funding" : {"$round": [{"$ifNull" : ["$vendor_funding", 0.0]}, 2]},
-                "veddor_discount" : {"$round": [{"$ifNull" : ["$vendor_discount", 0.0]}, 2]},
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "product_title": {"$ifNull": ["$product_title", ""]},
+                "product_description": {"$ifNull": ["$product_description", ""]},
+                "product_id": {"$ifNull": ["$product_id", ""]},
+                "product_id_type": {"$ifNull": ["$product_id_type", ""]},
+                "sku": {"$ifNull": ["$sku", ""]},
+                "price": {"$round": [{"$ifNull": ["$price", 0]}, 2]},
+                "currency": {"$ifNull": ["$currency", ""]},
+                "quantity": {"$ifNull": ["$quantity", 0]},
+                "published_status": 1,
+                "marketplace_ins": {
+                    "$map": {
+                        "input": "$marketplace_ins",
+                        "as": "marketplace",
+                        "in": "$$marketplace.name"
+                    }
+                },
+                "marketplace_image_url": {
+                    "$map": {
+                        "input": "$marketplace_ins",
+                        "as": "marketplace",
+                        "in": "$$marketplace.image_url"
+                    }
+                },
+                "item_condition": {"$ifNull": ["$item_condition", ""]},
+                "item_note": {"$ifNull": ["$item_note", ""]},
+                "listing_id": {"$ifNull": ["$listing_id", ""]},
+                "upc": {"$ifNull": ["$upc", ""]},
+                "gtin": {"$ifNull": ["$gtin", ""]},
+                "asin": {"$ifNull": ["$asin", ""]},
+                "model_number": {"$ifNull": ["$model_number", ""]},
+                "category": {"$ifNull": ["$category", ""]},
+                "brand_name": {"$ifNull": ["$brand_name", ""]},
+                "manufacturer_name": {"$ifNull": ["$manufacturer_name", ""]},
+                "attributes": {"$ifNull": ["$attributes", {}]},
+                "features": {"$ifNull": ["$features", []]},
+                "shelf_path": {"$ifNull": ["$shelf_path", ""]},
+                "image_url": {"$ifNull": ["$image_url", ""]},
+                "image_urls": {"$ifNull": ["$image_urls", []]},
+                "vendor_funding": {"$round": [{"$ifNull": ["$vendor_funding", 0.0]}, 2]},
+                "veddor_discount": {"$round": [{"$ifNull": ["$vendor_discount", 0.0]}, 2]},
                 "product_cost": {"$round": [{"$ifNull": ["$product_cost", 0]}, 2]},
                 "referral_fee": {"$round": [{"$ifNull": ["$referral_fee", 0]}, 2]},
                 "a_shipping_cost": {"$round": [{"$ifNull": ["$a_shipping_cost", 0]}, 2]},
@@ -260,7 +269,7 @@ def fetchProductDetails(request):
                 "walmart_fee": {"$round": [{"$ifNull": ["$walmart_fee", 0]}, 2]},
                 "w_shiping_cost": {"$round": [{"$ifNull": ["$w_shiping_cost", 0]}, 2]},
                 "w_total_cogs": {"$round": [{"$ifNull": ["$w_total_cogs", 0]}, 2]},
-                "pack_size": {"$ifNull" : ["$pack_size", ""]},
+                "pack_size": {"$ifNull": ["$pack_size", ""]},
             }
         }
     ]
@@ -2607,36 +2616,56 @@ def getProductVariant(request):
     if parant_sku != None:
         pipeline = [
             {
-                "$match" : match
+            "$match": match
             },
             {
-                "$lookup": {
-                    "from": "marketplace",
-                    "localField": "marketplace_id",
-                    "foreignField": "_id",
-                    "as": "marketplace_ins"
+            "$lookup": {
+                "from": "marketplace",
+                "localField": "marketplace_ids",
+                "foreignField": "_id",
+                "as": "marketplace_ins"
+            }
+            },
+            {
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "product_title": {"$ifNull": ["$product_title", ""]},
+                "product_id": {"$ifNull": ["$product_id", ""]},
+                "product_id_type": {"$ifNull": ["$product_id_type", ""]},
+                "sku": {"$ifNull": ["$sku", ""]},
+                "price": {"$ifNull": ["$price", 0]},
+                "currency": {"$ifNull": ["$currency", ""]},
+                "quantity": {"$ifNull": ["$quantity", 0]},
+                "marketplace_ins": {
+                "$reduce": {
+                    "input": "$marketplace_ins.name",
+                    "initialValue": [],
+                    "in": {
+                    "$cond": {
+                        "if": {"$in": ["$$this", "$$value"]},
+                        "then": "$$value",
+                        "else": {"$concatArrays": ["$$value", ["$$this"]]}
+                    }
+                    }
                 }
-            },
-            {
-                "$unwind": "$marketplace_ins"
-            },
-            {
-                "$project" : {
-                    "_id" : 0,
-                    "id" : {"$toString" : "$_id"},
-                    "product_title" : {"$ifNull" : ["$product_title", ""]},
-                    "product_id" : {"$ifNull" : ["$product_id", ""]},
-                    "product_id_type" : {"$ifNull" : ["$product_id_type", ""]},
-                    "sku" : {"$ifNull" : ["$sku", ""]},
-                    "price" : {"$ifNull" : ["$price", 0]},
-                    "currency" : {"$ifNull" : ["$currency", ""]},
-                    "quantity" : {"$ifNull" : ["$quantity", 0]},
-                    "marketplace_ins" : "$marketplace_ins.name",
-                    "marketplace_image_url" : "$marketplace_ins.image_url",
-                    "brand_name" : {"$ifNull" : ["$brand_name", ""]},
-                    "image_url" : {"$ifNull" : ["$image_url", ""]},
-                    
+                },
+                "marketplace_image_url": {
+                "$reduce": {
+                    "input": "$marketplace_ins.image_url",
+                    "initialValue": [],
+                    "in": {
+                    "$cond": {
+                        "if": {"$in": ["$$this", "$$value"]},
+                        "then": "$$value",
+                        "else": {"$concatArrays": ["$$value", ["$$this"]]}
+                    }
+                    }
                 }
+                },
+                "brand_name": {"$ifNull": ["$brand_name", ""]},
+                "image_url": {"$ifNull": ["$image_url", ""]}
+            }
             }
         ]
         variant_list = list(Product.objects.aggregate(*(pipeline)))
