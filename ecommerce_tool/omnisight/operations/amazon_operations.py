@@ -17,6 +17,14 @@ import boto3
 import time
 import gzip
 import io
+import threading
+from queue import Queue
+# Time range for orders report (last 4 hours)
+from io import StringIO
+import sys # For environment diagnostics
+from sp_api.api import Reports
+from sp_api.base import Marketplaces, SellingApiException
+from forex_python.converter import CurrencyRates
 
 
 
@@ -506,109 +514,109 @@ def updateOrdersItemsDetailsAmazon(request):
 
 
 
-def syncRecentAmazonOrders():
-    access_token = get_access_token()
-    if not access_token:
-        return None
+# def syncRecentAmazonOrders():
+#     access_token = get_access_token()
+#     if not access_token:
+#         return None
 
-    url = "https://sellingpartnerapi-na.amazon.com/orders/v0/orders"
+#     url = "https://sellingpartnerapi-na.amazon.com/orders/v0/orders"
     
-    # Amazon only allows retrieving orders from the last 180 days
-    created_after = (datetime.utcnow() - timedelta(days=18000)).isoformat()
+#     # Amazon only allows retrieving orders from the last 180 days
+#     created_after = (datetime.utcnow() - timedelta(days=18000)).isoformat()
 
-    headers = {
-        "x-amz-access-token": access_token,
-        "Content-Type": "application/json"
-    }
+#     headers = {
+#         "x-amz-access-token": access_token,
+#         "Content-Type": "application/json"
+#     }
 
-    params = {
-        "MarketplaceIds": MARKETPLACE_ID,
-        "CreatedAfter": created_after,
-        "MaxResultsPerPage": 100  # Get max orders per page
-    }
+#     params = {
+#         "MarketplaceIds": MARKETPLACE_ID,
+#         "CreatedAfter": created_after,
+#         "MaxResultsPerPage": 100  # Get max orders per page
+#     }
 
-    orders = []
-    response = requests.get(url, headers=headers, params=params)
+#     orders = []
+#     response = requests.get(url, headers=headers, params=params)
 
-    if response.status_code == 200:
-        orders_data = response.json()
-        orders = orders_data.get("payload").get('Orders')
-        # Check for more pages
-        marketplace_id = DatabaseModel.get_document(Marketplace.objects,{"name" : "Amazon"},['id']).id
+#     if response.status_code == 200:
+#         orders_data = response.json()
+#         orders = orders_data.get("payload").get('Orders')
+#         # Check for more pages
+#         marketplace_id = DatabaseModel.get_document(Marketplace.objects,{"name" : "Amazon"},['id']).id
 
-        for row in orders:
-            order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": str(row.get('AmazonOrderId', ""))})
-            if order_obj:
-                print(f"Order with purchase order ID {row.get('AmazonOrderId', '')} already exists. Skipping...")
-            else:
-                order_details = list()
-                order_items = list()
-                currency = "USD"
-                order_total = 0.0
-                BuyerEmail = ""
-                OrderTotal = row.get('OrderTotal', {})
-                customer_email_id = row.get('BuyerInfo', {})
-                if customer_email_id:
-                    BuyerEmail = customer_email_id.get('BuyerEmail', "")
+#         for row in orders:
+#             order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": str(row.get('AmazonOrderId', ""))})
+#             if order_obj:
+#                 print(f"Order with purchase order ID {row.get('AmazonOrderId', '')} already exists. Skipping...")
+#             else:
+#                 order_details = list()
+#                 order_items = list()
+#                 currency = "USD"
+#                 order_total = 0.0
+#                 BuyerEmail = ""
+#                 OrderTotal = row.get('OrderTotal', {})
+#                 customer_email_id = row.get('BuyerInfo', {})
+#                 if customer_email_id:
+#                     BuyerEmail = customer_email_id.get('BuyerEmail', "")
 
-                if OrderTotal:
-                    currency = OrderTotal.get('CurrencyCode', "USD")
-                order_total = OrderTotal.get('Amount', 0.0)
-                url = f"https://sellingpartnerapi-na.amazon.com/orders/v0/orders/{str(row.get('AmazonOrderId', ''))}/orderItems"
+#                 if OrderTotal:
+#                     currency = OrderTotal.get('CurrencyCode', "USD")
+#                 order_total = OrderTotal.get('Amount', 0.0)
+#                 url = f"https://sellingpartnerapi-na.amazon.com/orders/v0/orders/{str(row.get('AmazonOrderId', ''))}/orderItems"
 
-                # Headers
-                headers = {
-                    "x-amz-access-token": access_token,
-                    "Content-Type": "application/json"
-                }
+#                 # Headers
+#                 headers = {
+#                     "x-amz-access-token": access_token,
+#                     "Content-Type": "application/json"
+#                 }
 
-                response = requests.get(url, headers=headers)
-                order_date = converttime(row.get('PurchaseDate', "")) if row.get('PurchaseDate') else ""
-                if response.status_code == 200:
-                    report_url = response.json().get("payload", {})
-                    order_details =  report_url.get('OrderItems', [])
-                    for order_ins in order_details:
-                        order_items.append(process_amazon_order(order_ins,order_date))
+#                 response = requests.get(url, headers=headers)
+#                 order_date = converttime(row.get('PurchaseDate', "")) if row.get('PurchaseDate') else ""
+#                 if response.status_code == 200:
+#                     report_url = response.json().get("payload", {})
+#                     order_details =  report_url.get('OrderItems', [])
+#                     for order_ins in order_details:
+#                         order_items.append(process_amazon_order(order_ins,order_date))
 
 
-                order = Order(
-                    marketplace_id=marketplace_id,
-                    customer_email_id=BuyerEmail,
-                    purchase_order_id=str(row.get('AmazonOrderId', "")),
-                    earliest_ship_date=converttime(row.get('EarliestShipDate', "")) if row.get('EarliestShipDate') else "",
-                    sales_channel=str(row.get('SalesChannel', "")),
-                    number_of_items_shipped=int(row.get('NumberOfItemsShipped', 0)),
-                    order_type=str(row.get('OrderType', "")),
-                    is_premium_order=row.get('IsPremiumOrder', False),
-                    is_prime=row.get('IsPrime', False),
-                    fulfillment_channel=str(row.get('FulfillmentChannel', "")),
-                    number_of_items_unshipped=int(row.get('NumberOfItemsUnshipped', 0)),
-                    has_regulated_items=row.get('HasRegulatedItems', False),
-                    is_replacement_order=row.get('IsReplacementOrder', False),
-                    is_sold_by_ab=row.get('IsSoldByAB', False),
-                    latest_ship_date=converttime(row.get('LatestShipDate', "")) if row.get('LatestShipDate') else "",
-                    ship_service_level=str(row.get('ShipServiceLevel', "")),
-                    order_date=order_date,
-                    is_ispu=row.get('IsISPU', False),
-                    order_status=str(row.get('OrderStatus', "")),
-                    shipping_information=row.get('ShippingAddress', {}),
-                    is_access_point_order=row.get('IsAccessPointOrder', False),
-                    seller_order_id=str(row.get('SellerOrderId', "")),
-                    payment_method=str(row.get('PaymentMethod', "")),
-                    is_business_order=row.get('IsBusinessOrder', False),
-                    order_total=order_total,
-                    currency=currency,
-                    payment_method_details=row.get('PaymentMethodDetails', [])[0] if row.get('PaymentMethodDetails') else "",
-                    is_global_express_enabled=row.get('IsGlobalExpressEnabled', False),
-                    last_update_date=converttime(row.get('LastUpdateDate', "")) if row.get('LastUpdateDate') else "",
-                    shipment_service_level_category=str(row.get('ShipmentServiceLevelCategory', "")),
-                    automated_shipping_settings=row.get('AutomatedShippingSettings', {}),
-                    order_details =order_details,
-                    order_items = order_items
-                )
-                order.save()
+#                 order = Order(
+#                     marketplace_id=marketplace_id,
+#                     customer_email_id=BuyerEmail,
+#                     purchase_order_id=str(row.get('AmazonOrderId', "")),
+#                     earliest_ship_date=converttime(row.get('EarliestShipDate', "")) if row.get('EarliestShipDate') else "",
+#                     sales_channel=str(row.get('SalesChannel', "")),
+#                     number_of_items_shipped=int(row.get('NumberOfItemsShipped', 0)),
+#                     order_type=str(row.get('OrderType', "")),
+#                     is_premium_order=row.get('IsPremiumOrder', False),
+#                     is_prime=row.get('IsPrime', False),
+#                     fulfillment_channel=str(row.get('FulfillmentChannel', "")),
+#                     number_of_items_unshipped=int(row.get('NumberOfItemsUnshipped', 0)),
+#                     has_regulated_items=row.get('HasRegulatedItems', False),
+#                     is_replacement_order=row.get('IsReplacementOrder', False),
+#                     is_sold_by_ab=row.get('IsSoldByAB', False),
+#                     latest_ship_date=converttime(row.get('LatestShipDate', "")) if row.get('LatestShipDate') else "",
+#                     ship_service_level=str(row.get('ShipServiceLevel', "")),
+#                     order_date=order_date,
+#                     is_ispu=row.get('IsISPU', False),
+#                     order_status=str(row.get('OrderStatus', "")),
+#                     shipping_information=row.get('ShippingAddress', {}),
+#                     is_access_point_order=row.get('IsAccessPointOrder', False),
+#                     seller_order_id=str(row.get('SellerOrderId', "")),
+#                     payment_method=str(row.get('PaymentMethod', "")),
+#                     is_business_order=row.get('IsBusinessOrder', False),
+#                     order_total=order_total,
+#                     currency=currency,
+#                     payment_method_details=row.get('PaymentMethodDetails', [])[0] if row.get('PaymentMethodDetails') else "",
+#                     is_global_express_enabled=row.get('IsGlobalExpressEnabled', False),
+#                     last_update_date=converttime(row.get('LastUpdateDate', "")) if row.get('LastUpdateDate') else "",
+#                     shipment_service_level_category=str(row.get('ShipmentServiceLevelCategory', "")),
+#                     automated_shipping_settings=row.get('AutomatedShippingSettings', {}),
+#                     order_details =order_details,
+#                     order_items = order_items
+#                 )
+#                 order.save()
            
-    return orders
+#     return orders
 
 
 
@@ -1004,3 +1012,350 @@ def syncPageviews():
     start_date = datetime.today()
     report_date = start_date.strftime("%Y-%m-%d")
     fetch_sales_traffic_report(Acccess_Key, Secret_Access_Key, Role_ARN,AMAZON_API_KEY,AMAZON_SECRET_KEY,REFRESH_TOKEN,report_date,region="us-east-1")
+    return True
+
+
+
+# --- Helper function to request and download a report ---
+def get_and_download_report(sp_api_client, report_type, start_time, end_time):
+    TARGET_MARKETPLACE = Marketplaces.US
+    try:
+        report_request_payload = {
+            "reportType": report_type,
+            "marketplaceIds": [TARGET_MARKETPLACE.marketplace_id],
+            "dataStartTime": start_time.isoformat().split('.')[0] + 'Z',
+            "dataEndTime": end_time.isoformat().split('.')[0] + 'Z'
+        }
+        print(f"  Data time range: {report_request_payload['dataStartTime']} to {report_request_payload['dataEndTime']}")
+
+        # 1. Create the report request
+        try:
+            create_report_response = sp_api_client.create_report(**report_request_payload)
+            report_id = create_report_response.reportId
+            print(f"Report request submitted. Report ID: {report_id}")
+            if not report_id:
+                print("Failed to get a report ID from the creation response.")
+                return None
+        except SellingApiException as e:
+            print(f"API error submitting report request {report_type}: {e}")
+            if hasattr(e, 'message'):
+                print("API Error Details:", e.message)
+            return None
+        except Exception as e:
+            print(f"An unexpected error during report submission: {e}")
+            return None
+
+        # 2. Poll for report completion
+        print("Polling report status...")
+        report_status = None
+        report_document_id = None
+        max_polls = 60
+        poll_interval = 30
+
+        for i in range(max_polls):
+            time.sleep(poll_interval)
+            try:
+                get_report_response = sp_api_client.get_report(reportId=report_id)
+                report_status = get_report_response.processingStatus
+                
+                print(f" Poll {i+1}/{max_polls}: Status = {report_status}")
+
+                if report_status == 'DONE':
+                    report_document_id = get_report_response.reportDocumentId
+                    print("Report processing complete.")
+                    break
+                elif report_status in ['FATAL', 'CANCELLED']:
+                    print(f"Report processing failed with status: {report_status}")
+                    return None
+            except SellingApiException as e:
+                print(f"API error while polling report {report_id}: {e}")
+            except Exception as e:
+                print(f"An unexpected error occurred while polling report {report_id}: {e}")
+
+        if report_status != 'DONE' or not report_document_id:
+            print(f"Report {report_id} did not complete successfully within the polling limit.")
+            return None
+
+        # 3. Download the report content
+        print(f"Fetching report document {report_document_id}...")
+        try:
+            report_document = sp_api_client.get_report_document(reportDocumentId=report_document_id)
+            report_content_url = report_document.url
+            
+            # Download the report content
+            import requests
+            response = requests.get(report_content_url)
+            if response.status_code == 200:
+                report_content_str = response.text
+                print("Report content downloaded successfully.")
+                return report_content_str
+            else:
+                print(f"Failed to download report. Status code: {response.status_code}")
+                return None
+
+        except Exception as e:
+            print(f"An unexpected error occurred during report download: {e}")
+            return None
+
+    except Exception as e:
+        print(f"An unexpected error occurred during the overall report process: {e}")
+        return None
+
+def ordersAmazon():
+    # Report type for order data
+    ORDERS_REPORT_TYPE = "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL"
+    # Amazon Marketplace
+    TARGET_MARKETPLACE = Marketplaces.US  # Change to your marketplace (e.g., Marketplaces.IN for India)
+
+    # Report type for order data
+    ORDERS_REPORT_TYPE = "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL"
+    end_time = datetime.utcnow()
+    start_time = end_time - timedelta(hours=4)
+    print("Starting Amazon SP-API orders retrieval script for last 4 hours...")
+    try:
+        # Initialize the SP-API client credentials
+        credentials = {
+            'lwa_app_id': AMAZON_API_KEY,
+            'lwa_client_secret': AMAZON_SECRET_KEY,
+            'refresh_token': REFRESH_TOKEN,
+            'aws_access_key': Acccess_Key,
+            'aws_secret_key': Secret_Access_Key,
+            'role_arn': Role_ARN
+        }
+        
+        # Create a Reports API client
+        reports_client = Reports(
+            credentials=credentials,
+            marketplace=TARGET_MARKETPLACE
+        )
+
+    except Exception as e:
+        sys.exit(1)
+
+    # Get the Orders Report for the last 4 hours
+    orders_content = get_and_download_report(
+        reports_client,
+        ORDERS_REPORT_TYPE,
+        start_time=start_time,
+        end_time=end_time
+    )
+
+    orders_df = None
+    if orders_content:
+        try:
+            # Reports are typically tab-separated values (TSV)
+            orders_df = pd.read_csv(StringIO(orders_content), sep='\t', low_memory=False)
+            orders_json = orders_df.to_json(orient='records')
+            print(orders_json)
+
+        except pd.errors.EmptyDataError:
+            print("The downloaded report was empty. No orders found in the specified time range.")
+            orders_df = None
+        except Exception as e:
+            print(f"Error reading orders report content into DataFrame: {e}")
+            orders_df = None
+
+    return orders_df
+
+
+def syncRecentAmazonOrders():
+    def process_row(row, marketplace_id):
+        s = row
+        if s['sales-channel'] != "Non-Amazon":
+            merchant_order_id = str(s['merchant-order-id']) if 'merchant-order-id' in s and pd.notna(s['merchant-order-id']) else ""
+            sales_channel = str(s['sales-channel']) if 'sales-channel' in s and pd.notna(s['sales-channel']) else ""
+            items_order_quantity = int(s['quantity']) if 'quantity' in s and pd.notna(s['quantity']) else 0
+            product_name = str(s['product-name']) if 'product-name' in s and pd.notna(s['product-name']) else ""
+            sku = str(s['sku']) if 'sku' in s and pd.notna(s['sku']) else ""
+            asin = str(s['asin']) if 'asin' in s and pd.notna(s['asin']) else ""
+            number_of_items = int(s['number-of-items']) if 'number-of-items' in s and pd.notna(s['number-of-items']) else 0
+            currency = str(s['currency']) if 'currency' in s and pd.notna(s['currency']) else "USD"
+            item_price = float(s['item-price']) if 'item-price' in s and pd.notna(s['item-price']) else 0.0
+            item_tax = float(s['item-tax']) if 'item-tax' in s and pd.notna(s['item-tax']) else 0.0
+            shipping_price = float(s['shipping-price']) if 'shipping-price' in s and pd.notna(s['shipping-price']) else 0.0
+            shipping_tax = float(s['shipping-tax']) if 'shipping-tax' in s and pd.notna(s['shipping-tax']) else 0.0
+            item_promotion_discount = float(s['item-promotion-discount']) if 'item-promotion-discount' in s and pd.notna(s['item-promotion-discount']) else 0.0
+            item_promotion_discount_tax = float(s['item-promotion-discount-tax']) if 'item-promotion-discount-tax' in s and pd.notna(s['item-promotion-discount-tax']) else 0.0
+
+            if currency != "USD":
+                converter = CurrencyRates()
+                item_price = converter.convert(currency, 'USD', item_price)
+                item_tax = converter.convert(currency, 'USD', item_tax)
+                shipping_price = converter.convert(currency, 'USD', shipping_price)
+                shipping_tax = converter.convert(currency, 'USD', shipping_tax)
+                item_promotion_discount = converter.convert(currency, 'USD', item_promotion_discount)
+                item_promotion_discount_tax = converter.convert(currency, 'USD', item_promotion_discount_tax)
+
+            ship_address = {}
+            if 'ship-city' in s and pd.notna(s['ship-city']):
+                ship_address['City'] = str(s['ship-city'])
+            if 'ship-state' in s and pd.notna(s['ship-state']):
+                ship_address['StateOrRegion'] = str(s['ship-state'])
+            if 'ship-postal-code' in s and pd.notna(s['ship-postal-code']):
+                ship_address['PostalCode'] = str(s['ship-postal-code'])
+            if 'ship-country' in s and pd.notna(s['ship-country']):
+                ship_address['CountryCode'] = str(s['ship-country'])
+
+            purchase_order_id = str(s['amazon-order-id']) if 'amazon-order-id' in s and pd.notna(s['amazon-order-id']) else ""
+            order_date = datetime.strptime(s['purchase-date'], "%Y-%m-%dT%H:%M:%S%z") if 'purchase-date' in s and pd.notna(s['purchase-date']) else datetime.now()
+            order_status = str(s['order-status']) if 'order-status' in s and pd.notna(s['order-status']) else ""
+            last_update_date = datetime.strptime(s['last-updated-date'], "%Y-%m-%dT%H:%M:%S%z") if 'last-updated-date' in s and pd.notna(s['last-updated-date']) else datetime.now()
+            fulfillment_channel = "MFN" if s['fulfillment-channel'] == "Merchant" else "AFN"
+            ship_service_level = str(s['ship-service-level']) if 'ship-service-level' in s and pd.notna(s['ship-service-level']) else ""
+
+            p = [
+                {
+                    "$match": {
+                        "purchase_order_id": str(s['amazon-order-id'])
+                    }
+                },
+                {"$limit": 1},
+                {
+                    "$project": {
+                        "_id": 1,
+                        "order_items": 1,
+                    }
+                }
+            ]
+            order_obj = list(Order.objects.aggregate(p))
+            if order_obj != []:
+                print(f"Order with purchase order ID {purchase_order_id} already exists. Skipping...")
+                try:
+                    product = DatabaseModel.get_document(Product.objects, {"sku": sku}, ["id"])
+                    product_id = product.id if product else None
+                except:
+                    product_id = None
+
+                order_item = OrderItems(
+                    OrderId=purchase_order_id,
+                    Platform="Amazon",
+                    created_date=order_date,
+                    ProductDetails=ProductDetails(
+                        product_id=product_id,
+                        Title=product_name,
+                        SKU=sku,
+                        ASIN=asin,
+                        QuantityOrdered=items_order_quantity,
+                        QuantityShipped=items_order_quantity,
+                    ),
+                    Pricing=Pricing(
+                        ItemPrice=Money(**{"CurrencyCode": "USD", "Amount": item_price}),
+                        ItemTax=Money(**{"CurrencyCode": "USD", "Amount": item_tax}),
+                        PromotionDiscount=Money(**{"CurrencyCode": "USD", "Amount": item_promotion_discount})
+                    )
+                )
+                order_item.save()
+
+                if order_obj[0]['order_items'] == [] or order_obj[0]['order_items'] == [[]]:
+                    DatabaseModel.update_documents(Order.objects, {"purchase_order_id": purchase_order_id}, {
+                        "order_items": [order_item.id],
+                        "items_order_quantity": items_order_quantity,
+                        "shipping_price": shipping_price,
+                        "sales_channel": sales_channel,
+                        "merchant_order_id": merchant_order_id
+                    })
+                else:
+                    DatabaseModel.update_documents(Order.objects, {"purchase_order_id": purchase_order_id}, {
+                        "items_order_quantity": items_order_quantity,
+                        "shipping_price": shipping_price,
+                        "sales_channel": sales_channel,
+                        "merchant_order_id": merchant_order_id
+                    })
+
+            else:
+                print(f"Order with purchase order ID {purchase_order_id} CREATE NEW...")
+                order_items = list()
+                try:
+                    product = DatabaseModel.get_document(Product.objects, {"sku": sku}, ["id"])
+                    product_id = product.id if product else None
+                except:
+                    product_id = None
+
+                order_item = OrderItems(
+                    OrderId=purchase_order_id,
+                    Platform="Amazon",
+                    created_date=order_date,
+                    ProductDetails=ProductDetails(
+                        product_id=product_id,
+                        Title=product_name,
+                        SKU=sku,
+                        ASIN=asin,
+                        QuantityOrdered=items_order_quantity,
+                        QuantityShipped=items_order_quantity,
+                    ),
+                    Pricing=Pricing(
+                        ItemPrice=Money(**{"CurrencyCode": "USD", "Amount": item_price}),
+                        ItemTax=Money(**{"CurrencyCode": "USD", "Amount": item_tax}),
+                        PromotionDiscount=Money(**{"CurrencyCode": "USD", "Amount": item_promotion_discount})
+                    )
+                )
+                order_item.save()
+
+                order = Order(
+                    marketplace_id=marketplace_id,
+                    purchase_order_id=purchase_order_id,
+                    last_update_date=last_update_date,
+                    sales_channel=sales_channel,
+                    items_order_quantity=items_order_quantity,
+                    shipping_price=shipping_price,
+                    number_of_items_shipped=int(number_of_items),
+                    fulfillment_channel=fulfillment_channel,
+                    ship_service_level=ship_service_level,
+                    order_date=order_date,
+                    order_status=order_status,
+                    shipping_information=ship_address,
+                    merchant_order_id=merchant_order_id,
+                    order_total=item_price + item_tax + shipping_price + shipping_tax - item_promotion_discount - item_promotion_discount_tax,
+                    currency=currency,
+                    order_items=[order_item.id]
+                )
+                order.save()
+
+    marketplace_id = DatabaseModel.get_document(Marketplace.objects, {"name": "Amazon"}, ['id']).id
+    df = ordersAmazon()
+    if df is not None and not df.empty:
+
+        def worker():
+            while True:
+                row = q.get()
+                if row is None:
+                    break
+                process_row(row, marketplace_id)
+                q.task_done()
+
+        q = Queue()
+        num_threads = 10  # Adjust the number of threads as needed
+        threads = []
+        processed_count = 0  # Variable to track the number of processed rows
+        processed_count_lock = threading.Lock()  # Lock to ensure thread-safe updates
+
+        def worker():
+            nonlocal processed_count
+            while True:
+                row = q.get()
+                if row is None:
+                    break
+                process_row(row, marketplace_id)
+                with processed_count_lock:
+                    processed_count += 1  # Increment the count in a thread-safe manner
+                    print(f"Processed {processed_count} rows")  # Print the count after each row is processed
+                q.task_done()
+
+        for i in range(num_threads):
+            t = threading.Thread(target=worker)
+            t.start()
+            threads.append(t)
+
+        for _, row in df.iterrows():
+            q.put(row)
+
+        q.join()
+
+        for i in range(num_threads):
+            q.put(None)
+        for t in threads:
+            t.join()
+
+        print(f"Total rows processed: {processed_count}")  # Output the total processed count
+        return True
+
