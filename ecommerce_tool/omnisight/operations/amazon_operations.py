@@ -1220,47 +1220,13 @@ def syncRecentAmazonOrders():
             order_obj = list(Order.objects.aggregate(p))
             if order_obj != []:
                 print(f"Order with purchase order ID {purchase_order_id} already exists. Skipping...")
-                try:
-                    product = DatabaseModel.get_document(Product.objects, {"sku": sku}, ["id"])
-                    product_id = product.id if product else None
-                except:
-                    product_id = None
-
-                order_item = OrderItems(
-                    OrderId=purchase_order_id,
-                    Platform="Amazon",
-                    created_date=order_date,
-                    ProductDetails=ProductDetails(
-                        product_id=product_id,
-                        Title=product_name,
-                        SKU=sku,
-                        ASIN=asin,
-                        QuantityOrdered=items_order_quantity,
-                        QuantityShipped=items_order_quantity,
-                    ),
-                    Pricing=Pricing(
-                        ItemPrice=Money(**{"CurrencyCode": "USD", "Amount": item_price}),
-                        ItemTax=Money(**{"CurrencyCode": "USD", "Amount": item_tax}),
-                        PromotionDiscount=Money(**{"CurrencyCode": "USD", "Amount": item_promotion_discount})
-                    )
-                )
-                order_item.save()
-
-                if order_obj[0]['order_items'] == [] or order_obj[0]['order_items'] == [[]]:
-                    DatabaseModel.update_documents(Order.objects, {"purchase_order_id": purchase_order_id}, {
-                        "order_items": [order_item.id],
-                        "items_order_quantity": items_order_quantity,
-                        "shipping_price": shipping_price,
-                        "sales_channel": sales_channel,
-                        "merchant_order_id": merchant_order_id
-                    })
-                else:
-                    DatabaseModel.update_documents(Order.objects, {"purchase_order_id": purchase_order_id}, {
-                        "items_order_quantity": items_order_quantity,
-                        "shipping_price": shipping_price,
-                        "sales_channel": sales_channel,
-                        "merchant_order_id": merchant_order_id
-                    })
+                DatabaseModel.update_documents(Order.objects, {"purchase_order_id": purchase_order_id}, {
+                    "items_order_quantity": items_order_quantity,
+                    "shipping_price": shipping_price,
+                    "sales_channel": sales_channel,
+                    "merchant_order_id": merchant_order_id,
+                    "order_status" : order_status
+                })
 
             else:
                 print(f"Order with purchase order ID {purchase_order_id} CREATE NEW...")
