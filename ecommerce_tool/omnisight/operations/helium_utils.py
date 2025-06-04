@@ -135,9 +135,11 @@ def get_date_range(preset):
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
     if preset == "Today":
-        return today, (today + timedelta(days=1)).replace(hour=23, minute=59, second=59)
+        start = today
+        return start, start.replace(hour=23, minute=59, second=59)
     elif preset == "Yesterday":
-        return today - timedelta(days=1), today.replace(hour=23, minute=59, second=59)
+        start = today - timedelta(days=1)
+        return start, start.replace(hour=23, minute=59, second=59)
     elif preset == "This Week":
         start = today - timedelta(days=today.weekday())
         return start, today.replace(hour=23, minute=59, second=59)
