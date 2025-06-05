@@ -312,7 +312,7 @@ class Order(Document):
 
 
     order_channel = StringField()  # The channel through which the order was placed
-    items_order_quantity = IntField()  # Number of items in the order
+    items_order_quantity = IntField(default=0)  # Number of items in the order
     shipping_price = FloatField()  # Shipping cost for the order
 
 

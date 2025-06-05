@@ -619,13 +619,7 @@ def fetchAllorders(request):
                 "order_total": "$order_total",
                 "currency": "$currency",
                 "marketplace_name": "$marketplace_ins.name",
-                "quantity": {
-                "$cond": {
-                    "if": {"$eq": ["$marketplace_ins.name", "Amazon"]},
-                    "then": "$items_order_quantity",
-                    "else": {"$size": "$order_items"}
-                }
-                }
+                "quantity": "$items_order_quantity"
             }
             }
         ])
