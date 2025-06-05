@@ -772,6 +772,8 @@ def fetch_all_inventory(token):
 def sync_inventory():
     print("Starting Sellercloud inventory sync...")
     today_date = datetime.today()
+    start_of_day = datetime.combine(today_date.date(), datetime.min.time())
+    end_of_day = datetime.combine(today_date.date(), datetime.max.time())
     try:
         token = get_access_token()
         inventory = fetch_all_inventory(token)
@@ -780,9 +782,10 @@ def sync_inventory():
                 product_obj = DatabaseModel.get_document(Product.objects,{"sku" : str(ins['ID'])},['id'])
                 if product_obj:
                     # Check if an inventory log exists for today's date
+                    
                     inventory_log = DatabaseModel.get_document(
                         inventry_log.objects, 
-                        {"product_id": product_obj.id, "date__date": today_date.date()}
+                        {"product_id": product_obj.id, "date": {"$gte": start_of_day, "$lte": end_of_day}}
                     )
                     
                     if inventory_log:
