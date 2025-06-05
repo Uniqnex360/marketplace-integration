@@ -599,35 +599,34 @@ def fetchAllorders(request):
         pipeline.extend([
 
             {
-                "$lookup": {
-                    "from": "marketplace",
-                    "localField": "marketplace_id",
-                    "foreignField": "_id",
-                    "as": "marketplace_ins"
-                }
+            "$lookup": {
+                "from": "marketplace",
+                "localField": "marketplace_id",
+                "foreignField": "_id",
+                "as": "marketplace_ins"
+            }
             },
             {
-                "$unwind": "$marketplace_ins"
+            "$unwind": "$marketplace_ins"
             },
             {
-                "$project": {
-                    "_id": 0,
-                    "id": {"$toString": "$_id"},
-                    "purchase_order_id": "$purchase_order_id",
-                    "order_date": "$order_date",
-                    # {
-                    #     "$dateToString": {
-                    #         "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                    #         "date": "$order_date",
-                    #     }
-                    #     },
-                    "order_status": "$order_status",
-                    "order_total": "$order_total",
-                    "currency": "$currency",
-                    "marketplace_name": "$marketplace_ins.name",
-                    "quantity" : {"$size" : "$order_items"}
-
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "purchase_order_id": "$purchase_order_id",
+                "order_date": "$order_date",
+                "order_status": "$order_status",
+                "order_total": "$order_total",
+                "currency": "$currency",
+                "marketplace_name": "$marketplace_ins.name",
+                "quantity": {
+                "$cond": {
+                    "if": {"$eq": ["$marketplace_ins.name", "Amazon"]},
+                    "then": "$items_order_quantity",
+                    "else": {"$size": "$order_items"}
                 }
+                }
+            }
             }
         ])
         

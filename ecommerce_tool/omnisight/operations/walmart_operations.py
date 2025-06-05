@@ -656,6 +656,7 @@ def syncRecentWalmartOrders():
                 order_total=order_total,
                 currency=currency,
                 order_status=order_status,
+                items_order_quantity=len(order_items)
             )
             order.save()
 
