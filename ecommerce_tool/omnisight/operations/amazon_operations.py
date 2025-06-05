@@ -772,8 +772,7 @@ def fetch_all_inventory(token):
 def sync_inventory():
     print("Starting Sellercloud inventory sync...")
     today_date = datetime.today()
-    start_of_day = datetime.combine(today_date.date(), datetime.min.time())
-    end_of_day = datetime.combine(today_date.date(), datetime.max.time())
+    start_of_day = today_date
     try:
         token = get_access_token()
         inventory = fetch_all_inventory(token)
@@ -781,24 +780,35 @@ def sync_inventory():
             try:
                 product_obj = DatabaseModel.get_document(Product.objects,{"sku" : str(ins['ID'])},['id'])
                 if product_obj:
-                    # Check if an inventory log exists for today's date
                     
-                    inventory_log = DatabaseModel.get_document(
-                        inventry_log.objects, 
-                        {"product_id": product_obj.id, "date": {"$gte": start_of_day, "$lte": end_of_day}}
-                    )
-                    
-                    if inventory_log:
-                        # Update the existing inventory log
+                    # Check if an entry exists for the same product and date
+                    pipeline = [
+                        {
+                            "$match": {
+                                "product_id": product_obj.id,
+                                "date": {
+                                    "$gte": start_of_day.replace(hour=0, minute=0, second=0, microsecond=0),
+                                    "$lte": start_of_day.replace(hour=23, minute=59, second=59, microsecond=999999)
+                                }
+                            }
+                        },
+                        {
+                            "$limit": 1
+                        }
+                    ]
+                    existing_entry = list(inventry_log.objects.aggregate(*pipeline))
+                    existing_entry = existing_entry[0] if existing_entry else None
+                    if existing_entry:
+                        # Update the existing entry
                         DatabaseModel.update_documents(
                             inventry_log.objects, 
-                            {"id": inventory_log.id}, 
+                            {"id": existing_entry['_id']}, 
                             {
                                 "available": ins['InventoryAvailableQty'],
                                 "reserved": ins['ReservedQty']
                             }
                         )
-                        print(f"Updated inventory log for product SKU {ins['ID']} on {today_date}")
+                        print(f"Updated existing inventory log for product SKU {ins['ID']} on {today_date}")
                     else:
                         # Create a new inventory log for today's date
                         new_inventory_log = inventry_log(
