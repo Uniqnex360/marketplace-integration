@@ -593,7 +593,7 @@ def fetchAllorders(request):
             "$skip": skip
         },
         {
-            "$limit": limit + skip
+            "$limit": limit
         }
         ])
         pipeline.extend([
