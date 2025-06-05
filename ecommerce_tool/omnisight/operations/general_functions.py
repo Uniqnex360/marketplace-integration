@@ -619,7 +619,7 @@ def fetchAllorders(request):
                 "order_total": "$order_total",
                 "currency": "$currency",
                 "marketplace_name": "$marketplace_ins.name",
-                "quantity": "$items_order_quantity"
+                "items_order_quantity": "$items_order_quantity"
             }
             }
         ])
