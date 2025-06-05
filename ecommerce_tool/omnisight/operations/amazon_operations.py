@@ -782,7 +782,7 @@ def sync_inventory():
                     # Check if an inventory log exists for today's date
                     inventory_log = DatabaseModel.get_document(
                         inventry_log.objects, 
-                        {"product_id": product_obj.id, "date": today_date}
+                        {"product_id": product_obj.id, "date__date": today_date.date()}
                     )
                     
                     if inventory_log:
