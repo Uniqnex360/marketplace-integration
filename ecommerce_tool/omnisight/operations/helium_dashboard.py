@@ -1460,9 +1460,9 @@ def getPeriodWiseDataCustom(request):
             "previous": {"from": to_utc_format(prev_from)}
         }
 
-        if label not in ['Today', 'Yesterday']:
-            date_ranges["current"]["to"] = to_utc_format(cur_to)
-            date_ranges["previous"]["to"] = to_utc_format(prev_to)
+        # if label not in ['Today', 'Yesterday']:
+        date_ranges["current"]["to"] = to_utc_format(cur_to)
+        date_ranges["previous"]["to"] = to_utc_format(prev_to)
 
         summary_metrics = [
             "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds", "skuCount",
@@ -6025,3 +6025,52 @@ def getInventryLogForProductdaywise(request):
     }
 
     return data
+
+
+
+
+def getProductInformation(request):
+    product_id = request.GET.get('product_id')
+    product_obj = DatabaseModel.get_document(Product.objects,{"id" : product_id})
+
+    # Fetch marketplace IDs
+    marketplace_ids = product_obj.marketplace_ids
+    marketplaces = Marketplace.objects.filter(id__in=[ins.id for ins in marketplace_ids])
+
+    # Check for Amazon and Walmart presence
+    has_amazon = len(marketplaces.filter(name__iexact="Amazon")) > 0
+    has_walmart = len(marketplaces.filter(name__iexact="Walmart")) > 0
+
+    
+
+    # Prepare response data
+    response_data = {
+        "selling_status": "Active",
+        "asin/wpid": product_obj.product_id,
+        "SKU": product_obj.sku,
+        "Brand": product_obj.brand_name if product_obj.brand_name else "N/A",
+        "date_range": product_obj.product_created_date.strftime("%b %d, %Y") + " - Current" if product_obj.product_created_date else "N/A - Current",
+        "marketplaces": []
+    }
+
+
+    if has_amazon:
+        response_data["marketplaces"].append({
+        "name": "Amazon",
+        "product_cost": round(product_obj.product_cost, 2) if product_obj.product_cost else 0,
+        "shipping_cost": round(product_obj.a_shipping_cost, 2) if product_obj.a_shipping_cost else 0,
+        "amazon_fee": round(product_obj.referral_fee, 2) if product_obj.referral_fee else 0,
+        "total_cogs": round(product_obj.total_cogs, 2) if product_obj.total_cogs else 0,
+        
+        })
+
+    if has_walmart:
+        response_data["marketplaces"].append({
+        "name": "Walmart",
+        "product_cost": round(product_obj.w_product_cost, 2) if product_obj.w_product_cost else 0,
+        "shipping_cost": round(product_obj.w_shiping_cost, 2) if product_obj.w_shiping_cost else 0,
+        "walmart_fee": round(product_obj.walmart_fee, 2) if product_obj.walmart_fee else 0,
+        "total_cogs": round(product_obj.w_total_cogs, 2) if product_obj.w_total_cogs else 0,
+        })
+
+    return response_data

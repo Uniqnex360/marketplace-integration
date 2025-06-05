@@ -99,14 +99,13 @@ def getProductList(request):
                 "category" : {"$ifNull" : ["$category",""]},  # If category is null, replace with empty string
                 "image_url" : {"$ifNull" : ["$image_url",""]},  # If image_url is null, replace with empty string
                 "marketplace_name" : "$marketplace.name",
-                # "marketplace_image_url" : "$marketplace.image_url"
             }
         },
         {
             "$skip" : skip
         },
         {
-            "$limit" : limit+skip
+            "$limit" : limit  # Ensure limit is applied correctly
         }
     ])
     if sort_by != None and sort_by != "":
@@ -439,7 +438,7 @@ def getOrdersBasedOnProduct(request):
     # Step 3: Fetch orders with pagination
     orders_queryset = Order.objects.filter(order_items__in=matching_order_items)\
         .order_by("-order_date")\
-        .skip(skip).limit(limit)
+        .skip(skip).limit(limit - skip)
 
     # Step 4: Convert to dictionary and fetch marketplace in one go
     order_list = list(orders_queryset)
@@ -544,7 +543,7 @@ def fetchAllorders(request):
             "$skip": skip
         },
         {
-            "$limit": limit + skip
+            "$limit": limit
         }
         ])
 
