@@ -750,6 +750,249 @@ def get_top_products(request):
     data = {"results": {"items": result}}
     return data
 
+import pytz
+
+
+@csrf_exempt
+def get_top_products(request):
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id', None)
+    brand_id = json_request.get('brand_id', None)
+    product_id = json_request.get('product_id', None)
+    metric = json_request.get("sortBy", "units_sold")  # 'price', 'refund', etc.
+    preset = json_request.get("preset", "Today")  # today, yesterday, last_7_days
+
+    start_date_str = json_request.get("start_date", None)
+    end_date_str = json_request.get("end_date", None)
+
+    # Determine start and end dates
+    if start_date_str and end_date_str:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').replace(tzinfo=pytz.utc)
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=pytz.utc)
+    else:
+        start_date, end_date = get_date_range(preset)
+        # Ensure dates are timezone-aware if get_date_range does not return them as such
+        if start_date.tzinfo is None:
+            start_date = pytz.utc.localize(start_date)
+        if end_date.tzinfo is None:
+            end_date = pytz.utc.localize(end_date)
+
+
+    # Calculate the duration in hours
+    duration_hours = (end_date - start_date).total_seconds() / 3600
+
+    # Determine chart key format based on duration
+    if duration_hours <= 24:
+        # Less than or equal to 24 hours: hourly sales
+        chart_date_format = "%Y-%m-%d %H:00:00+00:00" # Add +00:00 for UTC offset
+    else:
+        # More than 24 hours: daily sales
+        chart_date_format = "%Y-%m-%d 00:00:00+00:00" # Add +00:00 for UTC offset
+
+    # Decide which field to sort by
+    sort_field = {
+        "units_sold": "total_units",
+        "price": "total_price",
+        "refund": "refund_qty"
+    }.get(metric, "total_units")
+
+    # Decide which field to use for chart values (already defined, remains the same)
+    chart_value_field = {
+        "units_sold": "$order_items_ins.ProductDetails.QuantityOrdered",
+        "price": {
+            "$multiply": [
+                "$order_items_ins.Pricing.ItemPrice.Amount",
+                "$order_items_ins.ProductDetails.QuantityOrdered"
+            ]
+        },
+        "refund": "$order_items_ins.ProductDetails.QuantityShipped" # Assuming QuantityShipped for refund
+    }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
+
+    match = dict()
+    match['order_date'] = {"$gte": start_date, "$lte": end_date}
+    match['order_status'] = {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
+
+    if marketplace_id and marketplace_id != "all" and marketplace_id != "custom":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+    if metric == "refund":
+        match['order_status'] = "Refunded"
+
+    product_ids_for_match = []
+    if product_id:
+        # Assuming product_id can be a single string or a list of strings
+        if isinstance(product_id, str):
+            product_ids_for_match = [ObjectId(product_id)]
+        elif isinstance(product_id, list):
+            product_ids_for_match = [ObjectId(pid) for pid in product_id]
+        
+        # Get order IDs based on product IDs
+        # You need to ensure getOrdersListBasedonProductId correctly filters orders by these product_ids
+        ids_from_products = getOrdersListBasedonProductId(product_ids_for_match, start_date, end_date)
+        if ids_from_products:
+            match["_id"] = {"$in": ids_from_products}
+        else: # No orders found for the given product_ids, return empty results early
+            return {"results": {"items": []}}
+
+    elif brand_id:
+        # Assuming brand_id can be a single string or a list of strings
+        if isinstance(brand_id, str):
+            brand_ids_for_match = [ObjectId(brand_id)]
+        elif isinstance(brand_id, list):
+            brand_ids_for_match = [ObjectId(bid) for bid in brand_id]
+
+        # Get product IDs based on brand IDs
+        # Then use these product IDs to find corresponding orders
+        product_ids_from_brands = getproductIdListBasedonbrand(brand_ids_for_match, start_date, end_date)
+        if product_ids_from_brands:
+            # Need to get order IDs that contain these product IDs
+            # This might require another lookup or an adjustment to getOrdersListBasedonProductId
+            # For simplicity, assuming getOrdersListBasedonProductId can take product_ids
+            ids_from_brands = getOrdersListBasedonProductId(product_ids_from_brands, start_date, end_date)
+            if ids_from_brands:
+                match["_id"] = {"$in": ids_from_brands}
+            else:
+                return {"results": {"items": []}}
+        else: # No products found for the given brand_ids, return empty results early
+            return {"results": {"items": []}}
+
+
+    pipeline = [
+        {
+            "$match": match
+        },
+        {
+            "$lookup": {
+                "from": "order_items",
+                "localField": "order_items",
+                "foreignField": "_id",
+                "as": "order_items_ins"
+            }
+        },
+        {
+            "$unwind": {
+                "path": "$order_items_ins",
+                "preserveNullAndEmptyArrays": True
+            }
+        },
+        {
+            "$lookup": {
+                "from": "product", # Assuming your product collection is named 'product'
+                "localField": "order_items_ins.ProductDetails.product_id",
+                "foreignField": "_id",
+                "as": "product_ins"
+            }
+        },
+        {
+            "$unwind": {
+                "path": "$product_ins",
+                "preserveNullAndEmptyArrays": True
+            }
+        },
+        {
+            "$addFields": {
+                "chart_key_raw": "$order_date", 
+                "chart_value": chart_value_field
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "productId": "$product_ins._id",
+                    "timeBucket": {
+                        "$dateToString": {
+                            "format": chart_date_format, 
+                            "date": "$chart_key_raw"
+                        }
+                    }
+                },
+                "productTitle": {"$first": "$product_ins.product_title"},
+                "asin": {"$first": "$product_ins.product_id"}, 
+                "sellerSku": {"$first": "$product_ins.sku"},
+                "imageUrl": {"$first": "$product_ins.image_url"},
+                "total_units_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
+                "total_price_sum": {
+                    "$sum": {
+                        "$multiply": [
+                            "$order_items_ins.Pricing.ItemPrice.Amount",
+                            "$order_items_ins.ProductDetails.QuantityOrdered"
+                        ]
+                    }
+                },
+                "refund_qty_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityShipped"},
+                "hourly_or_daily_sale": {"$sum": "$chart_value"} 
+            }
+        },
+        {
+            "$group": {
+                "_id": "$_id.productId",
+                "product": {
+                    "$first": {
+                        "title": "$productTitle",
+                        "asin": "$asin",
+                        "sellerSku": "$sellerSku",
+                        "imageUrl": "$imageUrl"
+                    }
+                },
+                "chart": {
+                    "$push": {
+                        "k": "$_id.timeBucket",
+                        "v": "$hourly_or_daily_sale"
+                    }
+                },
+                "total_units": {"$sum": "$total_units_sum"},
+                "total_price": {"$sum": "$total_price_sum"},
+                "refund_qty": {"$sum": "$refund_qty_sum"}
+            }
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "product": 1,
+                "chart": {
+                    "$arrayToObject": {
+                        "$filter": {
+                            "input": "$chart",
+                            "as": "item",
+                            "cond": {
+                                "$and": [
+                                    {"$ne": ["$$item.k", None]},
+                                    {"$ne": ["$$item.v", None]},
+                                    {"$eq": [{"$type": "$$item.k"}, "string"]}
+                                ]
+                            }
+                        }
+                    }
+                },
+                "total_units": 1,
+                "total_price": 1,
+                "refund_qty": 1
+            }
+        },
+        {
+            "$sort": SON([(sort_field, -1)])
+        },
+        {
+            "$limit": 10
+        }
+    ]
+    result = list(Order.objects.aggregate(pipeline))
+    formatted_results = []
+    for item in result:
+        formatted_results.append({
+            "id" : str(item["_id"]),
+            "product": item["product"]["title"],
+            "asin": item["product"]["asin"],
+            "sku": item["product"]["sellerSku"],
+            "product_image": item["product"]["imageUrl"],
+            "total_units": item["total_units"],
+            "total_price": item["total_price"],
+            "refund_qty" : item["refund_qty"],
+            "chart": item["chart"]
+        })
+
+    data = {"results": {"items": formatted_results}}
+    return data
+
 
 def getPreviousDateRange(start_date, end_date):
 
@@ -5909,7 +6152,7 @@ def profitlosschartForProduct(request):
 @csrf_exempt
 def getrevenuedetailsForProduct(request):
     json_request = JSONParser().parse(request)
-    preset = json_request.get("preset", "Today")
+    preset = json_request.get("preset", None)
     product_id = json_request.get("product_id", None)
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
