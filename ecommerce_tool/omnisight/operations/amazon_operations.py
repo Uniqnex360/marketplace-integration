@@ -941,6 +941,7 @@ def save_or_update_pageview_session_count(data, today_date):
 
 
 def fetch_sales_traffic_report(aws_access_key_id,aws_secret_access_key,role_arn,client_id,client_secret,refresh_token,report_date,region="us-east-1"):
+    print("kkkkkkkkkkkkkkkkkkkk",report_date)
     # 1. Assume Role
     sts_client = boto3.client(
         'sts',
@@ -976,7 +977,11 @@ def fetch_sales_traffic_report(aws_access_key_id,aws_secret_access_key,role_arn,
         "reportType": "GET_SALES_AND_TRAFFIC_REPORT",
         "marketplaceIds": ["ATVPDKIKX0DER"],  # Amazon US marketplace
         "dataStartTime": report_date + "T00:00:00Z",
-        "dataEndTime": report_date + "T23:59:59Z"
+        "dataEndTime": report_date + "T23:59:59Z",
+        "reportOptions": {
+        "dateGranularity": "DAY",
+        "asinGranularity": "CHILD"
+    }
     }
 
     report_res = requests.post(create_report_url, headers=headers, data=json.dumps(body))
@@ -1015,6 +1020,7 @@ def fetch_sales_traffic_report(aws_access_key_id,aws_secret_access_key,role_arn,
         content = report_file.text
 
     report_data = json.loads(content)
+    print(report_data)
     report_start_date = datetime.strptime(report_date, '%Y-%m-%d')
     for ins in report_data.get('salesAndTrafficByAsin',[]):
         save_or_update_pageview_session_count(ins, report_start_date)
@@ -1022,11 +1028,10 @@ def fetch_sales_traffic_report(aws_access_key_id,aws_secret_access_key,role_arn,
     return True  # full raw JSON report
 
 def syncPageviews():
-    start_date = datetime.today()
+    start_date = datetime.today() - timedelta(days=2)
     report_date = start_date.strftime("%Y-%m-%d")
     fetch_sales_traffic_report(Acccess_Key, Secret_Access_Key, Role_ARN,AMAZON_API_KEY,AMAZON_SECRET_KEY,REFRESH_TOKEN,report_date,region="us-east-1")
     return True
-
 
 
 def get_and_download_report(sp_api_client, report_type, start_time, end_time):
