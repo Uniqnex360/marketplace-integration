@@ -20,7 +20,7 @@ import io
 import threading
 from queue import Queue
 # Time range for orders report (last 4 hours)
-from io import StringIO
+from io import StringIO, BytesIO
 import sys # For environment diagnostics
 from sp_api.api import Reports
 from sp_api.base import Marketplaces, SellingApiException
@@ -1029,7 +1029,6 @@ def syncPageviews():
 
 
 
-# --- Helper function to request and download a report ---
 def get_and_download_report(sp_api_client, report_type, start_time, end_time):
     TARGET_MARKETPLACE = Marketplaces.US
     try:
@@ -1039,20 +1038,16 @@ def get_and_download_report(sp_api_client, report_type, start_time, end_time):
             "dataStartTime": start_time.isoformat().split('.')[0] + 'Z',
             "dataEndTime": end_time.isoformat().split('.')[0] + 'Z'
         }
+
         print(f"  Data time range: {report_request_payload['dataStartTime']} to {report_request_payload['dataEndTime']}")
 
         # 1. Create the report request
         try:
             create_report_response = sp_api_client.create_report(**report_request_payload)
-            report_id = create_report_response.reportId
+            report_id = create_report_response.payload['reportId']
             print(f"Report request submitted. Report ID: {report_id}")
-            if not report_id:
-                print("Failed to get a report ID from the creation response.")
-                return None
         except SellingApiException as e:
             print(f"API error submitting report request {report_type}: {e}")
-            if hasattr(e, 'message'):
-                print("API Error Details:", e.message)
             return None
         except Exception as e:
             print(f"An unexpected error during report submission: {e}")
@@ -1069,12 +1064,12 @@ def get_and_download_report(sp_api_client, report_type, start_time, end_time):
             time.sleep(poll_interval)
             try:
                 get_report_response = sp_api_client.get_report(reportId=report_id)
-                report_status = get_report_response.processingStatus
-                
+                report_status = get_report_response.payload['processingStatus']
+
                 print(f" Poll {i+1}/{max_polls}: Status = {report_status}")
 
                 if report_status == 'DONE':
-                    report_document_id = get_report_response.reportDocumentId
+                    report_document_id = get_report_response.payload['reportDocumentId']
                     print("Report processing complete.")
                     break
                 elif report_status in ['FATAL', 'CANCELLED']:
@@ -1089,19 +1084,16 @@ def get_and_download_report(sp_api_client, report_type, start_time, end_time):
             print(f"Report {report_id} did not complete successfully within the polling limit.")
             return None
 
-        # 3. Download the report content
+        # 3. Download the report content (as bytes)
         print(f"Fetching report document {report_document_id}...")
         try:
             report_document = sp_api_client.get_report_document(reportDocumentId=report_document_id)
-            report_content_url = report_document.url
-            
-            # Download the report content
-            import requests
-            response = requests.get(report_content_url)
+            report_content_url = report_document.payload['url']
+            response = requests.get(report_content_url, stream=True)
             if response.status_code == 200:
-                report_content_str = response.text
+                report_bytes = response.content
                 print("Report content downloaded successfully.")
-                return report_content_str
+                return report_bytes
             else:
                 print(f"Failed to download report. Status code: {response.status_code}")
                 return None
@@ -1115,59 +1107,62 @@ def get_and_download_report(sp_api_client, report_type, start_time, end_time):
         return None
 
 def ordersAmazon():
-    # Report type for order data
-    ORDERS_REPORT_TYPE = "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL"
-    # Amazon Marketplace
-    TARGET_MARKETPLACE = Marketplaces.US  # Change to your marketplace (e.g., Marketplaces.IN for India)
+    TARGET_MARKETPLACE = Marketplaces.US  # Update for your target
 
-    # Report type for order data
     ORDERS_REPORT_TYPE = "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL"
     end_time = datetime.utcnow()
-    start_time = end_time - timedelta(hours=4)
-    print("Starting Amazon SP-API orders retrieval script for last 4 hours...")
+    start_time = end_time - timedelta(days=3)
+    print("Starting Amazon SP-API orders retrieval script for last 3 days...")
+
+    # Initialize the SP-API client credentials
+    credentials = {
+        'lwa_app_id': AMAZON_API_KEY,
+        'lwa_client_secret': AMAZON_SECRET_KEY,
+        'refresh_token': REFRESH_TOKEN,
+        'aws_access_key': Acccess_Key,
+        'aws_secret_key': Secret_Access_Key,
+        'role_arn': Role_ARN
+    }
+
     try:
-        # Initialize the SP-API client credentials
-        credentials = {
-            'lwa_app_id': AMAZON_API_KEY,
-            'lwa_client_secret': AMAZON_SECRET_KEY,
-            'refresh_token': REFRESH_TOKEN,
-            'aws_access_key': Acccess_Key,
-            'aws_secret_key': Secret_Access_Key,
-            'role_arn': Role_ARN
-        }
-        
-        # Create a Reports API client
         reports_client = Reports(
             credentials=credentials,
             marketplace=TARGET_MARKETPLACE
         )
-
     except Exception as e:
+        print(f"SP-API client initialization failed: {e}")
         sys.exit(1)
 
-    # Get the Orders Report for the last 4 hours
+    # Get the Orders Report for the last 3 days
     orders_content = get_and_download_report(
         reports_client,
         ORDERS_REPORT_TYPE,
         start_time=start_time,
         end_time=end_time
     )
+    if not orders_content:
+        print("No orders content received.")
+        return None
 
+    # Decompress and load orders into DataFrame
     orders_df = None
-    if orders_content:
+    try:
         try:
-            # Reports are typically tab-separated values (TSV)
-            orders_df = pd.read_csv(StringIO(orders_content), sep='\t', low_memory=False)
-            orders_json = orders_df.to_json(orient='records')
-            print(orders_json)
+            # Try decompressing (usual case, gzipped)
+            with gzip.GzipFile(fileobj=BytesIO(orders_content)) as gz:
+                report_content_str = gz.read().decode('utf-8')
+        except OSError:
+            # Not gzipped (rare fallback)
+            report_content_str = orders_content.decode('utf-8')
+        orders_df = pd.read_csv(StringIO(report_content_str), sep='\t', low_memory=False)
+    except pd.errors.EmptyDataError:
+        print("The downloaded report was empty. No orders found in the specified time range.")
+        orders_df = None
+    except Exception as e:
+        print(f"Error reading orders report content into DataFrame: {e}")
+        orders_df = None
 
-        except pd.errors.EmptyDataError:
-            print("The downloaded report was empty. No orders found in the specified time range.")
-            orders_df = None
-        except Exception as e:
-            print(f"Error reading orders report content into DataFrame: {e}")
-            orders_df = None
-
+    print(f"Orders DataFrame loaded: {orders_df.shape if orders_df is not None else 'None'}")
     return orders_df
 
 
