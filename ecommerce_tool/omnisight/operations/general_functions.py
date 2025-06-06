@@ -77,13 +77,13 @@ def getProductList(request):
         {
             "$lookup" : {
                 "from" : "marketplace",
-                "localField" : "marketplace_id",
+                "localField" : "marketplace_ids",
                 "foreignField" : "_id",
-                "as" : "marketplace"
+                "as" : "marketplace_ins"
             }
         },
         {
-            "$unwind" : "$marketplace"
+            "$unwind" : "$marketplace_ins"
         },
         {
             "$project" : {
@@ -98,7 +98,34 @@ def getProductList(request):
                 "published_status" : 1,
                 "category" : {"$ifNull" : ["$category",""]},  # If category is null, replace with empty string
                 "image_url" : {"$ifNull" : ["$image_url",""]},  # If image_url is null, replace with empty string
-                "marketplace_name" : "$marketplace.name",
+                "marketplace_ins": {
+                "$reduce": {
+                    "input": {"$cond": {"if": {"$isArray": "$marketplace_ins.name"}, "then": "$marketplace_ins.name", "else": ["$marketplace_ins.name"]}},
+                    "initialValue": [],
+                    "in": {
+                    "$cond": {
+                        "if": {"$in": ["$$this", "$$value"]},
+                        "then": "$$value",
+                        "else": {"$concatArrays": ["$$value", ["$$this"]]}
+                    }
+                    }
+                }
+                },
+                "marketplace_image_url": {
+                "$reduce": {
+                    "input": {"$cond": {"if": {"$isArray": "$marketplace_ins.image_url"}, "then": "$marketplace_ins.image_url", "else": ["$marketplace_ins.image_url"]}},
+                    "initialValue": [],
+                    "in": {
+                    "$cond": {
+                        "if": {"$in": ["$$this", "$$value"]},
+                        "then": "$$value",
+                        "else": {"$concatArrays": ["$$value", ["$$this"]]}
+                    }
+                    }
+                }
+                },
+                
+              
             }
         },
         {
