@@ -8,8 +8,6 @@ def sync_orders():
     walmart_orders = syncRecentWalmartOrders()
     amazon_orders = syncRecentAmazonOrders()
     print("Orders Sync completed........................")
-    sync_inventory()
-    print("Inventory Sync completed........................")
     
     return f"Synced {len(walmart_orders) + len(amazon_orders)} orders"
 
@@ -17,4 +15,13 @@ def sync_orders():
 def sync_products():
     print("PageViews Sync starting........................")
     syncPageviews()
+    return True
+
+
+
+@shared_task
+def sync_inventry():
+    print("PageViews Sync starting........................")
+    sync_inventory()
+    print("Inventory Sync completed........................")
     return True

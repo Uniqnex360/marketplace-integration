@@ -23,9 +23,13 @@ app.conf.beat_schedule = {
         'task': 'omnisight.tasks.sync_orders',
         'schedule': crontab(minute='*/30'),  # Every 30 minutes
     },
-    'sync-products-every-hour': {
-        'task': 'omnisight.tasks.sync_products',  # Replace with your actual task path
+    'sync-inventry-every-hour': {
+        'task': 'omnisight.tasks.sync_inventry',  # Replace with your actual task path
         'schedule': crontab(minute=0),  # Every hour at minute 0
+    },
+    'sync-products-every-10-hours': {
+        'task': 'omnisight.tasks.sync_products',  # Replace with your actual task path
+        'schedule': crontab(minute=0, hour='*/10'),  # Every 10 hours
     },
 }
 

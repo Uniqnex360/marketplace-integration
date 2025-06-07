@@ -42,6 +42,16 @@ def getMarketplaceList(request):
 #---------------------------------------------PRODUCT APIS---------------------------------------------------
 @csrf_exempt
 def getProductList(request):
+    pipeline = [
+            {
+                "$project" : {
+                    "_id" : 1,
+                    "name" : 1,
+                    "image_url" : 1,
+                }
+            }
+        ]
+    marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
     data = dict()
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
@@ -57,7 +67,7 @@ def getProductList(request):
     count_pipeline = []
     match = {}
     if marketplace_id != None and marketplace_id != "":
-        match['marketplace_id'] = ObjectId(marketplace_id)
+        match['marketplace_ids'] = {"$in":[ObjectId(marketplace_id)]}
     if category_name != None and category_name != "" and category_name != []:
         match['category'] = {"$in":category_name}
     if brand_id_list != None and brand_id_list != "" and brand_id_list != []:
@@ -75,17 +85,6 @@ def getProductList(request):
         count_pipeline.append(match_pipeline)
     pipeline.extend([
         {
-            "$lookup" : {
-                "from" : "marketplace",
-                "localField" : "marketplace_ids",
-                "foreignField" : "_id",
-                "as" : "marketplace_ins"
-            }
-        },
-        {
-            "$unwind" : "$marketplace_ins"
-        },
-        {
             "$project" : {
                 "_id" : 0,
                 "id" : {"$toString" : "$_id"},
@@ -98,33 +97,7 @@ def getProductList(request):
                 "published_status" : 1,
                 "category" : {"$ifNull" : ["$category",""]},  # If category is null, replace with empty string
                 "image_url" : {"$ifNull" : ["$image_url",""]},  # If image_url is null, replace with empty string
-                "marketplace_ins": {
-                "$reduce": {
-                    "input": {"$cond": {"if": {"$isArray": "$marketplace_ins.name"}, "then": "$marketplace_ins.name", "else": ["$marketplace_ins.name"]}},
-                    "initialValue": [],
-                    "in": {
-                    "$cond": {
-                        "if": {"$in": ["$$this", "$$value"]},
-                        "then": "$$value",
-                        "else": {"$concatArrays": ["$$value", ["$$this"]]}
-                    }
-                    }
-                }
-                },
-                "marketplace_image_url": {
-                "$reduce": {
-                    "input": {"$cond": {"if": {"$isArray": "$marketplace_ins.image_url"}, "then": "$marketplace_ins.image_url", "else": ["$marketplace_ins.image_url"]}},
-                    "initialValue": [],
-                    "in": {
-                    "$cond": {
-                        "if": {"$in": ["$$this", "$$value"]},
-                        "then": "$$value",
-                        "else": {"$concatArrays": ["$$value", ["$$this"]]}
-                    }
-                    }
-                }
-                },
-                
+                "marketplace_ids": {"$ifNull": ["$marketplace_ids", []]},  # If marketplace_ids is null, replace with empty list
               
             }
         },
@@ -143,7 +116,14 @@ def getProductList(request):
         }
         pipeline.append(sort)
     product_list = list(Product.objects.aggregate(*(pipeline)))
-    # Get total product count
+    for ins in product_list:
+        marketplace_ids = ins.get('marketplace_ids', [])
+        ins['marketplace_details'] = []
+        for marketplace in marketplace_list:
+            if marketplace['_id'] in marketplace_ids:
+                ins['marketplace_ins'].append(marketplace['name'])
+                ins['marketplace_image_url'].append(marketplace['image_url'])
+        del ins['marketplace_ids']
     count_pipeline.extend([
         {
             "$count": "total_count"
