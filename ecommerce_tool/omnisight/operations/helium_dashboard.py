@@ -4313,8 +4313,19 @@ def obtainChooseMatrix(request):
 
 def InsightsDashboardView(request):
 
-    all_products = Product.objects()
-    total_products = all_products.count()
+    all_products = Product.objects.only(
+        "id", "product_title", "features", "product_description",
+        "image_urls", "upc", "category",
+        "asin", "sku", "fullfillment_by_channel"
+    ).all()
+    count_pipeline = [
+        {
+            "$count": "total_count"
+        }
+    ]
+    total_count_result = list(Product.objects.aggregate(*(count_pipeline)))
+    total_products = total_count_result[0]['total_count'] if total_count_result else 0
+    # total_products = all_products.count()
     optimized_count = 0
     refund_alerts = []
     fee_alerts = []
@@ -4385,25 +4396,25 @@ def InsightsDashboardView(request):
                 "messages": alerts
             })
 
-        # Count orders using aggregation
-        pipeline = [
-            {
-                "$lookup": {
-                    "from": "order_items",
-                    "localField": "order_items",
-                    "foreignField": "_id",
-                    "as": "order_items"
-                }
-            },
-            {"$unwind": "$order_items"},
-            {
-                "$match": {
-                    "order_items.ProductDetails.product_id": ObjectId(str(product.id))
-                }
-            }
-        ]
-        orders = list(Order.objects.aggregate(*pipeline))
-        total_orders = len(orders)
+        # # Count orders using aggregation
+        # pipeline = [
+        #     {
+        #         "$lookup": {
+        #             "from": "order_items",
+        #             "localField": "order_items",
+        #             "foreignField": "_id",
+        #             "as": "order_items"
+        #         }
+        #     },
+        #     {"$unwind": "$order_items"},
+        #     {
+        #         "$match": {
+        #             "order_items.ProductDetails.product_id": ObjectId(str(product.id))
+        #         }
+        #     }
+        # ]
+        # orders = list(Order.objects.aggregate(*pipeline))
+        total_orders = 0#len(orders)
         refund_count = Refund.objects(product_id=product.id).count()
         # total_orders = 8
         if total_orders > 0:
@@ -4472,7 +4483,7 @@ def InsightsDashboardView(request):
                 "title": getattr(product, 'title', ''),
                 "asin": getattr(product, 'asin', ''),
                 "sku": getattr(product, 'sku', ''),
-                "fulfillment_channel": getattr(product, 'fulfillment_channel', ''),
+                "fulfillment_channel": "FBA" if getattr(product, 'fullfillment_by_channel', False) else "FBM",
                 "days_left": days_remaining,
                 "reorder_by": reorder_by_date.isoformat(),
                 "inventory_alert": alert_message
@@ -6312,6 +6323,7 @@ def getProductInformation(request):
         "SKU": product_obj.sku,
         "Brand": product_obj.brand_name if product_obj.brand_name else "N/A",
         "date_range": product_obj.product_created_date.strftime("%b %d, %Y") + " - Current" if product_obj.product_created_date else "N/A - Current",
+        "product_title" : product_obj.product_title if product_obj.product_title else "N/A",
         "marketplaces": []
     }
 
