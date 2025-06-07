@@ -4,6 +4,7 @@ from datetime import datetime,timedelta
 from dateutil.relativedelta import relativedelta
 from ecommerce_tool.crud import DatabaseModel
 import threading
+import pandas as pd
 
 
 
@@ -234,7 +235,7 @@ def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product
                     "shipping_address": 1,
                     "shipping_information": 1,
                     "shipping_price" : {"$ifNull": ["$ShippingPrice", 0.0]},
-                    "items_order_quantity" : {"$ifNull": ["$ItemsOrderQuantity", 0.0]},
+                    "items_order_quantity" : {"$ifNull": ["$ItemsOrderQuantity", 0]},
                 }
             }
         ]
@@ -928,3 +929,52 @@ def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None,
         "units_sold": round(total_units, 2)
     }
     return total
+
+
+
+def get_top_movers(yesterday_data, previous_day_data):
+    # Create lookup for previous day's data by SKU
+    prev_data_map = {item['sku']: item for item in previous_day_data}
+    
+    changes = []
+    
+    for item in yesterday_data:
+        sku = item['sku']
+        yesterday_units = item['unitsSold']
+        prev_units = prev_data_map.get(sku, {}).get('unitsSold', 0)
+        
+        change = yesterday_units - prev_units  # can be positive or negative
+        
+        changes.append({
+            'sku': sku,
+            "id" : item['id'],
+            "asin" : item['asin'],
+            "fulfillmentChannel" : item['fulfillmentChannel'],
+            'product_name': item['product_name'],
+            'images': item['images'],
+            "unitsSold" : yesterday_units,
+            "grossRevenue" : item['grossRevenue'],
+            "netProfit" : item['netProfit'],
+            "totalCogs" : round(item['totalCogs'],2),
+            "netProfit" : item['netProfit'],
+            'yesterday_units': yesterday_units,
+            'previous_units': prev_units,
+            'change_in_units': change,
+        })
+    
+    top_increasing = sorted(
+        [c for c in changes if c['change_in_units'] > 0],
+        key=lambda x: x['change_in_units'],
+        reverse=True
+    )[:3]
+    
+    # Top 3 decreasing
+    top_decreasing = sorted(
+        [c for c in changes if c['change_in_units'] < 0],
+        key=lambda x: x['change_in_units']
+    )[:3]
+    
+    return {
+        'top_3_products': top_increasing,
+        'least_3_products': top_decreasing
+    }

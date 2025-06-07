@@ -19,7 +19,7 @@ from bson import ObjectId
 from calendar import monthrange
 from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
 from django.db.models import Sum, Q
-from omnisight.operations.helium_utils import calculate_metricss, get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount, getproductIdListBasedonManufacture,totalRevenueCalculation,get_graph_data, totalRevenueCalculationForProduct
+from omnisight.operations.helium_utils import calculate_metricss, get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount, getproductIdListBasedonManufacture,totalRevenueCalculation,get_graph_data, totalRevenueCalculationForProduct, get_top_movers
 from ecommerce_tool.crud import DatabaseModel
 from omnisight.operations.common_utils import calculate_listing_score
 import threading
@@ -2013,26 +2013,8 @@ def allMarketplaceData(request):
     return JsonResponse(response_data, safe=False)
 
 #------------------------------------------------------------
-@csrf_exempt
-def getProductPerformanceSummary(request):
-    json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
-    brand_id = json_request.get('brand_id', [])
-    product_id = json_request.get('product_id',[])
-    manufacturer_name = json_request.get('manufacturer_name',[])
-    fulfillment_channel = json_request.get('fulfillment_channel',None)
-    preset = json_request.get('preset')
 
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
-    if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
-    else:
-        from_date, to_date = get_date_range(preset)
-
-    orders = grossRevenue(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-    
+def sales(orders):
     sku_summary = defaultdict(lambda: {
         "sku": "",
         "product_name": "",
@@ -2041,11 +2023,11 @@ def getProductPerformanceSummary(request):
         "grossRevenue": 0.0,
         "totalCogs": 0.0,
         "netProfit": 0.0,
-        "margin": 0.0
+        "margin": 0.0,
+        "vendor_funding" : 0.0
     })
 
     for order in orders:
-        order_total = order.get("order_total", 0.0)
         item_ids = order.get("order_items", [])
         fulfillmentChannel = ""
         temp_price = 0.0
@@ -2071,7 +2053,7 @@ def getProductPerformanceSummary(request):
                         "id" : "$product_ins._id",
                         "price": "$Pricing.ItemPrice.Amount",
                         "tax_price": "$Pricing.ItemTax.Amount",
-
+                        "QuantityOrdered": {"$ifNull":["$ProductDetails.QuantityOrdered",0]},
                         "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                         "sku": "$product_ins.sku",
                         "product_name": "$product_ins.product_title",
@@ -2102,9 +2084,12 @@ def getProductPerformanceSummary(request):
                 images = item_data.get("images", [])
                 price = item_data.get("price", 0.0)
                 if order['marketplace_name'] == "Amazon":
-                    cogs = item_data.get("total_cogs", 0.0) + item_data.get("vendor_funding", 0.0)
+                    cogs = item_data.get("total_cogs", 0.0)
+                    temp_units = item_data.get("QuantityOrdered", 0)
                 else:
-                    cogs = item_data.get("w_total_cogs", 0.0) + item_data.get("vendor_funding", 0.0)
+                    cogs = item_data.get("w_total_cogs", 0.0)
+                    temp_units = 1
+                vendor_funding = item_data.get("vendor_funding", 0.0)
                  
                 temp_price += price
                 total_cogs += cogs
@@ -2116,29 +2101,63 @@ def getProductPerformanceSummary(request):
                     sku_summary[sku]["product_name"] = product_name
                     sku_summary[sku]["asin"] = product_id
                     sku_summary[sku]["images"] = images
-                    sku_summary[sku]["unitsSold"] += 1
+                    sku_summary[sku]["unitsSold"] += temp_units
                     sku_summary[sku]["grossRevenue"] += price
                     sku_summary[sku]["totalCogs"] += cogs
                     sku_summary[sku]["fulfillmentChannel"] = fulfillmentChannel
+                    sku_summary[sku]["vendor_funding"] += vendor_funding
 
         # other_price = order_total - temp_price - tax_price
 
         for sku in sku_set:
             gross = sku_summary[sku]["grossRevenue"]
             cogs = sku_summary[sku]["totalCogs"]
-            net_profit = gross - cogs
+            vendor_funding = sku_summary[sku]["vendor_funding"]
+            net_profit = (gross - cogs) + vendor_funding
             margin = (net_profit / gross) * 100 if gross > 0 else 0
             sku_summary[sku]["netProfit"] = round(net_profit, 2)
             sku_summary[sku]["margin"] = round(margin, 2)
-
     sorted_skus = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
-    top_3 = sorted_skus[:3]
-    least_3 = sorted_skus[-3:] if len(sorted_skus) >= 3 else sorted_skus
+    return sorted_skus
 
-    return JsonResponse({
-        "top_3_products": top_3,
-        "least_3_products": least_3
-    })
+
+
+@csrf_exempt
+def getProductPerformanceSummary(request):
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id', None)
+    brand_id = json_request.get('brand_id', [])
+    product_id = json_request.get('product_id',[])
+    manufacturer_name = json_request.get('manufacturer_name',[])
+    fulfillment_channel = json_request.get('fulfillment_channel',None)
+    today = datetime.now()
+    yesterday_start_date = today - timedelta(days=1)
+    yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
+
+    previous_day_start_date = yesterday_start_date - timedelta(days=1)
+    previous_day_start_date = previous_day_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    previous_day_end_date = previous_day_start_date.replace(hour=23, minute=59, second=59)
+
+    def fetch_data(start_date, end_date):
+        return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
+        future_yes_data = executor.submit(fetch_data, yesterday_start_date, yesterday_end_date)
+
+        prev_data = future_prev_data.result()
+        yes_data = future_yes_data.result()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_yes_data = executor.submit(sales, yes_data)
+        future_prev_data = executor.submit(sales, prev_data)
+
+        yes_data = future_yes_data.result()
+        prev_data = future_prev_data.result()
+
+    data = get_top_movers(yes_data, prev_data)
+    return JsonResponse(data)
 
 @csrf_exempt
 def downloadProductPerformanceSummary(request):
