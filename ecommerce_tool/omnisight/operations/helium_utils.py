@@ -1,4 +1,4 @@
-from omnisight.models import Product, Order,pageview_session_count,OrderItems
+from omnisight.models import Product, Order,pageview_session_count,OrderItems,Marketplace
 from bson import ObjectId
 from datetime import datetime,timedelta
 from dateutil.relativedelta import relativedelta
@@ -183,6 +183,16 @@ def get_date_range(preset):
 
 
 def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacuture_name=[],fulfillment_channel=None):
+    pipeline = [
+            {
+                "$project" : {
+                    "_id" : 1,
+                    "name" : 1,
+                    "image_url" : 1,
+                }
+            }
+        ]
+    marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
     match=dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
     match['order_status'] = {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
@@ -210,26 +220,13 @@ def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product
                 "$match": match
             },
             {
-                "$lookup": {
-                    "from": "marketplace",
-                    "localField": "marketplace_id",
-                    "foreignField": "_id",
-                    "as": "marketplace_ins"
-                }
-            },
-            {
-                "$unwind": {
-                    "path": "$marketplace_ins",
-                    "preserveNullAndEmptyArrays": True
-                }
-            },
-            {
                 "$project": {
                     "_id" : 1,
                     "order_date": 1,
                     "order_items": 1,
                     "order_total": 1,
-                    "marketplace_name": "$marketplace_ins.name",
+                    "marketplace_id" : 1,
+                    # "marketplace_name": "$marketplace_ins.name",
                     "marketplace_id": 1,
                     "currency": 1,
                     "shipping_address": 1,
@@ -239,7 +236,12 @@ def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product
                 }
             }
         ]
-    return list(Order.objects.aggregate(*pipeline))
+    order_list = list(Order.objects.aggregate(*pipeline))
+    for order_ins in order_list:
+        for marketplace in marketplace_list:
+            order_ins['marketplace_name'] = marketplace['name']
+        del order_ins['marketplace_id']
+    return order_list
 
 
 def get_previous_periods(current_start, current_end):
