@@ -517,7 +517,8 @@ def RevenueWidgetAPIView(request):
     def fetch_compare_graph_data():
         return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    executor = ThreadPoolExecutor(max_workers=4)
+    try:
         future_total = executor.submit(fetch_total)
         future_graph_data = executor.submit(fetch_graph_data)
 
@@ -530,6 +531,8 @@ def RevenueWidgetAPIView(request):
 
             future_compare_total = executor.submit(fetch_compare_total)
             future_compare_graph_data = executor.submit(fetch_compare_graph_data)
+    finally:
+        executor.shutdown(wait=True)
 
     # Wait for results
     total = future_total.result()
@@ -1472,7 +1475,8 @@ def getPeriodWiseData(request):
     y_current_start, y_current_end = get_date_range("This Year")
     ly_current_start, ly_current_end = get_date_range("Last Year")
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    executor = ThreadPoolExecutor(max_workers=4)
+    try:
         futures = {
             "yesterday": executor.submit(format_period_metrics, "Yesterday", yes_current_start, yes_current_end, yes_previous_start, yes_previous_end),
             "last7Days": executor.submit(format_period_metrics, "Last 7 Days", l7_current_start, l7_current_end, l7_previous_start, l7_previous_end),
@@ -1480,6 +1484,8 @@ def getPeriodWiseData(request):
             "yearToDate": executor.submit(format_period_metrics, "Year to Date", y_current_start, y_current_end, ly_current_start, ly_current_end),
         }
         response_data = {key: future.result() for key, future in futures.items()}
+    finally:
+        executor.shutdown(wait=True)
 
     return JsonResponse(response_data, safe=False)
 
@@ -2142,19 +2148,25 @@ def getProductPerformanceSummary(request):
     def fetch_data(start_date, end_date):
         return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
         future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
         future_yes_data = executor.submit(fetch_data, yesterday_start_date, yesterday_end_date)
 
         prev_data = future_prev_data.result()
         yes_data = future_yes_data.result()
+    finally:
+        executor.shutdown(wait=True)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
         future_yes_data = executor.submit(sales, yes_data)
         future_prev_data = executor.submit(sales, prev_data)
 
         yes_data = future_yes_data.result()
         prev_data = future_prev_data.result()
+    finally:
+        executor.shutdown(wait=True)
 
     data = get_top_movers(yes_data, prev_data)
     return JsonResponse(data)
@@ -3389,6 +3401,7 @@ def getProfitAndLossDetails(request):
                                 "price": "$Pricing.ItemPrice.Amount",
                                 "tax_price": "$Pricing.ItemTax.Amount",
                                 "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
+                                
                                 "sku": "$product_ins.sku",
                                 "category": "$product_ins.category",
                                 "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
@@ -6323,11 +6336,15 @@ def getProductInformation(request):
         "SKU": product_obj.sku,
         "Brand": product_obj.brand_name if product_obj.brand_name else "N/A",
         "date_range": product_obj.product_created_date.strftime("%b %d, %Y") + " - Current" if product_obj.product_created_date else "N/A - Current",
-        "product_title" : product_obj.product_title if product_obj.product_title else "N/A",
+        "product_title": product_obj.product_title if product_obj.product_title else "N/A",
         "marketplaces": []
     }
 
-
+    marketplace_name = getattr(product_obj.marketplace_id, 'name', None)
+    if marketplace_name == "Amazon":
+        response_data['ASIN'] = product_obj.product_id
+    else:
+        response_data['WPID'] = product_obj.product_id
     if has_amazon:
         response_data["marketplaces"].append({
         "name": "Amazon",
