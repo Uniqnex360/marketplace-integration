@@ -98,6 +98,8 @@ def getProductList(request):
                 "category" : {"$ifNull" : ["$category",""]},  # If category is null, replace with empty string
                 "image_url" : {"$ifNull" : ["$image_url",""]},  # If image_url is null, replace with empty string
                 "marketplace_ids": {"$ifNull": ["$marketplace_ids", []]},  # If marketplace_ids is null, replace with empty list
+                "marketplace_ins": [],
+                "marketplace_image_url": [] 
               
             }
         },
