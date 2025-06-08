@@ -592,6 +592,138 @@ def RevenueWidgetAPIView(request):
 
 
 @csrf_exempt
+def RevenueWidgetAPIView(request):
+    from django.utils import timezone
+    json_request = JSONParser().parse(request)
+    preset = json_request.get("preset", "Today")
+    compare_startdate = json_request.get("compare_startdate")
+    compare_enddate = json_request.get("compare_enddate")
+    marketplace_id = json_request.get("marketplace_id", None)
+    product_id = json_request.get("product_id", None)
+    brand_id = json_request.get("brand_id", None)
+    manufacturer_name = json_request.get("manufacturer_name", None)
+    fulfillment_channel = json_request.get("fulfillment_channel", None)
+
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
+    if start_date != None and start_date != "":
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+    else:
+        start_date, end_date = get_date_range(preset)
+
+    comapre_past = get_previous_periods(start_date, end_date)
+
+    # Use threading to fetch data concurrently
+
+    def fetch_total():
+        return totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+
+    def fetch_graph_data():
+        return get_graph_data(start_date, end_date, preset, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+
+    def fetch_compare_total():
+        return totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+
+    def fetch_compare_graph_data():
+        return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+
+    executor = ThreadPoolExecutor(max_workers=4)
+    try:
+        future_total = executor.submit(fetch_total)
+        future_graph_data = executor.submit(fetch_graph_data)
+
+        compare_total = None
+        compare_graph = None
+        if compare_startdate != None and compare_startdate != "":
+            compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
+            compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
+            initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
+
+            future_compare_total = executor.submit(fetch_compare_total)
+            future_compare_graph_data = executor.submit(fetch_compare_graph_data)
+    finally:
+        executor.shutdown(wait=True)
+
+    # Wait for results
+    total = future_total.result()
+    graph_data = future_graph_data.result()
+
+    if compare_startdate != None and compare_startdate != "":
+        compare_total = future_compare_total.result()
+        compare_graph = future_compare_graph_data.result()
+
+    data = {
+        "total": total,
+        "graph": graph_data,
+        "comapre_past": comapre_past
+    }
+
+    if compare_total:
+        difference = {
+            "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
+            "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
+            "profit_margin": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0, 2),
+            "orders": round(((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0, 2),
+            "units_sold": round(((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0, 2),
+            "refund_amount": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0, 2),
+            "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
+        }
+        data['compare_total'] = difference
+        data['previous_total'] = compare_total
+        data['compare_graph'] = compare_graph
+        updated_graph = {}
+        for index, (key, metrics) in enumerate(graph_data.items()):
+            compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
+            updated_graph[key] = {
+            "gross_revenue": metrics.get("gross_revenue", 0),
+            "net_profit": metrics.get("net_profit", 0),
+            "profit_margin": metrics.get("profit_margin", 0),
+            "orders": metrics.get("orders", 0),
+            "units_sold": metrics.get("units_sold", 0),
+            "refund_amount": metrics.get("refund_amount", 0),
+            "refund_quantity": metrics.get("refund_quantity", 0),
+            "compare_gross_revenue": compare_metrics.get("gross_revenue", 0),
+            "compare_net_profit": compare_metrics.get("net_profit", 0),
+            "compare_profit_margin": compare_metrics.get("profit_margin", 0),
+            "compare_orders": compare_metrics.get("orders", 0),
+            "compare_units_sold": compare_metrics.get("units_sold", 0),
+            "compare_refund_amount": compare_metrics.get("refund_amount", 0),
+            "compare_refund_quantity": compare_metrics.get("refund_quantity", 0),
+            "compare_date": list(compare_graph.keys())[index] if index < len(compare_graph) else None
+            }
+        data['updated_graph'] = updated_graph
+
+    # Apply filters based on chooseMatrix
+    name = "Revenue"
+    item_pipeline = [
+        {"$match": {"name": name}}
+    ]
+    item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
+    if item_result:
+        item_result = item_result[0]
+
+        if item_result['select_all']:
+            pass
+        if item_result['gross_revenue'] == False:
+            del data['total']["gross_revenue"]
+        if item_result['units_sold'] == False:
+            del data['total']["units_sold"]
+        if item_result['refund_quantity'] == False:
+            del data['total']["refund_quantity"]
+        if item_result['refund_amount'] == False:
+            del data['total']["refund_amount"]
+        if item_result['net_profit'] == False:
+            del data['total']["net_profit"]
+        if item_result['profit_margin'] == False:
+            del data['total']["profit_margin"]
+        if item_result['orders'] == False:
+            del data['total']["orders"]
+
+    return data
+
+
+@csrf_exempt
 def get_top_products(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
