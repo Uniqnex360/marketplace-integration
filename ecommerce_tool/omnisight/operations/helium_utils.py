@@ -774,15 +774,14 @@ def calculate_metricss(
         { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
         {
             "$project": {
+                "p_id" : "$product_ins._id",
                 "price": "$Pricing.ItemPrice.Amount",
                 "tax_price": "$Pricing.ItemTax.Amount",
                 "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
                 "sku": "$product_ins.sku",
                 "total_cogs": { "$ifNull": ["$product_ins.total_cogs", 0] },
                 "w_total_cogs": { "$ifNull": ["$product_ins.w_total_cogs", 0] },
-                "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] },
-                "page_views": "$product_ins.page_views",
-                "sessions": "$product_ins.sessions"
+                "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] }
             }
         }
     ]
@@ -809,11 +808,37 @@ def calculate_metricss(
                 if item_data.get('sku'):
                     sku_set.add(item_data['sku'])
 
-                # Sessions and Page Views (use last non-null)
-                if item_data.get("page_views"):
-                    page_views = item_data["page_views"]
-                if item_data.get("sessions"):
-                    sessions = item_data["sessions"]
+                try:
+                    pipeline = [
+                        {
+                            "$match": {
+                                "product_id": {"$in": [item_data['p_id']]},
+                                "date": {"$gte": from_date, "$lte": to_date}
+                            }
+                        },
+                        {
+                            "$group": {
+                                "_id": None,
+                                "page_views": {"$sum": "$page_views"},
+                                "sessions": {"$sum": "$sessions"}
+                            }
+                        },
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "page_views": 1,
+                                "sessions": 1
+                            }
+                        }
+                    ]
+                    result = list(pageview_session_count.objects.aggregate(*pipeline))
+                    for P_ins in result:
+                        page_views += P_ins.get('page_views', 0)
+                        sessions += P_ins.get('sessions', 0)
+
+                    del item_data['p_id']
+                except:
+                    pass
 
     net_profit = (temp_price - total_cogs) + vendor_funding
     margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0

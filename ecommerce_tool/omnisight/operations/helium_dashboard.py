@@ -592,7 +592,7 @@ def RevenueWidgetAPIView(request):
 
 
 @csrf_exempt
-def RevenueWidgetAPIView(request):
+def updatedRevenueWidgetAPIView(request):
     from django.utils import timezone
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
@@ -606,11 +606,15 @@ def RevenueWidgetAPIView(request):
 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
+
+
     if start_date != None and start_date != "":
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
     else:
         start_date, end_date = get_date_range(preset)
+
+
 
     comapre_past = get_previous_periods(start_date, end_date)
 
@@ -628,8 +632,7 @@ def RevenueWidgetAPIView(request):
     def fetch_compare_graph_data():
         return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
 
-    executor = ThreadPoolExecutor(max_workers=4)
-    try:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         future_total = executor.submit(fetch_total)
         future_graph_data = executor.submit(fetch_graph_data)
 
@@ -642,24 +645,56 @@ def RevenueWidgetAPIView(request):
 
             future_compare_total = executor.submit(fetch_compare_total)
             future_compare_graph_data = executor.submit(fetch_compare_graph_data)
-    finally:
-        executor.shutdown(wait=True)
 
     # Wait for results
     total = future_total.result()
     graph_data = future_graph_data.result()
 
+    updated_graph = {}
     if compare_startdate != None and compare_startdate != "":
         compare_total = future_compare_total.result()
         compare_graph = future_compare_graph_data.result()
 
+        for index, (key, metrics) in enumerate(graph_data.items()):
+            compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
+            updated_graph[key] = {
+                "current_date": key,
+                "gross_revenue": metrics.get("gross_revenue", 0),
+                "net_profit": metrics.get("net_profit", 0),
+                "profit_margin": metrics.get("profit_margin", 0),
+                "orders": metrics.get("orders", 0),
+                "units_sold": metrics.get("units_sold", 0),
+                "refund_amount": metrics.get("refund_amount", 0),
+                "refund_quantity": metrics.get("refund_quantity", 0),
+                "compare_gross_revenue": compare_metrics.get("gross_revenue", 0),
+                "compare_net_profit": compare_metrics.get("net_profit", 0),
+                "compare_profit_margin": compare_metrics.get("profit_margin", 0),
+                "compare_orders": compare_metrics.get("orders", 0),
+                "compare_units_sold": compare_metrics.get("units_sold", 0),
+                "compare_refund_amount": compare_metrics.get("refund_amount", 0),
+                "compare_refund_quantity": compare_metrics.get("refund_quantity", 0),
+                "compare_date": list(compare_graph.keys())[index] if index < len(compare_graph) else None
+            }
+    else:
+        for key, metrics in graph_data.items():
+            updated_graph[key] = {
+                "current_date": key,
+                "gross_revenue": metrics.get("gross_revenue", 0),
+                "net_profit": metrics.get("net_profit", 0),
+                "profit_margin": metrics.get("profit_margin", 0),
+                "orders": metrics.get("orders", 0),
+                "units_sold": metrics.get("units_sold", 0),
+                "refund_amount": metrics.get("refund_amount", 0),
+                "refund_quantity": metrics.get("refund_quantity", 0),
+            }
+
     data = {
         "total": total,
-        "graph": graph_data,
+        "graph": updated_graph,
         "comapre_past": comapre_past
     }
 
-    if compare_total:
+    if compare_startdate != None and compare_startdate != "":
         difference = {
             "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
             "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
@@ -670,29 +705,6 @@ def RevenueWidgetAPIView(request):
             "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
         }
         data['compare_total'] = difference
-        data['previous_total'] = compare_total
-        data['compare_graph'] = compare_graph
-        updated_graph = {}
-        for index, (key, metrics) in enumerate(graph_data.items()):
-            compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
-            updated_graph[key] = {
-            "gross_revenue": metrics.get("gross_revenue", 0),
-            "net_profit": metrics.get("net_profit", 0),
-            "profit_margin": metrics.get("profit_margin", 0),
-            "orders": metrics.get("orders", 0),
-            "units_sold": metrics.get("units_sold", 0),
-            "refund_amount": metrics.get("refund_amount", 0),
-            "refund_quantity": metrics.get("refund_quantity", 0),
-            "compare_gross_revenue": compare_metrics.get("gross_revenue", 0),
-            "compare_net_profit": compare_metrics.get("net_profit", 0),
-            "compare_profit_margin": compare_metrics.get("profit_margin", 0),
-            "compare_orders": compare_metrics.get("orders", 0),
-            "compare_units_sold": compare_metrics.get("units_sold", 0),
-            "compare_refund_amount": compare_metrics.get("refund_amount", 0),
-            "compare_refund_quantity": compare_metrics.get("refund_quantity", 0),
-            "compare_date": list(compare_graph.keys())[index] if index < len(compare_graph) else None
-            }
-        data['updated_graph'] = updated_graph
 
     # Apply filters based on chooseMatrix
     name = "Revenue"
@@ -1558,23 +1570,36 @@ def getPeriodWiseData(request):
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
+    timezone_str = json_request.get('timezone', 'US/Pacific')
+    local_tz = pytz.timezone(timezone_str)
 
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    def adjust_to_timezone(date_range):
+        start, end = date_range
+        start = local_tz.localize(start).astimezone(pytz.utc)
+        end = local_tz.localize(end).astimezone(pytz.utc)
+        return start, end
+
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
-        current_metrics = calculate_metricss(current_start, current_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
-        previous_metrics = calculate_metricss(prev_start, prev_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+        # Optimize by aggregating data in bulk instead of fetching individual documents
+        current_metrics = calculate_metricss(
+            current_start, current_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel
+        )
+        previous_metrics = calculate_metricss(
+            prev_start, prev_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel
+        )
 
         if label in ['Today', 'Yesterday']:
             period = {
-                "current": { "from": to_utc_format(current_start) },
-                "previous": { "from": to_utc_format(prev_start) }
+                "current": {"from": to_utc_format(current_start)},
+                "previous": {"from": to_utc_format(prev_start)}
             }
         else:
             period = {
-                "current": { "from": to_utc_format(current_start), "to": to_utc_format(current_end) },
-                "previous": { "from": to_utc_format(prev_start), "to": to_utc_format(prev_end) }
+                "current": {"from": to_utc_format(current_start), "to": to_utc_format(current_end)},
+                "previous": {"from": to_utc_format(prev_start), "to": to_utc_format(prev_end)}
             }
 
         output = {
@@ -1591,33 +1616,40 @@ def getPeriodWiseData(request):
 
         return output
 
-    # Date ranges
-    yes_current_start, yes_current_end = get_date_range("Yesterday")
-    yes_previous_start = yes_current_start - timedelta(days=1)
-    yes_previous_end = yes_current_start - timedelta(seconds=1)
+    # Precompute date ranges and adjust to timezone
+    date_ranges = {
+        "yesterday": adjust_to_timezone(get_date_range("Yesterday")),
+        "last7Days": adjust_to_timezone(get_date_range("Last 7 days")),
+        "last30Days": adjust_to_timezone(get_date_range("Last 30 days")),
+        "yearToDate": adjust_to_timezone(get_date_range("This Year")),
+        "lastYear": adjust_to_timezone(get_date_range("Last Year"))
+    }
 
-    l7_current_start, l7_current_end = get_date_range("Last 7 days")
-    l7_previous_start = l7_current_start - timedelta(days=7)
-    l7_previous_end = l7_current_start - timedelta(seconds=1)
-
-    l30_current_start, l30_current_end = get_date_range("Last 30 days")
-    l30_previous_start = l30_current_start - timedelta(days=30)
-    l30_previous_end = l30_current_start - timedelta(seconds=1)
-
-    y_current_start, y_current_end = get_date_range("This Year")
-    ly_current_start, ly_current_end = get_date_range("Last Year")
-
-    executor = ThreadPoolExecutor(max_workers=4)
-    try:
+    # Use threading to parallelize metric calculations
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
-            "yesterday": executor.submit(format_period_metrics, "Yesterday", yes_current_start, yes_current_end, yes_previous_start, yes_previous_end),
-            "last7Days": executor.submit(format_period_metrics, "Last 7 Days", l7_current_start, l7_current_end, l7_previous_start, l7_previous_end),
-            "last30Days": executor.submit(format_period_metrics, "Last 30 Days", l30_current_start, l30_current_end, l30_previous_start, l30_previous_end),
-            "yearToDate": executor.submit(format_period_metrics, "Year to Date", y_current_start, y_current_end, ly_current_start, ly_current_end),
+            "yesterday": executor.submit(
+                format_period_metrics, "Yesterday",
+                date_ranges["yesterday"][0], date_ranges["yesterday"][1],
+                date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)
+            ),
+            "last7Days": executor.submit(
+                format_period_metrics, "Last 7 Days",
+                date_ranges["last7Days"][0], date_ranges["last7Days"][1],
+                date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][0] - timedelta(seconds=1)
+            ),
+            "last30Days": executor.submit(
+                format_period_metrics, "Last 30 Days",
+                date_ranges["last30Days"][0], date_ranges["last30Days"][1],
+                date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][0] - timedelta(seconds=1)
+            ),
+            "yearToDate": executor.submit(
+                format_period_metrics, "Year to Date",
+                date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
+                date_ranges["lastYear"][0], date_ranges["lastYear"][1]
+            ),
         }
         response_data = {key: future.result() for key, future in futures.items()}
-    finally:
-        executor.shutdown(wait=True)
 
     return JsonResponse(response_data, safe=False)
 
@@ -2280,25 +2312,19 @@ def getProductPerformanceSummary(request):
     def fetch_data(start_date, end_date):
         return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
 
-    executor = ThreadPoolExecutor(max_workers=2)
-    try:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
         future_yes_data = executor.submit(fetch_data, yesterday_start_date, yesterday_end_date)
 
         prev_data = future_prev_data.result()
         yes_data = future_yes_data.result()
-    finally:
-        executor.shutdown(wait=True)
 
-    executor = ThreadPoolExecutor(max_workers=2)
-    try:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         future_yes_data = executor.submit(sales, yes_data)
         future_prev_data = executor.submit(sales, prev_data)
 
         yes_data = future_yes_data.result()
         prev_data = future_prev_data.result()
-    finally:
-        executor.shutdown(wait=True)
 
     data = get_top_movers(yes_data, prev_data)
     return JsonResponse(data)
@@ -3483,6 +3509,8 @@ def getProfitAndLossDetails(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
+    timezone = json_request.get('timezone', 'US/Pacific')
+    local_tz = pytz.timezone(timezone)
 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
@@ -3491,6 +3519,10 @@ def getProfitAndLossDetails(request):
         to_date = datetime.strptime(end_date, '%Y-%m-%d')
     else:
         from_date, to_date = get_date_range(preset)
+
+    # Adjust start_date and end_date to the provided timezone
+    from_date = local_tz.localize(from_date).astimezone(pytz.utc)
+    to_date = local_tz.localize(to_date).astimezone(pytz.utc)
     
     def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
         gross_revenue = 0
@@ -3499,6 +3531,8 @@ def getProfitAndLossDetails(request):
         net_profit = 0
         margin = 0
         total_units = 0
+        shipping_cost = 0
+        channel_fee = 0
         sku_set = set()
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
@@ -3513,7 +3547,7 @@ def getProfitAndLossDetails(request):
             for order in result:
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
-                tax_price = 0
+                # tax_price = 0
                 
                 for item_id in order['order_items']:
                     item_pipeline = [
@@ -3539,6 +3573,10 @@ def getProfitAndLossDetails(request):
                                 "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
                             "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
                             "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
+                            "a_shipping_cost" : {"$ifNull":["$product_ins.a_shipping_cost",0]},
+                            "w_shiping_cost" : {"$ifNull":["$product_ins.w_shiping_cost",0]},
+                            "referral_fee" : {"$ifNull":["$product_ins.referral_fee",0]},
+                            "walmart_fee" : {"$ifNull":["$product_ins.walmart_fee",0]},
                             }
                         }
                     ]
@@ -3548,9 +3586,14 @@ def getProfitAndLossDetails(request):
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
                         if order['marketplace_name'] == "Amazon":
-                            total_cogs += item_data['total_cogs'] 
+                            total_cogs += item_data['total_cogs']
+                            shipping_cost += item_data['a_shipping_cost']
+                            channel_fee += item_data['referral_fee']
                         else:
                             total_cogs += item_data['w_total_cogs']
+                            shipping_cost += item_data['w_shiping_cost']
+                            channel_fee += item_data['walmart_fee']
+
                         vendor_funding += item_data['vendor_funding']
                         total_units += 1
                         if item_data.get('sku'):
@@ -3589,10 +3632,11 @@ def getProfitAndLossDetails(request):
             "tax_price":tax_price,
             "total_cogs":total_cogs,
             "product_cost":order_total,
-            "shipping_cost":0,
+            "shipping_cost":shipping_cost,
             "productCategories": product_categories,  # Added product distribution data
             "productCompleteness": product_completeness,  # Added product completeness data
             'base_price':temp_price,
+            'channel_fee' : channel_fee
         }
 
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,preset):
@@ -3622,7 +3666,9 @@ def getProfitAndLossDetails(request):
                     "pageViews": with_delta("pageViews"),
                     "unitSessionPercentage": with_delta("unitSessionPercentage"),
                     "margin": with_delta("margin"),
-                    "roi": with_delta("roi")
+                    "roi": with_delta("roi"),
+                    "channel_fee" : with_delta("channel_fee"),
+
                 },
                 "netProfitCalculation": {
                     "current": {
@@ -3639,6 +3685,7 @@ def getProfitAndLossDetails(request):
                         "product_cost": current["product_cost"],
                         "base_price": current["base_price"],
                         "shipping_cost": current["shipping_cost"],
+                        "channel_fee" : current["channel_fee"],
                     },
                     "previous": {
                         "gross": previous["grossRevenue"],
@@ -3654,6 +3701,7 @@ def getProfitAndLossDetails(request):
                         "product_cost": previous["product_cost"],
                         "base_price": current["base_price"],
                         "shipping_cost": previous["shipping_cost"],
+                        "channel_fee" : previous["channel_fee"]
                     }
                 },
                 "charts": {
@@ -3746,11 +3794,26 @@ def profit_loss_chart(request):
 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
+
+
+    timezone = json_request.get('timezone', 'US/Pacific')
+    local_tz = pytz.timezone(timezone)
+
+   
     if start_date != None and start_date != "":
         from_date = datetime.strptime(start_date, '%Y-%m-%d')
         to_date = datetime.strptime(end_date, '%Y-%m-%d')
     else:
         from_date, to_date = get_date_range(preset)
+
+    # Adjust start_date and end_date to the provided timezone
+    from_date = local_tz.localize(from_date).astimezone(pytz.utc)
+    to_date = local_tz.localize(to_date).astimezone(pytz.utc)
+
+
+
+
+
     def get_month_range(year, month):
         start_date = datetime(year, month, 1)
         last_day = monthrange(year, month)[1]
@@ -3779,7 +3842,7 @@ def profit_loss_chart(request):
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
             # temp_price = 0
-            tax_price = 0
+            
 
             for item_id in order.get("order_items", []):
                 item_pipeline = [
@@ -5895,6 +5958,10 @@ def getProfitAndLossDetailsForProduct(request):
     product_id = json_request.get('product_id')
     preset = json_request.get('preset')
 
+    preset = json_request.get('preset')
+    timezone = json_request.get('timezone')
+    
+
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
     if start_date != None and start_date != "":
@@ -5902,14 +5969,21 @@ def getProfitAndLossDetailsForProduct(request):
         to_date = datetime.strptime(end_date, '%Y-%m-%d')
     else:
         from_date, to_date = get_date_range(preset)
+    if timezone:
+        local_tz = pytz.timezone(timezone)
+        # Adjust start_date and end_date to the provided timezone
+        from_date = local_tz.localize(from_date).astimezone(pytz.utc)
+        to_date = local_tz.localize(to_date).astimezone(pytz.utc)
     
-    def calculate_metrics(start_date, end_date,marketplace_id=None,brand_id=[],product_id=[],manufacturer_name=[],fulfillment_channel=[]):
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
         net_profit = 0
         margin = 0
         total_units = 0
+        shipping_cost = 0
+        channel_fee = 0
         sku_set = set()
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
@@ -5924,7 +5998,7 @@ def getProfitAndLossDetailsForProduct(request):
             for order in result:
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
-                tax_price = 0
+                # tax_price = 0
                 
                 for item_id in order['order_items']:
                     item_pipeline = [
@@ -5944,11 +6018,16 @@ def getProfitAndLossDetailsForProduct(request):
                                 "price": "$Pricing.ItemPrice.Amount",
                                 "tax_price": "$Pricing.ItemTax.Amount",
                                 "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
+                                
                                 "sku": "$product_ins.sku",
                                 "category": "$product_ins.category",
                                 "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
                             "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
                             "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
+                            "a_shipping_cost" : {"$ifNull":["$product_ins.a_shipping_cost",0]},
+                            "w_shiping_cost" : {"$ifNull":["$product_ins.w_shiping_cost",0]},
+                            "referral_fee" : {"$ifNull":["$product_ins.referral_fee",0]},
+                            "walmart_fee" : {"$ifNull":["$product_ins.walmart_fee",0]},
                             }
                         }
                     ]
@@ -5958,9 +6037,14 @@ def getProfitAndLossDetailsForProduct(request):
                         temp_price += item_data['price']
                         tax_price += item_data['tax_price']
                         if order['marketplace_name'] == "Amazon":
-                            total_cogs += item_data['total_cogs'] 
+                            total_cogs += item_data['total_cogs']
+                            shipping_cost += item_data['a_shipping_cost']
+                            channel_fee += item_data['referral_fee']
                         else:
                             total_cogs += item_data['w_total_cogs']
+                            shipping_cost += item_data['w_shiping_cost']
+                            channel_fee += item_data['walmart_fee']
+
                         vendor_funding += item_data['vendor_funding']
                         total_units += 1
                         if item_data.get('sku'):
@@ -5999,10 +6083,11 @@ def getProfitAndLossDetailsForProduct(request):
             "tax_price":tax_price,
             "total_cogs":total_cogs,
             "product_cost":order_total,
-            "shipping_cost":0,
+            "shipping_cost":shipping_cost,
             "productCategories": product_categories,  # Added product distribution data
             "productCompleteness": product_completeness,  # Added product completeness data
             'base_price':temp_price,
+            'channel_fee' : channel_fee
         }
 
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id=None,brand_id=[],product_id=[],manufacturer_name=[],fulfillment_channel=[],preset=None):
@@ -6049,6 +6134,7 @@ def getProfitAndLossDetailsForProduct(request):
                         "product_cost": current["product_cost"],
                         "base_price": current["base_price"],
                         "shipping_cost": current["shipping_cost"],
+                        "channel_fee" : current["channel_fee"]
                     },
                     "previous": {
                         "gross": previous["grossRevenue"],
@@ -6064,6 +6150,7 @@ def getProfitAndLossDetailsForProduct(request):
                         "product_cost": previous["product_cost"],
                         "base_price": current["base_price"],
                         "shipping_cost": previous["shipping_cost"],
+                        "channel_fee" : previous["channel_fee"]
                     }
                 },
                 "charts": {

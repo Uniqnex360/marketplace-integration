@@ -612,8 +612,22 @@ def syncRecentWalmartOrders():
 
     def process_order(row):
         po_id = str(row.get('purchaseOrderId', ""))
-        order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": po_id})
-        if order_obj is not None:
+        p = [
+                {
+                    "$match": {
+                        "purchase_order_id": po_id
+                    }
+                },
+                {"$limit": 1},
+                {
+                    "$project": {
+                        "_id": 1,
+                        "order_items": 1,
+                    }
+                }
+            ]
+        order_obj = list(Order.objects.aggregate(p))
+        if order_obj is not None and order_obj != []:
             print(f"Order with purchase order ID {po_id} already exists. Skipping...")
             DatabaseModel.update_documents(Order.objects, {"purchase_order_id": po_id},
                                            {"order_status": row['orderLines']['orderLine'][0]['orderLineStatuses']['orderLineStatus'][0]['status']})

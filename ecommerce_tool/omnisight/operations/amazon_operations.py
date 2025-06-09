@@ -1245,8 +1245,21 @@ def syncRecentAmazonOrders():
                 print(f"Order with purchase order ID {purchase_order_id} CREATE NEW...")
                 order_items = list()
                 try:
-                    product = DatabaseModel.get_document(Product.objects, {"sku": sku}, ["id"])
-                    product_id = product.id if product else None
+                    p = [
+                        {
+                            "$match": {
+                                "sku": sku
+                            }
+                        },
+                        {"$limit": 1},
+                        {
+                            "$project": {
+                                "_id": 1
+                            }
+                        }
+                    ]
+                    p_obj = list(Product.objects.aggregate(p))
+                    product_id = p_obj['_id'] if p_obj != [] else None
                 except:
                     product_id = None
 

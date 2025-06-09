@@ -21,7 +21,7 @@ from omnisight.operations.general_functions import getMarketplaceList, getProduc
 
 from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders,ShipStationShippingCostAPIView
 
-from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist,InsightsProductWise,getCitywiseSales,exportCitywiseSalesExcel,downloadCitywiseSalesCSV,obtainManufactureNames, getBrandListforfilter,productsDetailsPageSummary,productsSalesOverview, productsListingQualityScore, productsTrafficandConversions, getProfitAndLossDetailsForProduct, profitlosschartForProduct, getrevenuedetailsForProduct, getInventryLogForProductdaywise, getProductInformation
+from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist,InsightsProductWise,getCitywiseSales,exportCitywiseSalesExcel,downloadCitywiseSalesCSV,obtainManufactureNames, getBrandListforfilter,productsDetailsPageSummary,productsSalesOverview, productsListingQualityScore, productsTrafficandConversions, getProfitAndLossDetailsForProduct, profitlosschartForProduct, getrevenuedetailsForProduct, getInventryLogForProductdaywise, getProductInformation, updatedRevenueWidgetAPIView
 
 
 
@@ -34,6 +34,7 @@ urlpatterns = [
     path('forgotPassword/',forgotPassword,name="forgotPassword"),
     path('changePassword/',changePassword,name="changePassword"),
     path('fetchAllorders1/',fetchAllorders1,name="fetchAllorders1"),
+    path('updatedRevenueWidgetAPIView/', updatedRevenueWidgetAPIView, name='updatedRevenueWidgetAPIView'),
 
     # path('fetchBrand/',fetchBrand,name='fetch Brand'),
 
