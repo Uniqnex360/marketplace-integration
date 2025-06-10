@@ -5,6 +5,7 @@ from dateutil.relativedelta import relativedelta
 from ecommerce_tool.crud import DatabaseModel
 import threading
 import pandas as pd
+from pytz import timezone
 
 
 
@@ -132,8 +133,14 @@ def getproductIdListBasedonManufacture(manufactureName = [],start_date=None, end
         orders = getOrdersListBasedonProductId(products[0]['productIds'],start_date, end_date)
     return orders
 
-def get_date_range(preset):
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+def get_date_range(preset, time_zone_str="UTC"):
+
+    # Get the timezone object
+    tz = timezone(time_zone_str)
+
+    # Get today's date in the specified timezone
+    now = datetime.now(tz)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     if preset == "Today":
         start = today
@@ -752,6 +759,7 @@ def calculate_metricss(
     tax_price = 0
     sessions = 0
     page_views = 0
+    shipping_cost = 0
     unitSessionPercentage = 0
     sku_set = set()
 
@@ -781,14 +789,18 @@ def calculate_metricss(
                 "sku": "$product_ins.sku",
                 "total_cogs": { "$ifNull": ["$product_ins.total_cogs", 0] },
                 "w_total_cogs": { "$ifNull": ["$product_ins.w_total_cogs", 0] },
-                "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] }
+                "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] },
+                "a_shipping_cost" : {"$ifNull":["$product_ins.a_shipping_cost",0]},
+                "w_shiping_cost" : {"$ifNull":["$product_ins.w_shiping_cost",0]},
             }
         }
     ]
 
     item_details_map = {str(item['_id']): item for item in OrderItems.objects.aggregate(*item_pipeline)}
 
-    for order in result:
+    def process_order(order):
+        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost
+
         gross_revenue += order['order_total']
         for item_id in order['order_items']:
             item_data = item_details_map.get(str(item_id))
@@ -799,8 +811,10 @@ def calculate_metricss(
                 # Amazon vs Non-Amazon COGS
                 if order.get('marketplace_name') == "Amazon":
                     total_cogs += item_data.get('total_cogs', 0)
+                    shipping_cost += item_data.get('a_shipping_cost', 0)
                 else:
                     total_cogs += item_data.get('w_total_cogs', 0)
+                    shipping_cost += item_data.get('w_shiping_cost', 0)
 
                 vendor_funding += item_data.get('vendor_funding', 0)
                 total_units += 1
@@ -840,6 +854,17 @@ def calculate_metricss(
                 except:
                     pass
 
+    # Process orders in parallel using threads
+    threads = []
+    for order in result:
+        thread = threading.Thread(target=process_order, args=(order,))
+        threads.append(thread)
+        thread.start()
+
+    # Wait for all threads to complete
+    for thread in threads:
+        thread.join()
+
     net_profit = (temp_price - total_cogs) + vendor_funding
     margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
     unitSessionPercentage = (total_units / sessions) * 100 if sessions else 0
@@ -864,8 +889,8 @@ def calculate_metricss(
             "seller": "",
             "tax_price": round(tax_price, 2),
             "total_cogs": round(total_cogs, 2),
-            "product_cost": 0,
-            "shipping_cost": 0,
+            "product_cost": round(temp_price, 2),
+            "shipping_cost": round(shipping_cost,2),
         })
 
     return base_result

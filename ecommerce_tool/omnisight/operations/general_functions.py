@@ -167,6 +167,11 @@ def getProductCategoryList(request):
                 "product_count": {"$size": "$products"}
             }
         },
+        {
+            "$match": {
+                "product_count": {"$gt": 0}
+            }
+        }
     ]
     category_list = list(Category.objects.aggregate(*(pipeline)))
     data['category_list'] = category_list

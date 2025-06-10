@@ -492,14 +492,16 @@ def RevenueWidgetAPIView(request):
     brand_id = json_request.get("brand_id", None)
     manufacturer_name = json_request.get("manufacturer_name", None)
     fulfillment_channel = json_request.get("fulfillment_channel", None)
-
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
+    timezone_str = json_request.get('timezone', 'US/Pacific')
+
+    
     if start_date != None and start_date != "":
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
     else:
-        start_date, end_date = get_date_range(preset)
+        start_date, end_date = get_date_range(preset,timezone_str)
 
     comapre_past = get_previous_periods(start_date, end_date)
 
@@ -603,6 +605,7 @@ def updatedRevenueWidgetAPIView(request):
     brand_id = json_request.get("brand_id", None)
     manufacturer_name = json_request.get("manufacturer_name", None)
     fulfillment_channel = json_request.get("fulfillment_channel", None)
+    timezone_str = json_request.get('timezone', 'US/Pacific')
 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
@@ -612,7 +615,7 @@ def updatedRevenueWidgetAPIView(request):
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
     else:
-        start_date, end_date = get_date_range(preset)
+        start_date, end_date = get_date_range(preset,timezone_str)
 
 
 
@@ -735,167 +738,167 @@ def updatedRevenueWidgetAPIView(request):
     return data
 
 
-@csrf_exempt
-def get_top_products(request):
-    json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
-    brand_id = json_request.get('brand_id', None)
-    product_id = json_request.get('product_id', None)
-    metric = json_request.get("sortBy", "units_sold")  # 'price', 'refund', etc.
-    preset = json_request.get("preset", "Today")  # today, yesterday, last_7_days
+# @csrf_exempt
+# def get_top_products(request):
+#     json_request = JSONParser().parse(request)
+#     marketplace_id = json_request.get('marketplace_id', None)
+#     brand_id = json_request.get('brand_id', None)
+#     product_id = json_request.get('product_id', None)
+#     metric = json_request.get("sortBy", "units_sold")  # 'price', 'refund', etc.
+#     preset = json_request.get("preset", "Today")  # today, yesterday, last_7_days
 
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
-    if start_date != None and start_date != "":
-        start_date = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date, '%Y-%m-%d')
-    else:
-        start_date, end_date = get_date_range(preset)
+#     start_date = json_request.get("start_date", None)
+#     end_date = json_request.get("end_date", None)
+#     if start_date != None and start_date != "":
+#         start_date = datetime.strptime(start_date, '%Y-%m-%d')
+#         end_date = datetime.strptime(end_date, '%Y-%m-%d')
+#     else:
+#         start_date, end_date = get_date_range(preset)
 
-    # Decide which field to sort by
-    sort_field = {
-        "units_sold": "total_units",
-        "price": "total_price",
-        "refund": "refund_qty"
-    }.get(metric, "total_units")
+#     # Decide which field to sort by
+#     sort_field = {
+#         "units_sold": "total_units",
+#         "price": "total_price",
+#         "refund": "refund_qty"
+#     }.get(metric, "total_units")
 
-    # Decide which field to use for chart values
-    chart_value_field = {
-        "units_sold": "$order_items_ins.ProductDetails.QuantityOrdered",
-        "price": {
-            "$multiply": [
-                "$order_items_ins.Pricing.ItemPrice.Amount",
-                "$order_items_ins.ProductDetails.QuantityOrdered"
-            ]
-        },
-        "refund": "$order_items_ins.ProductDetails.QuantityShipped"
-    }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
-    match = dict()
-    match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
-    if metric == "refund":
-        match['order_status'] = "Refunded"
-    if product_id != None and product_id != "" and product_id != []:
-        product_id = [ObjectId(pid) for pid in product_id]
-        ids = getOrdersListBasedonProductId(product_id,start_date, end_date)
-        match["_id"] = {"$in": ids}
+#     # Decide which field to use for chart values
+#     chart_value_field = {
+#         "units_sold": "$order_items_ins.ProductDetails.QuantityOrdered",
+#         "price": {
+#             "$multiply": [
+#                 "$order_items_ins.Pricing.ItemPrice.Amount",
+#                 "$order_items_ins.ProductDetails.QuantityOrdered"
+#             ]
+#         },
+#         "refund": "$order_items_ins.ProductDetails.QuantityShipped"
+#     }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
+#     match = dict()
+#     match['order_date'] = {"$gte": start_date, "$lte": end_date}
+#     match['order_status'] = {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
+#     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+#         match['marketplace_id'] = ObjectId(marketplace_id)
+#     if metric == "refund":
+#         match['order_status'] = "Refunded"
+#     if product_id != None and product_id != "" and product_id != []:
+#         product_id = [ObjectId(pid) for pid in product_id]
+#         ids = getOrdersListBasedonProductId(product_id,start_date, end_date)
+#         match["_id"] = {"$in": ids}
 
-    elif brand_id != None and brand_id != "" and brand_id != []:
-        brand_id = [ObjectId(bid) for bid in brand_id]
-        ids = getproductIdListBasedonbrand(brand_id,start_date, end_date)
-        match["_id"] = {"$in": ids}
+#     elif brand_id != None and brand_id != "" and brand_id != []:
+#         brand_id = [ObjectId(bid) for bid in brand_id]
+#         ids = getproductIdListBasedonbrand(brand_id,start_date, end_date)
+#         match["_id"] = {"$in": ids}
     
 
-    pipeline = [
-        {
-            "$match": match
-        },
-        {
-            "$lookup": {
-                "from": "order_items",
-                "localField": "order_items",
-                "foreignField": "_id",
-                "as": "order_items_ins"
-            }
-        },
-        {
-            "$unwind": {
-                "path": "$order_items_ins",
-                "preserveNullAndEmptyArrays": True
-            }
-        },
-        {
-            "$lookup": {
-                "from": "product",
-                "localField": "order_items_ins.ProductDetails.product_id",
-                "foreignField": "_id",
-                "as": "product_ins"
-            }
-        },
-        {
-            "$unwind": {
-                "path": "$product_ins",
-                "preserveNullAndEmptyArrays": True
-            }
-        },
-        {
-            "$addFields": {
-                "chart_key": {
-                    "$dateToString": {
-                        "format": "%Y-%m-%d %H:00:00",
-                        "date": "$order_date"
-                    }
-                },
-                "chart_value": chart_value_field
-            }
-        },
-        {
-            "$group": {
-                "_id": "$product_ins._id",
-                "id": {"$first": {"$toString":"$product_ins._id"}},
-                "product": {"$first": "$product_ins.product_title"},
-                "asin": {"$first": "$product_ins.product_id"},
-                "sku": {"$first": "$product_ins.sku"},
-                "product_image": {"$first": "$product_ins.image_url"},
-                "total_units": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
-                "total_price": {
-                    "$sum": {
-                        "$multiply": [
-                            "$order_items_ins.Pricing.ItemPrice.Amount",
-                            "$order_items_ins.ProductDetails.QuantityOrdered"
-                        ]
-                    }
-                },
-                "refund_qty": {"$sum": "$order_items_ins.ProductDetails.QuantityShipped"},
-                "chart": {
-                    "$push": {
-                        "k": "$chart_key",
-                        "v": "$chart_value"
-                    }
-                }
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "id" : 1,
-                "product": 1,
-                "sku": 1,
-                "asin": 1,
-                "product_image": 1,
-                "total_units": 1,
-                "total_price": 1,
-                "refund_qty": 1,
-                "chart": {
-                    "$arrayToObject": {
-                        "$filter": {
-                            "input": "$chart",
-                            "as": "item",
-                            "cond": {
-                                "$and": [
-                                    {"$ne": ["$$item.k", None]},
-                                    {"$ne": ["$$item.v", None]},
-                                    {"$eq": [{"$type": "$$item.k"}, "string"]}
-                                ]
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        {
-            "$sort": SON([(sort_field, -1)])
-        },
-        {
-            "$limit": 10
-        }
-    ]
+#     pipeline = [
+#         {
+#             "$match": match
+#         },
+#         {
+#             "$lookup": {
+#                 "from": "order_items",
+#                 "localField": "order_items",
+#                 "foreignField": "_id",
+#                 "as": "order_items_ins"
+#             }
+#         },
+#         {
+#             "$unwind": {
+#                 "path": "$order_items_ins",
+#                 "preserveNullAndEmptyArrays": True
+#             }
+#         },
+#         {
+#             "$lookup": {
+#                 "from": "product",
+#                 "localField": "order_items_ins.ProductDetails.product_id",
+#                 "foreignField": "_id",
+#                 "as": "product_ins"
+#             }
+#         },
+#         {
+#             "$unwind": {
+#                 "path": "$product_ins",
+#                 "preserveNullAndEmptyArrays": True
+#             }
+#         },
+#         {
+#             "$addFields": {
+#                 "chart_key": {
+#                     "$dateToString": {
+#                         "format": "%Y-%m-%d %H:00:00",
+#                         "date": "$order_date"
+#                     }
+#                 },
+#                 "chart_value": chart_value_field
+#             }
+#         },
+#         {
+#             "$group": {
+#                 "_id": "$product_ins._id",
+#                 "id": {"$first": {"$toString":"$product_ins._id"}},
+#                 "product": {"$first": "$product_ins.product_title"},
+#                 "asin": {"$first": "$product_ins.product_id"},
+#                 "sku": {"$first": "$product_ins.sku"},
+#                 "product_image": {"$first": "$product_ins.image_url"},
+#                 "total_units": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
+#                 "total_price": {
+#                     "$sum": {
+#                         "$multiply": [
+#                             "$order_items_ins.Pricing.ItemPrice.Amount",
+#                             "$order_items_ins.ProductDetails.QuantityOrdered"
+#                         ]
+#                     }
+#                 },
+#                 "refund_qty": {"$sum": "$order_items_ins.ProductDetails.QuantityShipped"},
+#                 "chart": {
+#                     "$push": {
+#                         "k": "$chart_key",
+#                         "v": "$chart_value"
+#                     }
+#                 }
+#             }
+#         },
+#         {
+#             "$project": {
+#                 "_id": 0,
+#                 "id" : 1,
+#                 "product": 1,
+#                 "sku": 1,
+#                 "asin": 1,
+#                 "product_image": 1,
+#                 "total_units": 1,
+#                 "total_price": 1,
+#                 "refund_qty": 1,
+#                 "chart": {
+#                     "$arrayToObject": {
+#                         "$filter": {
+#                             "input": "$chart",
+#                             "as": "item",
+#                             "cond": {
+#                                 "$and": [
+#                                     {"$ne": ["$$item.k", None]},
+#                                     {"$ne": ["$$item.v", None]},
+#                                     {"$eq": [{"$type": "$$item.k"}, "string"]}
+#                                 ]
+#                             }
+#                         }
+#                     }
+#                 }
+#             }
+#         },
+#         {
+#             "$sort": SON([(sort_field, -1)])
+#         },
+#         {
+#             "$limit": 10
+#         }
+#     ]
 
-    result = list(Order.objects.aggregate(pipeline))
-    data = {"results": {"items": result}}
-    return data
+#     result = list(Order.objects.aggregate(pipeline))
+#     data = {"results": {"items": result}}
+#     return data
 
 import pytz
 
@@ -912,12 +915,14 @@ def get_top_products(request):
     start_date_str = json_request.get("start_date", None)
     end_date_str = json_request.get("end_date", None)
 
+    timezone_str = json_request.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
+
     # Determine start and end dates
     if start_date_str and end_date_str:
         start_date = datetime.strptime(start_date_str, '%Y-%m-%d').replace(tzinfo=pytz.utc)
         end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=pytz.utc)
     else:
-        start_date, end_date = get_date_range(preset)
+        start_date, end_date = get_date_range(preset,timezone_str)
         # Ensure dates are timezone-aware if get_date_range does not return them as such
         if start_date.tzinfo is None:
             start_date = pytz.utc.localize(start_date)
@@ -1170,6 +1175,7 @@ def get_products_with_pagination(request):
     parent_search = json_request.get('parent_search')
     sku_search = json_request.get('sku_search')
     search_query = json_request.get('search_query')
+    timezone_str = json_request.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
     
 
 
@@ -1177,8 +1183,8 @@ def get_products_with_pagination(request):
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
     else:
-        start_date, end_date = get_date_range(preset)  
-    today_start_date, today_end_date = get_date_range("Today")
+        start_date, end_date = get_date_range(preset,timezone_str)  
+    today_start_date, today_end_date = get_date_range("Today",timezone_str)
 
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
@@ -1564,6 +1570,8 @@ def get_products_with_pagination(request):
 
 @csrf_exempt
 def getPeriodWiseData(request):
+    def to_utc_format(dt):
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
@@ -1571,25 +1579,15 @@ def getPeriodWiseData(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = json_request.get('timezone', 'US/Pacific')
-    local_tz = pytz.timezone(timezone_str)
-
-    def to_utc_format(dt):
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    def adjust_to_timezone(date_range):
-        start, end = date_range
-        start = local_tz.localize(start).astimezone(pytz.utc)
-        end = local_tz.localize(end).astimezone(pytz.utc)
-        return start, end
 
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
         # Optimize by aggregating data in bulk instead of fetching individual documents
         current_metrics = calculate_metricss(
             current_start, current_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel
         )
-        previous_metrics = calculate_metricss(
-            prev_start, prev_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel
-        )
+        # previous_metrics = calculate_metricss(
+        #     prev_start, prev_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel
+        # )
 
         if label in ['Today', 'Yesterday']:
             period = {
@@ -1610,19 +1608,19 @@ def getPeriodWiseData(request):
         for key in current_metrics:
             output[key] = {
                 "current": current_metrics[key],
-                "previous": previous_metrics[key],
-                "delta": round(current_metrics[key] - previous_metrics[key], 2)
+                # "previous": previous_metrics[key],
+                # "delta": round(current_metrics[key] - previous_metrics[key], 2)
             }
 
         return output
 
     # Precompute date ranges and adjust to timezone
     date_ranges = {
-        "yesterday": adjust_to_timezone(get_date_range("Yesterday")),
-        "last7Days": adjust_to_timezone(get_date_range("Last 7 days")),
-        "last30Days": adjust_to_timezone(get_date_range("Last 30 days")),
-        "yearToDate": adjust_to_timezone(get_date_range("This Year")),
-        "lastYear": adjust_to_timezone(get_date_range("Last Year"))
+        "yesterday": get_date_range("Yesterday",timezone_str),
+        "last7Days": get_date_range("Last 7 days",timezone_str),
+        "last30Days": get_date_range("Last 30 days",timezone_str),
+        "yearToDate": get_date_range("This Year",timezone_str),
+        "lastYear": get_date_range("Last Year",timezone_str)
     }
 
     # Use threading to parallelize metric calculations
@@ -1815,11 +1813,12 @@ def exportPeriodWiseCSV(request):
 
     return response
 
-def to_utc_format(dt):
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 @csrf_exempt
 def getPeriodWiseDataCustom(request):
+    def to_utc_format(dt):
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     json_request = JSONParser().parse(request)
 
     # Extract filters
@@ -3502,6 +3501,8 @@ def calculate_metrics(start_date, end_date):
 
 @csrf_exempt
 def getProfitAndLossDetails(request):
+    def to_utc_format(dt):
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
@@ -5953,6 +5954,8 @@ def InsightsProductWise(request):
 
 @csrf_exempt
 def getProfitAndLossDetailsForProduct(request):
+    def to_utc_format(dt):
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     json_request = JSONParser().parse(request)
     print(json_request)
     product_id = json_request.get('product_id')
@@ -6556,7 +6559,9 @@ def getProductInformation(request):
         "Brand": product_obj.brand_name if product_obj.brand_name else "N/A",
         "date_range": product_obj.product_created_date.strftime("%b %d, %Y") + " - Current" if product_obj.product_created_date else "N/A - Current",
         "product_title": product_obj.product_title if product_obj.product_title else "N/A",
-        "marketplaces": []
+        "marketplaces": [],
+        "ASIN" : "",
+        "WPID" : ""
     }
 
     marketplace_name = getattr(product_obj.marketplace_id, 'name', None)
