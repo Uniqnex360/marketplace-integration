@@ -768,72 +768,73 @@ def fetch_all_inventory(token):
     return all_inventory
 
 
-# Main runner
 def sync_inventory():
-    print("Starting Sellercloud inventory sync...")
-    today_date = datetime.today()
-    start_of_day = today_date
+    print("🚀 Starting Sellercloud inventory sync...")
+
+    today = datetime.today()
+    start_of_day = today.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_day = today.replace(hour=23, minute=59, second=59, microsecond=999999)
+
     try:
         token = get_access_token()
         inventory = fetch_all_inventory(token)
+
         for ins in inventory:
+            sku = str(ins.get('ID'))
             try:
-                product_obj = DatabaseModel.get_document(Product.objects,{"sku" : str(ins['ID'])},['id'])
-                if product_obj:
-                    
-                    # Check if an entry exists for the same product and date
-                    pipeline = [
-                        {
-                            "$match": {
-                                "product_id": product_obj.id,
-                                "date": {
-                                    "$gte": start_of_day.replace(hour=0, minute=0, second=0, microsecond=0),
-                                    "$lte": start_of_day.replace(hour=23, minute=59, second=59, microsecond=999999)
-                                }
-                            }
-                        },
-                        {
-                            "$limit": 1
+                product_obj = DatabaseModel.get_document(Product.objects, {"sku": sku}, ['id'])
+                if not product_obj:
+                    print(f"⚠️ Product not found for SKU: {sku}")
+                    continue
+
+                # Check if inventory log already exists for today
+                pipeline = [
+                    {
+                        "$match": {
+                            "product_id": product_obj.id,
+                            "date": {"$gte": start_of_day, "$lte": end_of_day}
                         }
-                    ]
-                    existing_entry = list(inventry_log.objects.aggregate(*pipeline))
-                    existing_entry = existing_entry[0] if existing_entry else None
-                    if existing_entry:
-                        # Update the existing entry
-                        DatabaseModel.update_documents(
-                            inventry_log.objects, 
-                            {"id": existing_entry['_id']}, 
-                            {
-                                "available": ins['InventoryAvailableQty'],
-                                "reserved": ins['ReservedQty']
-                            }
-                        )
-                        print(f"Updated existing inventory log for product SKU {ins['ID']} on {today_date}")
-                    else:
-                        # Create a new inventory log for today's date
-                        new_inventory_log = inventry_log(
-                            product_id=product_obj,
-                            available=ins['InventoryAvailableQty'],
-                            reserved=ins['ReservedQty'],
-                            date=datetime.now()
-                        )
-                        new_inventory_log.save()
-                        print(f"Created new inventory log for product SKU {ins['ID']} on {today_date}")
+                    },
+                    {"$limit": 1}
+                ]
 
-                    # Update the product's quantity
+                existing_entry = list(inventry_log.objects.aggregate(*pipeline))
+                existing_entry = existing_entry[0] if existing_entry else None
+
+                if existing_entry:
+                    # Update existing log
                     DatabaseModel.update_documents(
-                        Product.objects, 
-                        {"sku": str(ins['ID'])}, 
-                        {'quantity': ins['InventoryAvailableQty']}
+                        inventry_log.objects,
+                        {"id": existing_entry['_id']},
+                        {
+                            "available": ins.get('InventoryAvailableQty'),
+                            "reserved": ins.get('ReservedQty')
+                        }
                     )
+                    print(f"🔁 Updated inventory log for SKU {sku}")
+                else:
+                    # Create new inventory log
+                    new_inventory_log = inventry_log(
+                        product_id=product_obj,
+                        available=ins.get('InventoryAvailableQty'),
+                        reserved=ins.get('ReservedQty'),
+                        date=datetime.now()
+                    )
+                    new_inventory_log.save()
+                    print(f"✅ Created inventory log for SKU {sku}")
 
+                # Update product quantity
+                DatabaseModel.update_documents(
+                    Product.objects,
+                    {"sku": sku},
+                    {"quantity": ins.get('InventoryAvailableQty')}
+                )
 
+            except Exception as inner_err:
+                print(f"❌ Failed to process SKU {sku}: {inner_err}")
 
-            except:
-                print(f"Failed to update product with SKU {ins['ID']}: {sys.exc_info()[0]}")
-            
     except Exception as e:
-        print("❌ Error:", e)
+        print("🔥 Critical Error in sync_inventory:", e)
 
 def save_or_update_pageview_session_count(data, today_date):
     try:
@@ -1172,26 +1173,25 @@ def ordersAmazon():
 
 
 def syncRecentAmazonOrders():
-    def process_row(row, marketplace_id):
+    def process_row(row, marketplace_id, converter):
         s = row
         if s['sales-channel'] != "Non-Amazon":
-            merchant_order_id = str(s['merchant-order-id']) if 'merchant-order-id' in s and pd.notna(s['merchant-order-id']) else ""
-            sales_channel = str(s['sales-channel']) if 'sales-channel' in s and pd.notna(s['sales-channel']) else ""
-            items_order_quantity = int(s['quantity']) if 'quantity' in s and pd.notna(s['quantity']) else 0
-            product_name = str(s['product-name']) if 'product-name' in s and pd.notna(s['product-name']) else ""
-            sku = str(s['sku']) if 'sku' in s and pd.notna(s['sku']) else ""
-            asin = str(s['asin']) if 'asin' in s and pd.notna(s['asin']) else ""
-            number_of_items = int(s['number-of-items']) if 'number-of-items' in s and pd.notna(s['number-of-items']) else 0
-            currency = str(s['currency']) if 'currency' in s and pd.notna(s['currency']) else "USD"
-            item_price = float(s['item-price']) if 'item-price' in s and pd.notna(s['item-price']) else 0.0
-            item_tax = float(s['item-tax']) if 'item-tax' in s and pd.notna(s['item-tax']) else 0.0
-            shipping_price = float(s['shipping-price']) if 'shipping-price' in s and pd.notna(s['shipping-price']) else 0.0
-            shipping_tax = float(s['shipping-tax']) if 'shipping-tax' in s and pd.notna(s['shipping-tax']) else 0.0
-            item_promotion_discount = float(s['item-promotion-discount']) if 'item-promotion-discount' in s and pd.notna(s['item-promotion-discount']) else 0.0
-            item_promotion_discount_tax = float(s['item-promotion-discount-tax']) if 'item-promotion-discount-tax' in s and pd.notna(s['item-promotion-discount-tax']) else 0.0
+            merchant_order_id = str(s['merchant-order-id']) if pd.notna(s.get('merchant-order-id')) else ""
+            sales_channel = str(s['sales-channel']) if pd.notna(s.get('sales-channel')) else ""
+            items_order_quantity = int(s['quantity']) if pd.notna(s.get('quantity')) else 0
+            product_name = str(s['product-name']) if pd.notna(s.get('product-name')) else ""
+            sku = str(s['sku']) if pd.notna(s.get('sku')) else ""
+            asin = str(s['asin']) if pd.notna(s.get('asin')) else ""
+            number_of_items = int(s['number-of-items']) if pd.notna(s.get('number-of-items')) else 0
+            currency = str(s['currency']) if pd.notna(s.get('currency')) else "USD"
+            item_price = float(s['item-price']) if pd.notna(s.get('item-price')) else 0.0
+            item_tax = float(s['item-tax']) if pd.notna(s.get('item-tax')) else 0.0
+            shipping_price = float(s['shipping-price']) if pd.notna(s.get('shipping-price')) else 0.0
+            shipping_tax = float(s['shipping-tax']) if pd.notna(s.get('shipping-tax')) else 0.0
+            item_promotion_discount = float(s['item-promotion-discount']) if pd.notna(s.get('item-promotion-discount')) else 0.0
+            item_promotion_discount_tax = float(s['item-promotion-discount-tax']) if pd.notna(s.get('item-promotion-discount-tax')) else 0.0
 
             if currency != "USD":
-                converter = CurrencyRates()
                 item_price = converter.convert(currency, 'USD', item_price)
                 item_tax = converter.convert(currency, 'USD', item_tax)
                 shipping_price = converter.convert(currency, 'USD', shipping_price)
@@ -1200,68 +1200,30 @@ def syncRecentAmazonOrders():
                 item_promotion_discount_tax = converter.convert(currency, 'USD', item_promotion_discount_tax)
 
             ship_address = {}
-            if 'ship-city' in s and pd.notna(s['ship-city']):
-                ship_address['City'] = str(s['ship-city'])
-            if 'ship-state' in s and pd.notna(s['ship-state']):
-                ship_address['StateOrRegion'] = str(s['ship-state'])
-            if 'ship-postal-code' in s and pd.notna(s['ship-postal-code']):
-                ship_address['PostalCode'] = str(s['ship-postal-code'])
-            if 'ship-country' in s and pd.notna(s['ship-country']):
-                ship_address['CountryCode'] = str(s['ship-country'])
+            if pd.notna(s.get('ship-city')): ship_address['City'] = str(s['ship-city'])
+            if pd.notna(s.get('ship-state')): ship_address['StateOrRegion'] = str(s['ship-state'])
+            if pd.notna(s.get('ship-postal-code')): ship_address['PostalCode'] = str(s['ship-postal-code'])
+            if pd.notna(s.get('ship-country')): ship_address['CountryCode'] = str(s['ship-country'])
 
-            purchase_order_id = str(s['amazon-order-id']) if 'amazon-order-id' in s and pd.notna(s['amazon-order-id']) else ""
-            order_date = datetime.strptime(s['purchase-date'], "%Y-%m-%dT%H:%M:%S%z") if 'purchase-date' in s and pd.notna(s['purchase-date']) else datetime.now()
-            order_status = str(s['order-status']) if 'order-status' in s and pd.notna(s['order-status']) else ""
-            last_update_date = datetime.strptime(s['last-updated-date'], "%Y-%m-%dT%H:%M:%S%z") if 'last-updated-date' in s and pd.notna(s['last-updated-date']) else datetime.now()
+            purchase_order_id = str(s['amazon-order-id']) if pd.notna(s.get('amazon-order-id')) else ""
+            order_date = datetime.strptime(s['purchase-date'], "%Y-%m-%dT%H:%M:%S%z") if pd.notna(s.get('purchase-date')) else datetime.now()
+            order_status = str(s['order-status']) if pd.notna(s.get('order-status')) else ""
+            last_update_date = datetime.strptime(s['last-updated-date'], "%Y-%m-%dT%H:%M:%S%z") if pd.notna(s.get('last-updated-date')) else datetime.now()
             fulfillment_channel = "MFN" if s['fulfillment-channel'] == "Merchant" else "AFN"
-            ship_service_level = str(s['ship-service-level']) if 'ship-service-level' in s and pd.notna(s['ship-service-level']) else ""
+            ship_service_level = str(s['ship-service-level']) if pd.notna(s.get('ship-service-level')) else ""
 
-            p = [
-                {
-                    "$match": {
-                        "purchase_order_id": str(s['amazon-order-id'])
-                    }
-                },
-                {"$limit": 1},
-                {
-                    "$project": {
-                        "_id": 1,
-                        "order_items": 1,
-                    }
-                }
-            ]
-            order_obj = list(Order.objects.aggregate(p))
-            if order_obj != []:
-                print(f"Order with purchase order ID {purchase_order_id} already exists. Skipping...")
+            order_obj = Order.objects(purchase_order_id=purchase_order_id).only('id', 'order_items').first()
+            if order_obj:
                 DatabaseModel.update_documents(Order.objects, {"purchase_order_id": purchase_order_id}, {
                     "items_order_quantity": items_order_quantity,
                     "shipping_price": shipping_price,
                     "sales_channel": sales_channel,
                     "merchant_order_id": merchant_order_id,
-                    "order_status" : order_status
+                    "order_status": order_status
                 })
-
             else:
-                print(f"Order with purchase order ID {purchase_order_id} CREATE NEW...")
-                order_items = list()
-                try:
-                    p = [
-                        {
-                            "$match": {
-                                "sku": sku
-                            }
-                        },
-                        {"$limit": 1},
-                        {
-                            "$project": {
-                                "_id": 1
-                            }
-                        }
-                    ]
-                    p_obj = list(Product.objects.aggregate(p))
-                    product_id = p_obj['_id'] if p_obj != [] else None
-                except:
-                    product_id = None
+                p_obj = Product.objects(sku=sku).only('id').first()
+                product_id = p_obj.id if p_obj else None
 
                 order_item = OrderItems(
                     OrderId=purchase_order_id,
@@ -1290,7 +1252,7 @@ def syncRecentAmazonOrders():
                     sales_channel=sales_channel,
                     items_order_quantity=items_order_quantity,
                     shipping_price=shipping_price,
-                    number_of_items_shipped=int(number_of_items),
+                    number_of_items_shipped=number_of_items,
                     fulfillment_channel=fulfillment_channel,
                     ship_service_level=ship_service_level,
                     order_date=order_date,
@@ -1303,23 +1265,13 @@ def syncRecentAmazonOrders():
                 )
                 order.save()
 
-    marketplace_id = DatabaseModel.get_document(Marketplace.objects, {"name": "Amazon"}, ['id']).id
     df = ordersAmazon()
     if df is not None and not df.empty:
-
-        def worker():
-            while True:
-                row = q.get()
-                if row is None:
-                    break
-                process_row(row, marketplace_id)
-                q.task_done()
-
         q = Queue()
-        num_threads = 10  # Adjust the number of threads as needed
-        threads = []
-        processed_count = 0  # Variable to track the number of processed rows
-        processed_count_lock = threading.Lock()  # Lock to ensure thread-safe updates
+        semaphore = threading.BoundedSemaphore(4)  # Reduced to 4 threads for CPU efficiency
+        converter = CurrencyRates()
+        processed_count = 0
+        processed_count_lock = threading.Lock()
 
         def worker():
             nonlocal processed_count
@@ -1327,27 +1279,28 @@ def syncRecentAmazonOrders():
                 row = q.get()
                 if row is None:
                     break
-                process_row(row, marketplace_id)
-                with processed_count_lock:
-                    processed_count += 1  # Increment the count in a thread-safe manner
-                    print(f"Processed {processed_count} rows")  # Print the count after each row is processed
+                with semaphore:
+                    process_row(row, marketplace_id, converter)
+                    with processed_count_lock:
+                        processed_count += 1
+                        if processed_count % 10 == 0:
+                            print(f"Processed {processed_count} rows")
                 q.task_done()
 
-        for i in range(num_threads):
-            t = threading.Thread(target=worker)
-            t.start()
-            threads.append(t)
+        marketplace_id = DatabaseModel.get_document(Marketplace.objects, {"name": "Amazon"}, ['id']).id
+        threads = [threading.Thread(target=worker) for _ in range(4)]
 
+        for t in threads:
+            t.start()
         for _, row in df.iterrows():
             q.put(row)
 
         q.join()
-
-        for i in range(num_threads):
+        for _ in threads:
             q.put(None)
         for t in threads:
             t.join()
 
-        print(f"Total rows processed: {processed_count}")  # Output the total processed count
+        print(f"Total rows processed: {processed_count}")
         return True
-
+    

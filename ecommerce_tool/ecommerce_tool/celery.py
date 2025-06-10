@@ -19,18 +19,23 @@ app.autodiscover_tasks()
 from celery.schedules import crontab
 
 app.conf.beat_schedule = {
-    'sync-orders-every-30-minutes': {
+    'sync-orders-every-20-minutes': {
         'task': 'omnisight.tasks.sync_orders',
-        'schedule': crontab(minute='*/30'),  # Every 30 minutes
+        'schedule': crontab(minute='2,22,42'),
+    },
+    'sync-walmart_orders-every-15-minutes': {
+        'task': 'omnisight.tasks.sync_walmart_orders',
+        'schedule': crontab(minute='0,15,30,45'),
     },
     'sync-inventry-every-hour': {
-        'task': 'omnisight.tasks.sync_inventry',  # Replace with your actual task path
-        'schedule': crontab(minute=0),  # Every hour at minute 0
+        'task': 'omnisight.tasks.sync_inventry',
+        'schedule': crontab(minute=10),
     },
     'sync-products-every-10-hours': {
-        'task': 'omnisight.tasks.sync_products',  # Replace with your actual task path
-        'schedule': crontab(minute=0, hour='*/10'),  # Every 10 hours
+        'task': 'omnisight.tasks.sync_products',
+        'schedule': crontab(minute=0, hour='*/10'),
     },
 }
+
 
 app.conf.timezone = 'UTC'
