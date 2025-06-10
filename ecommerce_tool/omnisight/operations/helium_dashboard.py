@@ -328,11 +328,8 @@ def LatestOrdersTodayAPIView(request):
     brand_id = json_request.get('brand_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
-    # 1️⃣ Compute bounds for "today" based on the user's local timezone
-    user_timezone = json_request.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
-    local_tz = timezone(user_timezone)
 
-    now = datetime.now(local_tz)
+    now = datetime.now()
     # For a 24-hour period ending now
     start_of_day = now - timedelta(hours=24)
     end_of_day = now
@@ -387,10 +384,13 @@ def LatestOrdersTodayAPIView(request):
     orders_out = []
     for order in qs:
         # Convert order_date to user's timezone for consistent bucketing
-        order_local_time = order['order_date'].astimezone(local_tz)
+        order_local_time = order.get('order_date')  # Ensure 'order_date' is accessed correctly
         
         # hour bucket for this order
-        bk = order_local_time.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:00:00")
+        if isinstance(order_local_time, datetime):  # Check if it's a valid datetime object
+            bk = order_local_time.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:00:00")
+        else:
+            raise TypeError("'order_date' must be a datetime object")
         
         # Only process if the bucket exists in our chart
         if bk in chart:
@@ -3930,7 +3930,7 @@ def profit_loss_chart(request):
 
     # Preset types
     hourly_presets = ["Today", "Yesterday"]
-    daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", "Last 60 days", "Last 90 days"]
+    daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", "Last 60 days", "Last 90 days","Last Month","This Quarter","Last Quarter","Last Year"]
 
     # Key generation
     if preset in hourly_presets:
@@ -4308,7 +4308,7 @@ def profitLossChartCsv(request):
     
 
     hourly_presets = ["Today", "Yesterday"]
-    daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", "Last 60 days", "Last 90 days"]
+    daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", "Last 60 days", "Last 90 days","Last Month","This Quarter","Last Quarter","Last Year"]
 
     if preset in hourly_presets:
         interval_keys = [(from_date + timedelta(hours=i)).strftime("%Y-%m-%d %H:00:00")
@@ -6364,7 +6364,7 @@ def profitlosschartForProduct(request):
 
     # Preset types
     hourly_presets = ["Today", "Yesterday"]
-    daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", "Last 60 days", "Last 90 days"]
+    daily_presets = daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", "Last 60 days", "Last 90 days","Last Month","This Quarter","Last Quarter","Last Year"]
 
     # Key generation
     if preset in hourly_presets:
@@ -6589,3 +6589,12 @@ def getProductInformation(request):
         })
 
     return response_data
+
+
+@csrf_exempt
+def updateProductDetails(request):
+    json_request = JSONParser().parse(request)
+    product_id = json_request.get('product_id')
+    update_obj = json_request.get('update_obj', {})
+    DatabaseModel.update_documents(Product.objects,{"id": product_id}, update_obj)
+    return True
