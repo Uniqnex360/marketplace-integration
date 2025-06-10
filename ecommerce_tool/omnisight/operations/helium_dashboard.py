@@ -3522,8 +3522,8 @@ def getProfitAndLossDetails(request):
         from_date, to_date = get_date_range(preset)
 
     # Adjust start_date and end_date to the provided timezone
-    from_date = local_tz.localize(from_date).astimezone(pytz.utc)
-    to_date = local_tz.localize(to_date).astimezone(pytz.utc)
+    from_date = local_tz.localize(from_date.replace(tzinfo=None)).astimezone(pytz.utc)
+    to_date = local_tz.localize(to_date.replace(tzinfo=None)).astimezone(pytz.utc)
     
     def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
         gross_revenue = 0
@@ -3540,14 +3540,14 @@ def getProfitAndLossDetails(request):
 
         result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
         order_total = 0
-        # other_price = 0
+        product_cost = 0
         tax_price = 0
         temp_price = 0
         vendor_funding = 0
         if result:
             for order in result:
                 gross_revenue += order['order_total']
-                order_total = order['order_total']
+                # order_total = order['order_total']
                 # tax_price = 0
                 
                 for item_id in order['order_items']:
@@ -3578,6 +3578,8 @@ def getProfitAndLossDetails(request):
                             "w_shiping_cost" : {"$ifNull":["$product_ins.w_shiping_cost",0]},
                             "referral_fee" : {"$ifNull":["$product_ins.referral_fee",0]},
                             "walmart_fee" : {"$ifNull":["$product_ins.walmart_fee",0]},
+                            "product_cost" : {"$ifNull":["$product_ins.product_cost",0]},
+                            "w_product_cost" : {"$ifNull":["$product_ins.w_product_cost",0]},
                             }
                         }
                     ]
@@ -3590,10 +3592,12 @@ def getProfitAndLossDetails(request):
                             total_cogs += item_data['total_cogs']
                             shipping_cost += item_data['a_shipping_cost']
                             channel_fee += item_data['referral_fee']
+                            product_cost += item_data['product_cost']
                         else:
                             total_cogs += item_data['w_total_cogs']
                             shipping_cost += item_data['w_shiping_cost']
                             channel_fee += item_data['walmart_fee']
+                            product_cost += item_data['w_product_cost']
 
                         vendor_funding += item_data['vendor_funding']
                         total_units += 1
@@ -3632,7 +3636,7 @@ def getProfitAndLossDetails(request):
             "seller":"",
             "tax_price":tax_price,
             "total_cogs":total_cogs,
-            "product_cost":order_total,
+            "product_cost":product_cost,
             "shipping_cost":shipping_cost,
             "productCategories": product_categories,  # Added product distribution data
             "productCompleteness": product_completeness,  # Added product completeness data
@@ -3807,9 +3811,8 @@ def profit_loss_chart(request):
     else:
         from_date, to_date = get_date_range(preset)
 
-    # Adjust start_date and end_date to the provided timezone
-    from_date = local_tz.localize(from_date).astimezone(pytz.utc)
-    to_date = local_tz.localize(to_date).astimezone(pytz.utc)
+    from_date = local_tz.localize(from_date.replace(tzinfo=None)).astimezone(pytz.utc)
+    to_date = local_tz.localize(to_date.replace(tzinfo=None)).astimezone(pytz.utc)
 
 
 
