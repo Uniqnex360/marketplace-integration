@@ -271,6 +271,7 @@ class Order(Document):
 
     # Order timing
     order_date = DateTimeField()  # Date when the order was placed
+    pacific_date = DateTimeField()  # Date in Pacific Time Zone
     earliest_ship_date = DateTimeField()  # Minimum date for product delivery
     latest_ship_date = DateTimeField()  # Maximum date for product delivery
     last_update_date = DateTimeField()  # Most recent order update date
