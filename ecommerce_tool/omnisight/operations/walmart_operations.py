@@ -566,6 +566,7 @@ def updateOrdersItemsDetails(request):
 
 
 def syncRecentWalmartOrders():
+    from pytz import timezone,utc
     access_token = oauthFunction()
     marketplace_id = DatabaseModel.get_document(
         Marketplace.objects, {'name': "Walmart"}, ['id']
@@ -639,8 +640,14 @@ def syncRecentWalmartOrders():
 
         for order_line in order_lines:
             for charge in order_line.get('charges', {}).get('charge', []):
-                tax = float(charge.get('tax', {}).get('taxAmount', {}).get('amount', 0))
-                order_total += float(charge['chargeAmount']['amount']) + tax
+                try:
+                    tax = float(charge.get('tax', {}).get('taxAmount', {}).get('amount', 0))
+                except:
+                    tax = 0
+                try:
+                    order_total += float(charge['chargeAmount']['amount']) + tax
+                except:
+                    order_total += 0
                 currency = charge['chargeAmount'].get('currency', currency)
 
             order_items.append(process_walmart_order(order_line, order_date, po_id))
@@ -673,15 +680,15 @@ def syncRecentWalmartOrders():
     # Process orders with thread limit
     def worker(subset):
         for order in subset:
-            try:
-                process_order(order)
-            except Exception as e:
-                print(f"⚠️ Error processing order: {e}")
+            # try:
+            process_order(order)
+            # except Exception as e:
+            #     print(f"⚠️ Error processing order: {e}")
 
     # Split orders into batches to limit threads
-    for i in range(0, len(orders), 4):
+    for i in range(0, len(orders), 1):
         threads = []
-        batch = orders[i:i + 4]
+        batch = orders[i:i + 1]
         for order_data in batch:
             t = threading.Thread(target=worker, args=([order_data],))
             t.start()

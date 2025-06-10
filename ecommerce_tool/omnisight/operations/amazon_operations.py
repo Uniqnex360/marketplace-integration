@@ -1173,7 +1173,14 @@ def ordersAmazon():
 
 
 def syncRecentAmazonOrders():
-    def process_row(row, marketplace_id, converter):
+    def safe_convert(from_currency, amount):
+            fallback_rates = {
+                'MXN': 0.058,  # e.g., 1 MXN = 0.058 USD (update this as needed)
+                'CAD': 0.73    # e.g., 1 CAD = 0.73 USD (update this as needed)
+            }
+            return amount * fallback_rates.get(from_currency, 1)  # fallback: use predefined rates or return original amount
+
+    def process_row(row, marketplace_id):
         s = row
         if s['sales-channel'] != "Non-Amazon":
             merchant_order_id = str(s['merchant-order-id']) if pd.notna(s.get('merchant-order-id')) else ""
@@ -1192,12 +1199,12 @@ def syncRecentAmazonOrders():
             item_promotion_discount_tax = float(s['item-promotion-discount-tax']) if pd.notna(s.get('item-promotion-discount-tax')) else 0.0
 
             if currency != "USD":
-                item_price = converter.convert(currency, 'USD', item_price)
-                item_tax = converter.convert(currency, 'USD', item_tax)
-                shipping_price = converter.convert(currency, 'USD', shipping_price)
-                shipping_tax = converter.convert(currency, 'USD', shipping_tax)
-                item_promotion_discount = converter.convert(currency, 'USD', item_promotion_discount)
-                item_promotion_discount_tax = converter.convert(currency, 'USD', item_promotion_discount_tax)
+                item_price = safe_convert(currency, item_price)
+                item_tax = safe_convert(currency, item_tax)
+                shipping_price = safe_convert(currency, shipping_price)
+                shipping_tax = safe_convert(currency, shipping_tax)
+                item_promotion_discount = safe_convert(currency, item_promotion_discount)
+                item_promotion_discount_tax = safe_convert(currency, item_promotion_discount_tax)
 
             ship_address = {}
             if pd.notna(s.get('ship-city')): ship_address['City'] = str(s['ship-city'])
@@ -1267,40 +1274,12 @@ def syncRecentAmazonOrders():
 
     df = ordersAmazon()
     if df is not None and not df.empty:
-        q = Queue()
-        semaphore = threading.BoundedSemaphore(4)  # Reduced to 4 threads for CPU efficiency
-        converter = CurrencyRates()
-        processed_count = 0
-        processed_count_lock = threading.Lock()
-
-        def worker():
-            nonlocal processed_count
-            while True:
-                row = q.get()
-                if row is None:
-                    break
-                with semaphore:
-                    process_row(row, marketplace_id, converter)
-                    with processed_count_lock:
-                        processed_count += 1
-                        if processed_count % 10 == 0:
-                            print(f"Processed {processed_count} rows")
-                q.task_done()
-
         marketplace_id = DatabaseModel.get_document(Marketplace.objects, {"name": "Amazon"}, ['id']).id
-        threads = [threading.Thread(target=worker) for _ in range(4)]
-
-        for t in threads:
-            t.start()
+        process_count =0
         for _, row in df.iterrows():
-            q.put(row)
+            process_count += 1
+            print(f"Processed {process_count} rows...")
+            process_row(row, marketplace_id)
+        print("Amazon orders synced successfully.")
 
-        q.join()
-        for _ in threads:
-            q.put(None)
-        for t in threads:
-            t.join()
-
-        print(f"Total rows processed: {processed_count}")
         return True
-    
