@@ -875,8 +875,8 @@ def calculate_metricss(
             }
         }
     ]
-    result = list(pageview_session_count.objects.aggregate(*pipeline))
-    for P_ins in result:
+    p_result = list(pageview_session_count.objects.aggregate(*pipeline))
+    for P_ins in p_result:
         page_views += P_ins.get('page_views', 0)
         sessions += P_ins.get('sessions', 0)
 
