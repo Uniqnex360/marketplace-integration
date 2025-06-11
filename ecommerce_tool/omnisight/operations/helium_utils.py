@@ -912,7 +912,7 @@ def calculate_metricss(
 
 
 
-def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None):
+def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None,timezone_str="UTC"):
     total = dict()
     gross_revenue = 0
     total_cogs = 0
@@ -921,7 +921,7 @@ def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None,
     temp_other_price = 0
     vendor_funding = 0
 
-    result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+    result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
 
     def process_order(order):
@@ -929,6 +929,7 @@ def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None,
 
         tax_price = 0
         gross_revenue += order['order_total']
+        total_units += order['items_order_quantity']
 
         for j in order['order_items']:
             pipeline = [
@@ -972,7 +973,7 @@ def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None,
                     total_cogs += result[0]['total_cogs']
                 else:
                     total_cogs += result[0]['w_total_cogs']
-                total_units += 1
+                
                 vendor_funding += result[0]['vendor_funding']
 
     # Create threads for processing orders
