@@ -621,6 +621,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         # Process each order in the bucket
         for order in bucket_orders:
             gross_revenue += order.order_total
+            total_units += order.items_order_quantity if order.items_order_quantity else 0
             for item in order.order_items:
                 pipeline = [
                     {"$match": {"_id": item.id}},
@@ -645,7 +646,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                 if result:
                     temp_other_price += result[0]['price']
                     total_cogs += result[0]['total_cogs'] if order.marketplace_id.name == "Amazon" else result[0]['w_total_cogs']
-                    total_units += 1
+                    
                     vendor_funding += result[0]['vendor_funding']
 
         # Calculate metrics
@@ -700,6 +701,7 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
 
         tax_price = 0
         gross_revenue += order['order_total']
+        total_units += order['items_order_quantity']
 
         for j in order['order_items']:
             pipeline = [
@@ -743,7 +745,7 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
                     total_cogs += result[0]['total_cogs']
                 else:
                     total_cogs += result[0]['w_total_cogs']
-                total_units += 1
+                
                 vendor_funding += result[0]['vendor_funding']
 
     # Create threads for processing orders
@@ -857,6 +859,7 @@ def calculate_metricss(
         nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost
 
         gross_revenue += order['order_total']
+        total_units += order['items_order_quantity']
         for item_id in order['order_items']:
             item_data = item_details_map.get(str(item_id))
             if item_data:
@@ -871,7 +874,7 @@ def calculate_metricss(
                     shipping_cost += item_data.get('w_shiping_cost', 0)
 
                 vendor_funding += item_data.get('vendor_funding', 0)
-                total_units += 1
+                
 
                 if item_data.get('sku'):
                     sku_set.add(item_data['sku'])
