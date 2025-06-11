@@ -119,6 +119,7 @@ def get_metrics_by_date_range(request):
             for ins in result:
                 tax_price = 0
                 gross_revenue += ins['order_total']
+                total_units += ins['items_order_quantity']
                 # other_price = 0
                 # temp_other_price = 0 
                 for j in ins['order_items']:                  
@@ -162,7 +163,7 @@ def get_metrics_by_date_range(request):
                             total_cogs += result[0]['total_cogs']
                         else:
                             total_cogs += result[0]['w_total_cogs']
-                        total_units += 1
+                        
                         vendor_funding += result[0]['vendor_funding']
             # other_price += ins['order_total'] - temp_other_price - tax_price
 
