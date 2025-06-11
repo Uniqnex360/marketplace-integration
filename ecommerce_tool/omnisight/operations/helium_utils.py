@@ -7,7 +7,20 @@ import threading
 import pandas as pd
 from pytz import timezone
 
-
+def convertLocalTimeToUTC(start_date, end_date, timezone_str):
+    import pytz
+    local_tz = pytz.timezone(timezone_str)
+        
+    # If dates are naive (no timezone), localize them
+    if start_date.tzinfo is None:
+        start_date = local_tz.localize(start_date)
+    if end_date.tzinfo is None:
+        end_date = local_tz.localize(end_date)
+    
+    # Convert to UTC
+    start_date = start_date.astimezone(pytz.UTC)
+    end_date = end_date.astimezone(pytz.UTC)
+    return start_date, end_date
 
 def getOrdersListBasedonProductId(productIds,start_date=None, end_date=None):
     """
@@ -191,22 +204,10 @@ def get_date_range(preset, time_zone_str="UTC"):
 
 def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None, 
                 product_id=None, manufacuture_name=[], fulfillment_channel=None, 
-                timezone='UTC'):
-    import pytz
-    
+                timezone='UTC'):    
     # Convert local timezone dates to UTC
     if timezone != 'UTC':
-        local_tz = pytz.timezone(timezone)
-        
-        # If dates are naive (no timezone), localize them
-        if start_date.tzinfo is None:
-            start_date = local_tz.localize(start_date)
-        if end_date.tzinfo is None:
-            end_date = local_tz.localize(end_date)
-        
-        # Convert to UTC
-        start_date = start_date.astimezone(pytz.UTC)
-        end_date = end_date.astimezone(pytz.UTC)
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
     
     # Remove timezone info for MongoDB query (assuming your MongoDB driver expects naive UTC)
     start_date = start_date.replace(tzinfo=None)
@@ -256,7 +257,6 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
                 "order_items": 1,
                 "order_total": 1,
                 "marketplace_id": 1,
-                "marketplace_id": 1,
                 "currency": 1,
                 "shipping_address": 1,
                 "shipping_information": 1,
@@ -271,7 +271,6 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     for order_ins in order_list:
         for marketplace in marketplace_list:
             order_ins['marketplace_name'] = marketplace['name']
-        del order_ins['marketplace_id']
     
     return order_list
 
@@ -317,22 +316,10 @@ def get_previous_periods(current_start, current_end):
     return response_data
 
 
-def refundOrder(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacuture_name=[],fulfillment_channel=None,timezone='UTC'):
-    import pytz
-    
+def refundOrder(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacuture_name=[],fulfillment_channel=None,timezone='UTC'):    
     # Convert local timezone dates to UTC
     if timezone != 'UTC':
-        local_tz = pytz.timezone(timezone)
-        
-        # If dates are naive (no timezone), localize them
-        if start_date.tzinfo is None:
-            start_date = local_tz.localize(start_date)
-        if end_date.tzinfo is None:
-            end_date = local_tz.localize(end_date)
-        
-        # Convert to UTC
-        start_date = start_date.astimezone(pytz.UTC)
-        end_date = end_date.astimezone(pytz.UTC)
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
     
     # Remove timezone info for MongoDB query (assuming your MongoDB driver expects naive UTC)
     start_date = start_date.replace(tzinfo=None)
@@ -509,21 +496,8 @@ def pageViewsandSessionCount(start_date,end_date,product_id):
 def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, product_id=None, 
                   manufacturer_name=None, fulfillment_channel=None, timezone="UTC"):
     import pytz
-    
-    # Convert local timezone dates to UTC
     if timezone != 'UTC':
-        local_tz = pytz.timezone(timezone)
-        
-        # If dates are naive (no timezone), localize them
-        if start_date.tzinfo is None:
-            start_date = local_tz.localize(start_date)
-        if end_date.tzinfo is None:
-            end_date = local_tz.localize(end_date)
-        
-        # Convert to UTC
-        start_date = start_date.astimezone(pytz.UTC)
-        end_date = end_date.astimezone(pytz.UTC)
-    
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
     # Remove timezone info for MongoDB query (assuming your MongoDB driver expects naive UTC)
     start_date = start_date.replace(tzinfo=None)
     end_date = end_date.replace(tzinfo=None)
@@ -787,7 +761,6 @@ def calculate_metricss(
     include_extra_fields=False,
     use_threads=False
 ):
-    import pytz
     gross_revenue = 0
     total_cogs = 0
     net_profit = 0
@@ -801,6 +774,7 @@ def calculate_metricss(
     shipping_cost = 0
     unitSessionPercentage = 0
     sku_set = set()
+    p_id = set()
 
     result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone)
     all_item_ids = [ObjectId(item_id) for order in result for item_id in order['order_items']]
@@ -808,19 +782,8 @@ def calculate_metricss(
     refund = len(refund_ins)
     
     
-    # Convert local timezone dates to UTC
     if timezone != 'UTC':
-        local_tz = pytz.timezone(timezone)
-        
-        # If dates are naive (no timezone), localize them
-        if from_date.tzinfo is None:
-            from_date = local_tz.localize(from_date)
-        if to_date.tzinfo is None:
-            to_date = local_tz.localize(to_date)
-        
-        # Convert to UTC
-        from_date = from_date.astimezone(pytz.UTC)
-        to_date = to_date.astimezone(pytz.UTC)
+        from_date, to_date = convertLocalTimeToUTC(from_date, to_date, timezone)
     
     # Remove timezone info for MongoDB query (assuming your MongoDB driver expects naive UTC)
     from_date = from_date.replace(tzinfo=None)
@@ -856,7 +819,7 @@ def calculate_metricss(
     item_details_map = {str(item['_id']): item for item in OrderItems.objects.aggregate(*item_pipeline)}
 
     def process_order(order):
-        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost
+        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost,p_id
 
         gross_revenue += order['order_total']
         total_units += order['items_order_quantity']
@@ -880,25 +843,7 @@ def calculate_metricss(
                     sku_set.add(item_data['sku'])
 
                 try:
-                    pipeline = [
-                        {
-                            "$match": {
-                                "product_id": {"$in": [item_data['p_id']]},
-                                "date": {"$gte": from_date, "$lte": to_date}
-                            }
-                        },
-                        {
-                            "$group": {
-                                "_id": None,
-                                "page_views": {"$sum": "$page_views"},
-                                "sessions": {"$sum": "$sessions"}
-                            }
-                        }
-                    ]
-                    result = list(pageview_session_count.objects.aggregate(*pipeline))
-                    for P_ins in result:
-                        page_views += P_ins.get('page_views', 0)
-                        sessions += P_ins.get('sessions', 0)
+                    p_id.add(item_data['p_id'])
                 except:
                     pass
 
@@ -915,6 +860,25 @@ def calculate_metricss(
         # Process sequentially
         for order in result:
             process_order(order)
+    pipeline = [
+        {
+            "$match": {
+                "product_id": {"$in": list(p_id)},
+                "date": {"$gte": from_date, "$lte": to_date}
+            }
+        },
+        {
+            "$group": {
+                "_id": None,
+                "page_views": {"$sum": "$page_views"},
+                "sessions": {"$sum": "$sessions"}
+            }
+        }
+    ]
+    result = list(pageview_session_count.objects.aggregate(*pipeline))
+    for P_ins in result:
+        page_views += P_ins.get('page_views', 0)
+        sessions += P_ins.get('sessions', 0)
 
     net_profit = (temp_price - total_cogs) + vendor_funding
     margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0

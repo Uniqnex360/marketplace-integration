@@ -19,7 +19,7 @@ from bson import ObjectId
 from calendar import monthrange
 from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
 from django.db.models import Sum, Q
-from omnisight.operations.helium_utils import calculate_metricss, get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount, getproductIdListBasedonManufacture,totalRevenueCalculation,get_graph_data, totalRevenueCalculationForProduct, get_top_movers
+from omnisight.operations.helium_utils import calculate_metricss, get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount, getproductIdListBasedonManufacture,totalRevenueCalculation,get_graph_data, totalRevenueCalculationForProduct, get_top_movers, convertLocalTimeToUTC
 from ecommerce_tool.crud import DatabaseModel
 from omnisight.operations.common_utils import calculate_listing_score
 import threading
@@ -506,8 +506,23 @@ def RevenueWidgetAPIView(request):
 
     
     if start_date != None and start_date != "":
-        start_date = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
 
@@ -618,47 +633,47 @@ def updatedRevenueWidgetAPIView(request):
     fulfillment_channel = json_request.get("fulfillment_channel", None)
     timezone_str = json_request.get('timezone', 'US/Pacific')
 
-    # Convert input dates to UTC
-    def convert_to_utc(date_str, end_of_day=False):
-        if not date_str:
-            return None
+    
+    if start_date != None and start_date != "":
+        # Convert string dates to datetime in the specified timezone
         local_tz = pytz.timezone(timezone_str)
-        naive_date = datetime.strptime(date_str, '%Y-%m-%d')
-        local_date = local_tz.localize(naive_date)
-        if end_of_day:
-            local_date = local_date.replace(hour=23, minute=59, second=59)
-        return local_date.astimezone(pytz.UTC)
-
-    start_date = json_request.get("start_date")
-    end_date = json_request.get("end_date")
-
-    if start_date and start_date != "":
-        start_date = convert_to_utc(start_date)
-        end_date = convert_to_utc(end_date, end_of_day=True)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
-        start_date, end_date = get_date_range(preset, timezone_str)
-        start_date = start_date.astimezone(pytz.UTC)
-        end_date = end_date.astimezone(pytz.UTC)
+        start_date, end_date = get_date_range(preset,timezone_str)
 
     comapre_past = get_previous_periods(start_date, end_date)
 
     # Define all fetch functions first
     def fetch_total():
         return totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id, 
-                                    product_id, manufacturer_name, fulfillment_channel)
+                                    product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     def fetch_graph_data():
         return get_graph_data(start_date, end_date, preset, marketplace_id, brand_id, 
-                           product_id, manufacturer_name, fulfillment_channel)
+                           product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     def fetch_compare_total():
         return totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id, 
-                                    brand_id, product_id, manufacturer_name, fulfillment_channel)
+                                    brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     def fetch_compare_graph_data():
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
         return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, 
-                           brand_id, product_id, manufacturer_name, fulfillment_channel)
+                           brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     # Execute all futures within the same context manager
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -669,8 +684,8 @@ def updatedRevenueWidgetAPIView(request):
         compare_graph = None
         
         if compare_startdate and compare_startdate != "":
-            compare_startdate = convert_to_utc(compare_startdate)
-            compare_enddate = convert_to_utc(compare_enddate, end_of_day=True)
+            compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
+            compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
             
             future_compare_total = executor.submit(fetch_compare_total)
             future_compare_graph_data = executor.submit(fetch_compare_graph_data)
@@ -933,8 +948,23 @@ def get_top_products(request):
 
     # Determine start and end dates
     if start_date_str and end_date_str:
-        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').replace(tzinfo=pytz.utc)
-        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=pytz.utc)
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
         # Ensure dates are timezone-aware if get_date_range does not return them as such
@@ -1194,8 +1224,23 @@ def get_products_with_pagination(request):
 
 
     if start_date != None and start_date != "":
-        start_date = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)  
     today_start_date, today_end_date = get_date_range("Today",timezone_str)
@@ -1682,14 +1727,15 @@ def getPeriodWiseDataXl(request):
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel')
+    timezone_str = json_request.get('timezone', 'US/Pacific')
 
-    # Define periods and date ranges
+    # Define periods with timezone-aware ranges
     periods = {
-        "Yesterday": get_date_range("Yesterday"),
-        "Last 7 Days": get_date_range("Last 7 days"),
-        "Last 30 Days": get_date_range("Last 30 days"),
-        "Month to Date": get_date_range("This Month"),
-        "Year to Date": get_date_range("This Year"),
+        "Yesterday": get_date_range("Yesterday", timezone_str),
+        "Last 7 Days": get_date_range("Last 7 days", timezone_str),
+        "Last 30 Days": get_date_range("Last 30 days", timezone_str),
+        "Month to Date": get_date_range("This Month", timezone_str),
+        "Year to Date": get_date_range("This Year", timezone_str),
     }
 
     def create_row(label, start, end):
@@ -1700,6 +1746,7 @@ def getPeriodWiseDataXl(request):
             product_id,
             manufacturer_name,
             fulfillment_channel,
+            timezone_str,
             include_extra_fields=True
         )
         return [
@@ -1708,17 +1755,17 @@ def getPeriodWiseDataXl(request):
             data.get("marketplace", ""),
             start.strftime("%Y-%m-%d"),
             end.strftime("%Y-%m-%d"),
-            data["grossRevenue"],
-            data["expenses"],
-            data["netProfit"],
-            data["roi"],
-            data["unitsSold"],
-            data["refunds"],
-            data["skuCount"],
-            data["sessions"],
-            data["pageViews"],
-            data["unitSessionPercentage"],
-            data["margin"]
+            data.get("grossRevenue", 0),
+            data.get("expenses", 0),
+            data.get("netProfit", 0),
+            data.get("roi", 0),
+            data.get("unitsSold", 0),
+            data.get("refunds", 0),
+            data.get("skuCount", 0),
+            data.get("sessions", 0),
+            data.get("pageViews", 0),
+            data.get("unitSessionPercentage", 0),
+            data.get("margin", 0)
         ]
 
     # Use threads to process all periods in parallel
@@ -1772,14 +1819,15 @@ def exportPeriodWiseCSV(request):
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
+    timezone_str = json_request.get('timezone', 'US/Pacific')
 
-    # Define time periods and their date ranges
+    # Define time periods with timezone-aware date ranges
     periods = {
-        "Yesterday": get_date_range("Yesterday"),
-        "Last 7 Days": get_date_range("Last 7 days"),
-        "Last 30 Days": get_date_range("Last 30 days"),
-        "Month to Date": get_date_range("This Month"),
-        "Year to Date": get_date_range("This Year"),
+        "Yesterday": get_date_range("Yesterday", timezone_str),
+        "Last 7 Days": get_date_range("Last 7 days", timezone_str),
+        "Last 30 Days": get_date_range("Last 30 days", timezone_str),
+        "Month to Date": get_date_range("This Month", timezone_str),
+        "Year to Date": get_date_range("This Year", timezone_str),
     }
 
     def create_row(label, start, end):
@@ -1790,6 +1838,7 @@ def exportPeriodWiseCSV(request):
             product_id,
             manufacturer_name,
             fulfillment_channel,
+            timezone_str=timezone_str,
             include_extra_fields=True
         )
 
@@ -1799,17 +1848,17 @@ def exportPeriodWiseCSV(request):
             data.get("marketplace", ""),
             start.strftime("%Y-%m-%d"),
             end.strftime("%Y-%m-%d"),
-            str(data["grossRevenue"]),
-            str(data["expenses"]),
-            str(data["netProfit"]),
-            str(data["roi"]),
-            str(data["unitsSold"]),
-            str(data["refunds"]),
-            str(data["skuCount"]),
-            str(data["sessions"]),
-            str(data["pageViews"]),
-            str(data["unitSessionPercentage"]),
-            str(data["margin"])
+            str(data.get("grossRevenue", 0)),
+            str(data.get("expenses", 0)),
+            str(data.get("netProfit", 0)),
+            str(data.get("roi", 0)),
+            str(data.get("unitsSold", 0)),
+            str(data.get("refunds", 0)),
+            str(data.get("skuCount", 0)),
+            str(data.get("sessions", 0)),
+            str(data.get("pageViews", 0)),
+            str(data.get("unitSessionPercentage", 0)),
+            str(data.get("margin", 0))
         ]
 
     # Parallel processing of metric calculations
@@ -1857,8 +1906,23 @@ def getPeriodWiseDataCustom(request):
 
     
     if start_date:
-        from_date = datetime.strptime(start_date, "%Y-%m-%d")
-        to_date = datetime.strptime(end_date, "%Y-%m-%d")
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        from_date = localized_from_date.astimezone(pytz.UTC)
+        to_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        to_date = to_date.replace(hour=23, minute=59, second=59)
     else:
         from_date, to_date = get_date_range(preset,timezone_str)
     
@@ -1945,18 +2009,35 @@ def allMarketplaceData(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
+    timezone_str = json_request.get('timezone', 'US/Pacific')
 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
+
     if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        from_date = localized_from_date.astimezone(pytz.UTC)
+        to_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        to_date = to_date.replace(hour=23, minute=59, second=59)
     else:
-        from_date, to_date = get_date_range(preset)
+        from_date, to_date = get_date_range(preset,timezone_str)
 
 
-    def grouped_marketplace_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
-        orders = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+    def grouped_marketplace_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str):
+        orders = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
         grouped_orders = defaultdict(list)
         
         for order in orders:
@@ -1984,6 +2065,7 @@ def allMarketplaceData(request):
     
             for order in orders:
                 gross_revenue += order["order_total"]
+                total_units += order['items_order_quantity']
                 order_total = order["order_total"]
                 tax_price = 0
 
@@ -2023,7 +2105,7 @@ def allMarketplaceData(request):
                             total_cogs += item_data['w_total_cogs']
                         vendor_funding += item_data['vendor_funding'] 
                         total_product_cost += item_data['price']
-                        total_units += 1
+                        
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
@@ -2073,7 +2155,7 @@ def allMarketplaceData(request):
             ]
 
 
-    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
@@ -2083,7 +2165,7 @@ def allMarketplaceData(request):
         temp_price = 0
         sku_set = set()
 
-        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
         order_total = 0
         other_price = 0
         tax_price = 0
@@ -2093,6 +2175,7 @@ def allMarketplaceData(request):
             for order in result:
                 gross_revenue += order['order_total']
                 order_total = order['order_total']
+                total_units += order['items_order_quantity']
                 
                 tax_price = 0
 
@@ -2131,7 +2214,7 @@ def allMarketplaceData(request):
                         else:
                             total_cogs += item_data['w_total_cogs']
                         vendor_funding += item_data['vendor_funding']
-                        total_units += 1
+                        # total_units += 1
                         if item_data.get('sku'):
                             sku_set.add(item_data['sku'])
 
@@ -2159,9 +2242,9 @@ def allMarketplaceData(request):
             "shipping_cost": 0
         }
 
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
-        current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str):
+        current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
+        previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
 
         def with_delta(metric):
             return {
@@ -2184,7 +2267,7 @@ def allMarketplaceData(request):
                 "margin": with_delta("margin"),
                 "roi": with_delta("roi")
             },
-            "marketplace_list": grouped_marketplace_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+            "marketplace_list": grouped_marketplace_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
         }
 
     current_date = datetime.now()
@@ -2193,12 +2276,338 @@ def allMarketplaceData(request):
     prev_to_date = to_date - custom_duration
 
     response_data = {
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel),
+        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str),
         "from_date":from_date,
         "to_date":to_date
     }
 
     return JsonResponse(response_data, safe=False)
+
+
+@csrf_exempt
+def allMarketplaceDataxl(request):
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id', None)
+    brand_id = json_request.get('brand_id', [])
+    product_id = json_request.get('product_id',[])
+    manufacturer_name = json_request.get('manufacturer_name',[])
+    fulfillment_channel = json_request.get('fulfillment_channel',None)
+    preset = json_request.get('preset')
+    timezone_str = json_request.get('timezone', 'US/Pacific')
+
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
+
+    if start_date != None and start_date != "":
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        from_date = localized_from_date.astimezone(pytz.UTC)
+        to_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        to_date = to_date.replace(hour=23, minute=59, second=59)
+    else:
+        from_date, to_date = get_date_range(preset,timezone_str)
+
+
+    def grouped_marketplace_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str):
+        orders = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
+        grouped_orders = defaultdict(list)
+        
+        for order in orders:
+            key = (order.get("marketplace_id"), order.get("currency"))
+            grouped_orders[key].append(order)
+
+        marketplace_metrics = defaultdict(lambda: {"currency_list": []})
+
+        for (mp_id, currency), orders in grouped_orders.items():
+            gross_revenue = 0
+            total_cogs = 0
+            total_units = 0
+            refund = 0
+            tax_price = 0
+            other_price = 0
+            total_product_cost = 0
+            temp_price = 0
+            vendor_funding = 0
+            sku_set = set()
+
+            m_obj = Marketplace.objects(id=mp_id)
+            marketplace = m_obj[0].name if m_obj else ""
+
+            for order in orders:
+                gross_revenue += order["order_total"]
+                order_total = order["order_total"]
+                total_units += order['items_order_quantity']
+                
+                tax_price = 0
+
+                for item_id in order['order_items']:
+                    item_pipeline = [
+                        {"$match": {"_id": item_id}},
+                        {
+                            "$lookup": {
+                                "from": "product",
+                                "localField": "ProductDetails.product_id",
+                                "foreignField": "_id",
+                                "as": "product_ins"
+                            }
+                        },
+                        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "price": "$Pricing.ItemPrice.Amount",
+                                "tax_price": "$Pricing.ItemTax.Amount",
+                                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                                "sku": "$product_ins.sku",
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
+                            }
+                        }
+                    ]
+                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                    if item_result:
+                        item_data = item_result[0]
+                        temp_price += item_data['price']
+                        tax_price += item_data['tax_price']
+                        if order['marketplace_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs'] 
+                        else:
+                            total_cogs += item_data['w_total_cogs']
+                        vendor_funding += item_data['vendor_funding']
+                        total_product_cost += item_data['price']
+                        
+                        if item_data.get('sku'):
+                            sku_set.add(item_data['sku'])
+
+            # other_price += order_total - temp_price - tax_price
+
+            expenses = total_cogs
+            net_profit = (temp_price - expenses) + vendor_funding
+            roi = (net_profit / expenses) * 100 if expenses > 0 else 0
+            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+
+            currency_data = {
+                "Marketplace": marketplace,
+                "Currency": currency,
+                "Start Date": from_date.date(),
+                "End Date": to_date.date(),
+                "Gross Revenue": round(gross_revenue, 2),
+                "Expenses": round(expenses, 2),
+                # "SKU Count": len(sku_set),
+                # "Tax Price": round(tax_price, 2),
+                "COGS": round(total_cogs, 2),
+                "Net Profit": round(net_profit, 2),
+                "Margin (%)": round(margin, 2),
+                "ROI (%)": round(roi, 2),
+                "Refunds": refund,
+                "Units Sold": total_units,
+                # "Product Cost": round(total_product_cost, 2),
+                # "Other Price": round(other_price, 2),
+            }
+
+            marketplace_metrics[marketplace]["currency_list"].append(currency_data)
+
+        rows = []
+        for _, data in marketplace_metrics.items():
+            for row in data["currency_list"]:
+                rows.append(row)
+        return rows
+
+    # Build the Excel workbook
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Marketplace Metrics"
+
+    # Get data
+    data_rows = grouped_marketplace_metrics(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
+
+    # Write headers
+    if data_rows:
+        headers = list(data_rows[0].keys())
+        sheet.append(headers)
+        for col in range(1, len(headers) + 1):
+            sheet.cell(row=1, column=col).font = Font(bold=True)
+
+        # Write rows
+        for row in data_rows:
+            sheet.append(list(row.values()))
+
+        # Auto-adjust column widths
+        for col in sheet.columns:
+            max_length = max(len(str(cell.value)) if cell.value else 0 for cell in col)
+            sheet.column_dimensions[get_column_letter(col[0].column)].width = max_length + 2
+
+    # Prepare response
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+
+    response = HttpResponse(buffer, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response["Content-Disposition"] = f'attachment; filename="marketplace_metrics_{datetime.now().date()}.xlsx"'
+    return response
+
+@csrf_exempt
+def downloadMarketplaceDataCSV(request):
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id', None)
+    brand_id = json_request.get('brand_id', [])
+    product_id = json_request.get('product_id',[])
+    manufacturer_name = json_request.get('manufacturer_name',[])
+    fulfillment_channel = json_request.get('fulfillment_channel',None)
+    preset = json_request.get('preset')
+    timezone_str = json_request.get('timezone', 'US/Pacific')
+
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
+
+    if start_date != None and start_date != "":
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        from_date = localized_from_date.astimezone(pytz.UTC)
+        to_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        to_date = to_date.replace(hour=23, minute=59, second=59)
+    else:
+        from_date, to_date = get_date_range(preset,timezone_str)
+
+    def grouped_marketplace_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str):
+        orders = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
+        grouped_orders = defaultdict(list)
+
+        for order in orders:
+            key = (order.get("marketplace_id"), order.get("currency"))
+            grouped_orders[key].append(order)
+
+        marketplace_metrics = []
+
+        for (mp_id, currency), orders in grouped_orders.items():
+            gross_revenue = 0
+            total_cogs = 0
+            total_units = 0
+            refund = 0
+            tax_price = 0
+            other_price = 0
+            total_product_cost = 0
+            vendor_funding = 0
+            sku_set = set()
+
+            m_obj = Marketplace.objects(id=mp_id)
+            marketplace = m_obj[0].name if m_obj else ""
+
+            for order in orders:
+                gross_revenue += order["order_total"]
+                order_total = order["order_total"]
+                total_units += order['items_order_quantity']
+                temp_price = 0
+                tax_price = 0
+
+                for item_id in order['order_items']:
+                    item_pipeline = [
+                        {"$match": {"_id": item_id}},
+                        {
+                            "$lookup": {
+                                "from": "product",
+                                "localField": "ProductDetails.product_id",
+                                "foreignField": "_id",
+                                "as": "product_ins"
+                            }
+                        },
+                        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "price": "$Pricing.ItemPrice.Amount",
+                                "tax_price": "$Pricing.ItemTax.Amount",
+                                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                                "sku": "$product_ins.sku",
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
+                            }
+                        }
+                    ]
+                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                    if item_result:
+                        item_data = item_result[0]
+                        temp_price += item_data['price']
+                        tax_price += item_data['tax_price']
+                        if order['marketplace_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs'] 
+                        else:
+                            total_cogs += item_data['w_total_cogs']
+                        vendor_funding += item_data['vendor_funding']
+                        total_product_cost += item_data['price']
+                        
+                        if item_data.get('sku'):
+                            sku_set.add(item_data['sku'])
+
+            # other_price += order_total - temp_price - tax_price
+
+            expenses = total_cogs 
+            net_profit = (total_product_cost - expenses) + vendor_funding
+            roi = (net_profit / expenses) * 100 if expenses > 0 else 0
+            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+
+            marketplace_metrics.append({
+                "Marketplace": marketplace,
+                "Currency": currency,
+                "Start Date": from_date.date(),
+                "End Date": to_date.date(),
+                "Gross Revenue": round(gross_revenue, 2),
+                "Expenses": round(expenses, 2),
+                # "SKU Count": len(sku_set),
+                # "Tax Price": round(tax_price, 2),
+                "COGS": round(total_cogs, 2),
+                "Net Profit": round(net_profit, 2),
+                "Margin (%)": round(margin, 2),
+                "ROI (%)": round(roi, 2),
+                "Refunds": refund,
+                "Units Sold": total_units,
+                # "Product Cost": round(total_product_cost, 2),
+                # "Other Price": round(other_price, 2),
+            })
+
+        return marketplace_metrics
+
+    # Get data
+    metrics = grouped_marketplace_metrics(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
+
+    # Prepare CSV response
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="marketplace_metrics.csv"'
+
+    writer = csv.DictWriter(response, fieldnames=metrics[0].keys())
+    writer.writeheader()
+    for row in metrics:
+        writer.writerow(row)
+
+    return response
+
+
 
 #------------------------------------------------------------
 
@@ -2318,7 +2727,9 @@ def getProductPerformanceSummary(request):
     product_id = json_request.get('product_id',[])
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
-    today = datetime.now()
+    timezone_str = json_request.get('timezone', 'US/Pacific')
+    local_tz = timezone(timezone_str)
+    today = datetime.now(local_tz)
     yesterday_start_date = today - timedelta(days=1)
     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
@@ -2328,7 +2739,7 @@ def getProductPerformanceSummary(request):
     previous_day_end_date = previous_day_start_date.replace(hour=23, minute=59, second=59)
 
     def fetch_data(start_date, end_date):
-        return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+        return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
@@ -2356,133 +2767,42 @@ def downloadProductPerformanceSummary(request):
     product_id = json_request.get('product_id',[])
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
-    preset = json_request.get('preset')
+    timezone_str = json_request.get('timezone', 'US/Pacific')
+    local_tz = timezone(timezone_str)
+    today = datetime.now(local_tz)
+    yesterday_start_date = today - timedelta(days=1)
+    yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
 
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
-    if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
-    else:
-        from_date, to_date = get_date_range(preset)
+    previous_day_start_date = yesterday_start_date - timedelta(days=1)
+    previous_day_start_date = previous_day_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    previous_day_end_date = previous_day_start_date.replace(hour=23, minute=59, second=59)
 
-    orders = grossRevenue(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
- 
-    sku_summary = defaultdict(lambda: {
-        "sku": "",
-        "product_name": "",
-        "images": "",
-        "unitsSold": 0,
-        "grossRevenue": 0.0,
-        "totalCogs": 0.0,
-        "netProfit": 0.0,
-        "margin": 0.0,
-        "Trend" :"",
-        "vendor_funding" : 0      
-    })
- 
-    for order in orders:
-        order_total = order.get("order_total", 0.0)
-        item_ids = order.get("order_items", [])
-        m_name = order.get("marketplace_name", "")
-        fulfillment_channel = ""
-        temp_price = 0.0
-        total_cogs = 0.0
-        tax_price = 0
-        vendor_funding = 0
-        sku_set = set()
-        for item_id in item_ids:
-            item_pipeline = [
-                {"$match": {"_id": item_id}},
-                {
-                    "$lookup": {
-                        "from": "product",
-                        "localField": "ProductDetails.product_id",
-                        "foreignField": "_id",
-                        "as": "product_ins"
-                    }
-                },
-                {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                {
-                    "$project": {
-                        "_id": 0,
-                        "id" : "$product_ins._id",
-                        "price": "$Pricing.ItemPrice.Amount",
-                        "tax_price": "$Pricing.ItemPrice.tax_price",
-                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                        "sku": "$product_ins.sku",
-                        "fulfillmentChannel": {
-                            "$cond": {
-                            "if": {"$eq": ["$product_ins.fullfillment_by_channel", True]},
-                            "then": "FBA",
-                            "else": "FBM"
-                            }
-                            },
-                        "product_name": "$product_ins.product_title",
-                        "images": "$product_ins.image_urls",
-                        "asin": "$product_ins.asin",
-                        "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                        "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                        "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
-                    }
-                }
-            ]
-            item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-            if item_result:
-                item_data = item_result[0]
-                sku = item_data.get("sku")
-                id = item_data.get("id")
-                product_name = item_data.get("product_name", "")
-                images = item_data.get("images", [])
-                asin = item_data.get("asin", "")
-                
-                tax_price = item_data.get("tax_price", 0.0)
-                price = item_data.get("price", 0.0)
-                if order['marketplace_name'] == "Amazon":
-                    cogs = item_data.get("total_cogs", 0.0)
-                else:
-                    cogs = item_data.get("w_total_cogs", 0.0)
-                temp_price += price
-                total_cogs += cogs
-                vendor_funding += item_data.get("vendor_funding", 0.0)
-                fulfillment_channel = item_data.get("fulfillmentChannel", 0.0)
-                if sku:
-                    sku_set.add(sku)
-                    sku_summary[sku]["id"] = str(id)
-                    sku_summary[sku]["sku"] = sku
-                    sku_summary[sku]["product_name"] = product_name
-                    sku_summary[sku]["images"] = images
-                    sku_summary[sku]["asin"] = asin
-                    sku_summary[sku]["fulfillment_channel"] = fulfillment_channel
-                    sku_summary[sku]["m_name"] = m_name
-                    sku_summary[sku]["unitsSold"] += 1
-                    sku_summary[sku]["grossRevenue"] += price
-                    sku_summary[sku]["totalCogs"] += cogs
-                    sku_summary[sku]['vendor_funding'] += vendor_funding
- 
-        # other_price = order_total - temp_price - tax_price
- 
-        for sku in sku_set:
-            gross = sku_summary[sku]["grossRevenue"]
-            cogs = sku_summary[sku]["totalCogs"]
-            vendor_funding = sku_summary[sku]['vendor_funding']
-            net_profit = (gross - cogs) + vendor_funding
-            margin = (net_profit / gross) * 100 if gross > 0 else 0
-            sku_summary[sku]["netProfit"] = round(net_profit, 2)
-            sku_summary[sku]["margin"] = round(margin, 2)
-            if action == "top":
-                sku_summary[sku]["Trend"] = "Increasing"
-            elif action == "least":
-                sku_summary[sku]["Trend"] = "Decreasing"
-    # Sort and limit based on action
-    sorted_summary = sorted(sku_summary.values(), key=lambda x: x["unitsSold"], reverse=True)
+    def fetch_data(start_date, end_date):
+        return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
+        future_yes_data = executor.submit(fetch_data, yesterday_start_date, yesterday_end_date)
+
+        prev_data = future_prev_data.result()
+        yes_data = future_yes_data.result()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_yes_data = executor.submit(sales, yes_data)
+        future_prev_data = executor.submit(sales, prev_data)
+
+        yes_data = future_yes_data.result()
+        prev_data = future_prev_data.result()
+
+    data = get_top_movers(yes_data, prev_data)
  
     if action == "top":
-        final_summary = sorted_summary[:3]
+        final_summary = data['top_increasing']
     elif action == "least":
-        final_summary = sorted_summary[-3:]
-    else:
-        final_summary = sorted_summary  # all products
+        final_summary = data['top_decreasing']
+    # else:
+    #     final_summary = sorted_summary  # all products
  
     # Create Excel workbook
     wb = openpyxl.Workbook()
@@ -2506,8 +2826,8 @@ def downloadProductPerformanceSummary(request):
             data["sku"],
             data["fulfillment_channel"],
             data["m_name"],
-            from_date.date(),
-            to_date.date(),
+            yesterday_start_date.date(),
+            yesterday_end_date.date(),
             round(data["grossRevenue"], 2),
             round(data["netProfit"], 2),
             data["unitsSold"],
@@ -2524,7 +2844,7 @@ def downloadProductPerformanceSummary(request):
     response = HttpResponse(
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
-    filename = f"Product_Performance_{from_date.strftime('%Y-%m-%d')}_{action or 'all'}.xlsx"
+    filename = f"Product_Performance_{yesterday_start_date.strftime('%Y-%m-%d')}_{action or 'all'}.xlsx"
     response['Content-Disposition'] = f'attachment; filename={filename}'
     wb.save(response)
  
@@ -2541,136 +2861,44 @@ def downloadProductPerformanceCSV(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
+    timezone_str = json_request.get('timezone', 'US/Pacific')
+    local_tz = timezone(timezone_str)
+    today = datetime.now(local_tz)
+    yesterday_start_date = today - timedelta(days=1)
+    yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
 
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
-    if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
-    else:
-        from_date, to_date = get_date_range(preset)
+    previous_day_start_date = yesterday_start_date - timedelta(days=1)
+    previous_day_start_date = previous_day_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    previous_day_end_date = previous_day_start_date.replace(hour=23, minute=59, second=59)
 
-    orders = grossRevenue(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
- 
-    sku_summary = defaultdict(lambda: {
-        "sku": "",
-        "product_name": "",
-        "images": "",
-        "unitsSold": 0,
-        "grossRevenue": 0.0,
-        "totalCogs": 0.0,
-        "netProfit": 0.0,
-        "margin": 0.0,
-        "Trend":"",
-        "vendor_funding" : 0
-    })
- 
-    for order in orders:
-        order_total = order.get("order_total", 0.0)
-        item_ids = order.get("order_items", [])
-        fulfillment_channel = ""
-        temp_price = 0.0
-        total_cogs = 0.0
-        tax_price = 0
-        vendor_funding = 0
-        sku_set = set()
-        m_name = order.get("marketplace_name", "")
+    def fetch_data(start_date, end_date):
+        return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
-        for item_id in item_ids:
-            item_pipeline = [
-                {"$match": {"_id": item_id}},
-                {
-                    "$lookup": {
-                        "from": "product",
-                        "localField": "ProductDetails.product_id",
-                        "foreignField": "_id",
-                        "as": "product_ins"
-                    }
-                },
-                {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                {
-                    "$project": {
-                        "_id": 0,
-                        "price": "$Pricing.ItemPrice.Amount",
-                        "tax_price": "$Pricing.ItemPrice.tax_price",
-                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                        "sku": "$product_ins.sku",
-                        "product_name": "$product_ins.product_title",
-                        "images": "$product_ins.image_urls",
-                        "fulfillmentChannel": {
-                            "$cond": {
-                            "if": {"$eq": ["$product_ins.fullfillment_by_channel", True]},
-                            "then": "FBA",
-                            "else": "FBM"
-                            }
-                            },
-                        "asin": "$product_ins.asin",
-                        "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                        "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                        "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
-                    }
-                }
-            ]
-            item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-            if item_result:
-                item_data = item_result[0]
-                sku = item_data.get("sku")
-                product_name = item_data.get("product_name", "")
-                images = item_data.get("images", [])
-                asin =  item_data.get("asin", "")
-                
-                price = item_data.get("price", 0.0)
-                tax_price = item_data.get("tax_price", 0.0)
-                if order['marketplace_name'] == "Amazon":
-                    cogs = item_data.get("total_cogs", 0.0)
-                else:
-                    cogs = item_data.get("w_total_cogs", 0.0)
-                temp_price += price
-                total_cogs += cogs
-                vendor_funding += item_data.get("vendor_funding", 0.0)
-                fulfillment_channel = item_data.get("fulfillmentChannel", 0.0)
-                if sku:
-                    sku_set.add(sku)
- 
-                    sku_summary[sku]["sku"] = sku
-                    sku_summary[sku]["product_name"] = product_name
-                    sku_summary[sku]["images"] = images
-                    sku_summary[sku]["m_name"] = m_name
-                    sku_summary[sku]["fulfillment_channel"] = fulfillment_channel
- 
-                    sku_summary[sku]["asin"] = asin
-                    sku_summary[sku]["unitsSold"] += 1
-                    sku_summary[sku]["grossRevenue"] += price
-                    sku_summary[sku]["totalCogs"] += cogs
-                    sku_summary[sku]['vendor_funding'] += vendor_funding
- 
-        # other_price = order_total - temp_price - tax_price
- 
-        for sku in sku_set:
-            gross = sku_summary[sku]["grossRevenue"]
-            cogs = sku_summary[sku]["totalCogs"]
-            vendor_funding = sku_summary[sku]['vendor_funding']
-            net_profit = (gross - cogs) + vendor_funding
-            margin = (net_profit / gross) * 100 if gross > 0 else 0
-            sku_summary[sku]["netProfit"] = round(net_profit, 2)
-            sku_summary[sku]["margin"] = round(margin, 2)
-            if action == "top":
-                sku_summary[sku]["Trend"] = "Increasing"
-            elif action == "least":
-                sku_summary[sku]["Trend"] = "Decreasing"
-    # Get action parameter to determine top or least
- 
-    # Sort and pick top 3 or least 3 based on netProfit
-    sorted_summary = sorted(
-        sku_summary.values(),
-        key=lambda x: x["unitsSold"],
-        reverse=(action == "top")
-    )
-    limited_summary = sorted_summary[:3]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
+        future_yes_data = executor.submit(fetch_data, yesterday_start_date, yesterday_end_date)
+
+        prev_data = future_prev_data.result()
+        yes_data = future_yes_data.result()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_yes_data = executor.submit(sales, yes_data)
+        future_prev_data = executor.submit(sales, prev_data)
+
+        yes_data = future_yes_data.result()
+        prev_data = future_prev_data.result()
+
+    data = get_top_movers(yes_data, prev_data)
+
+    if action == "top":
+        limited_summary = data['top_increasing']
+    elif action == "least":
+        limited_summary = data['top_decreasing']
  
     # Create CSV response
     response = HttpResponse(content_type='text/csv')
-    filename = f"Product_Performance_{from_date.strftime('%Y-%m-%d')}.csv"
+    filename = f"Product_Performance_{yesterday_start_date.strftime('%Y-%m-%d')}.csv"
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
  
     writer = csv.writer(response)
@@ -2687,8 +2915,8 @@ def downloadProductPerformanceCSV(request):
             data["sku"],
             data["fulfillment_channel"],
             data["m_name"],
-            from_date.date(),
-            to_date.date(),
+            yesterday_start_date.date(),
+            yesterday_end_date.date(),
             round(data["grossRevenue"], 2),
             round(data["netProfit"], 2),
             data["unitsSold"],
@@ -2699,303 +2927,6 @@ def downloadProductPerformanceCSV(request):
     return response
  
 
-
-@csrf_exempt
-def allMarketplaceDataxl(request):
-    # from_str = request.GET.get("from_date")
-    # to_str = request.GET.get("to_date")
-
-    json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
-    brand_id = json_request.get('brand_id', [])
-    product_id = json_request.get('product_id',[])
-    manufacturer_name = json_request.get('manufacturer_name',[])
-    fulfillment_channel = json_request.get('fulfillment_channel',None)
-    preset = json_request.get('preset')
-
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
-    if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
-    else:
-        from_date, to_date = get_date_range(preset)
-
-    # try:
-    #     from_date = datetime.strptime(from_str, "%Y-%m-%d")
-    #     to_date = datetime.strptime(to_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
-    # except:
-    #     to_date = datetime.now()
-    #     from_date = to_date - timedelta(days=30)
-
-    def grouped_marketplace_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
-        orders = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        grouped_orders = defaultdict(list)
-        
-        for order in orders:
-            key = (order.get("marketplace_id"), order.get("currency"))
-            grouped_orders[key].append(order)
-
-        marketplace_metrics = defaultdict(lambda: {"currency_list": []})
-
-        for (mp_id, currency), orders in grouped_orders.items():
-            gross_revenue = 0
-            total_cogs = 0
-            total_units = 0
-            refund = 0
-            tax_price = 0
-            other_price = 0
-            total_product_cost = 0
-            temp_price = 0
-            vendor_funding = 0
-            sku_set = set()
-
-            m_obj = Marketplace.objects(id=mp_id)
-            marketplace = m_obj[0].name if m_obj else ""
-
-            for order in orders:
-                gross_revenue += order["order_total"]
-                order_total = order["order_total"]
-                
-                tax_price = 0
-
-                for item_id in order['order_items']:
-                    item_pipeline = [
-                        {"$match": {"_id": item_id}},
-                        {
-                            "$lookup": {
-                                "from": "product",
-                                "localField": "ProductDetails.product_id",
-                                "foreignField": "_id",
-                                "as": "product_ins"
-                            }
-                        },
-                        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                        {
-                            "$project": {
-                                "_id": 0,
-                                "price": "$Pricing.ItemPrice.Amount",
-                                "tax_price": "$Pricing.ItemTax.Amount",
-                                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                                "sku": "$product_ins.sku",
-                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
-                            }
-                        }
-                    ]
-                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-                    if item_result:
-                        item_data = item_result[0]
-                        temp_price += item_data['price']
-                        tax_price += item_data['tax_price']
-                        if order['marketplace_name'] == "Amazon":
-                            total_cogs += item_data['total_cogs'] 
-                        else:
-                            total_cogs += item_data['w_total_cogs']
-                        vendor_funding += item_data['vendor_funding']
-                        total_product_cost += item_data['price']
-                        total_units += 1
-                        if item_data.get('sku'):
-                            sku_set.add(item_data['sku'])
-
-            # other_price += order_total - temp_price - tax_price
-
-            expenses = total_cogs
-            net_profit = (temp_price - expenses) + vendor_funding
-            roi = (net_profit / expenses) * 100 if expenses > 0 else 0
-            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-
-            currency_data = {
-                "Marketplace": marketplace,
-                "Currency": currency,
-                "Start Date": from_date.date(),
-                "End Date": to_date.date(),
-                "Gross Revenue": round(gross_revenue, 2),
-                "Expenses": round(expenses, 2),
-                # "SKU Count": len(sku_set),
-                # "Tax Price": round(tax_price, 2),
-                "COGS": round(total_cogs, 2),
-                "Net Profit": round(net_profit, 2),
-                "Margin (%)": round(margin, 2),
-                "ROI (%)": round(roi, 2),
-                "Refunds": refund,
-                "Units Sold": total_units,
-                # "Product Cost": round(total_product_cost, 2),
-                # "Other Price": round(other_price, 2),
-            }
-
-            marketplace_metrics[marketplace]["currency_list"].append(currency_data)
-
-        rows = []
-        for _, data in marketplace_metrics.items():
-            for row in data["currency_list"]:
-                rows.append(row)
-        return rows
-
-    # Build the Excel workbook
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    sheet.title = "Marketplace Metrics"
-
-    # Get data
-    data_rows = grouped_marketplace_metrics(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-
-    # Write headers
-    if data_rows:
-        headers = list(data_rows[0].keys())
-        sheet.append(headers)
-        for col in range(1, len(headers) + 1):
-            sheet.cell(row=1, column=col).font = Font(bold=True)
-
-        # Write rows
-        for row in data_rows:
-            sheet.append(list(row.values()))
-
-        # Auto-adjust column widths
-        for col in sheet.columns:
-            max_length = max(len(str(cell.value)) if cell.value else 0 for cell in col)
-            sheet.column_dimensions[get_column_letter(col[0].column)].width = max_length + 2
-
-    # Prepare response
-    buffer = io.BytesIO()
-    workbook.save(buffer)
-    buffer.seek(0)
-
-    response = HttpResponse(buffer, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    response["Content-Disposition"] = f'attachment; filename="marketplace_metrics_{datetime.now().date()}.xlsx"'
-    return response
-
-@csrf_exempt
-def downloadMarketplaceDataCSV(request):
-    json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
-    brand_id = json_request.get('brand_id', [])
-    product_id = json_request.get('product_id',[])
-    manufacturer_name = json_request.get('manufacturer_name',[])
-    fulfillment_channel = json_request.get('fulfillment_channel',None)
-    preset = json_request.get('preset')
-
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
-    if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
-    else:
-        from_date, to_date = get_date_range(preset)
-
-
-    def grouped_marketplace_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
-        orders = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        grouped_orders = defaultdict(list)
-
-        for order in orders:
-            key = (order.get("marketplace_id"), order.get("currency"))
-            grouped_orders[key].append(order)
-
-        marketplace_metrics = []
-
-        for (mp_id, currency), orders in grouped_orders.items():
-            gross_revenue = 0
-            total_cogs = 0
-            total_units = 0
-            refund = 0
-            tax_price = 0
-            other_price = 0
-            total_product_cost = 0
-            vendor_funding = 0
-            sku_set = set()
-
-            m_obj = Marketplace.objects(id=mp_id)
-            marketplace = m_obj[0].name if m_obj else ""
-
-            for order in orders:
-                gross_revenue += order["order_total"]
-                order_total = order["order_total"]
-                temp_price = 0
-                tax_price = 0
-
-                for item_id in order['order_items']:
-                    item_pipeline = [
-                        {"$match": {"_id": item_id}},
-                        {
-                            "$lookup": {
-                                "from": "product",
-                                "localField": "ProductDetails.product_id",
-                                "foreignField": "_id",
-                                "as": "product_ins"
-                            }
-                        },
-                        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                        {
-                            "$project": {
-                                "_id": 0,
-                                "price": "$Pricing.ItemPrice.Amount",
-                                "tax_price": "$Pricing.ItemTax.Amount",
-                                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                                "sku": "$product_ins.sku",
-                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
-                            }
-                        }
-                    ]
-                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-                    if item_result:
-                        item_data = item_result[0]
-                        temp_price += item_data['price']
-                        tax_price += item_data['tax_price']
-                        if order['marketplace_name'] == "Amazon":
-                            total_cogs += item_data['total_cogs'] 
-                        else:
-                            total_cogs += item_data['w_total_cogs']
-                        vendor_funding += item_data['vendor_funding']
-                        total_product_cost += item_data['price']
-                        total_units += 1
-                        if item_data.get('sku'):
-                            sku_set.add(item_data['sku'])
-
-            # other_price += order_total - temp_price - tax_price
-
-            expenses = total_cogs 
-            net_profit = (total_product_cost - expenses) + vendor_funding
-            roi = (net_profit / expenses) * 100 if expenses > 0 else 0
-            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-
-            marketplace_metrics.append({
-                "Marketplace": marketplace,
-                "Currency": currency,
-                "Start Date": from_date.date(),
-                "End Date": to_date.date(),
-                "Gross Revenue": round(gross_revenue, 2),
-                "Expenses": round(expenses, 2),
-                # "SKU Count": len(sku_set),
-                # "Tax Price": round(tax_price, 2),
-                "COGS": round(total_cogs, 2),
-                "Net Profit": round(net_profit, 2),
-                "Margin (%)": round(margin, 2),
-                "ROI (%)": round(roi, 2),
-                "Refunds": refund,
-                "Units Sold": total_units,
-                # "Product Cost": round(total_product_cost, 2),
-                # "Other Price": round(other_price, 2),
-            })
-
-        return marketplace_metrics
-
-    # Get data
-    metrics = grouped_marketplace_metrics(from_date, to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-
-    # Prepare CSV response
-    response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = 'attachment; filename="marketplace_metrics.csv"'
-
-    writer = csv.DictWriter(response, fieldnames=metrics[0].keys())
-    writer.writeheader()
-    for row in metrics:
-        writer.writerow(row)
-
-    return response
 
 
 
@@ -3415,7 +3346,7 @@ def generate_monthly_intervals(from_date, to_date):
     return intervals
 
 # Function to calculate the profit/loss metrics
-def calculate_metrics(start_date, end_date):
+def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone):
     gross_revenue = 0
     total_cogs = 0
     refund = 0
@@ -3426,7 +3357,7 @@ def calculate_metrics(start_date, end_date):
     product_categories = {}
     product_completeness = {"complete": 0, "incomplete": 0}
 
-    result = grossRevenue(start_date, end_date)
+    result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone)
     order_total = 0
     # other_price = 0
     tax_price = 0
@@ -3436,6 +3367,7 @@ def calculate_metrics(start_date, end_date):
         for order in result:
             gross_revenue += order['order_total']
             order_total = order['order_total']
+            total_units += order['items_order_quantity']
             tax_price = 0
 
             for item_id in order['order_items']:
@@ -3474,7 +3406,7 @@ def calculate_metrics(start_date, end_date):
                     else:
                         total_cogs += item_data['w_total_cogs']
                     vendor_funding += item_data['vendor_funding']
-                    total_units += 1
+                    
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
 
@@ -3530,21 +3462,32 @@ def getProfitAndLossDetails(request):
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
     timezone = json_request.get('timezone', 'US/Pacific')
-    local_tz = pytz.timezone(timezone)
-
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
     if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        from_date = localized_from_date.astimezone(pytz.UTC)
+        to_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        to_date = to_date.replace(hour=23, minute=59, second=59)
     else:
-        from_date, to_date = get_date_range(preset)
+        from_date, to_date = get_date_range(preset,timezone)
 
-    # Adjust start_date and end_date to the provided timezone
-    from_date = local_tz.localize(from_date.replace(tzinfo=None)).astimezone(pytz.utc)
-    to_date = local_tz.localize(to_date.replace(tzinfo=None)).astimezone(pytz.utc)
     
-    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+    
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
@@ -3557,7 +3500,7 @@ def getProfitAndLossDetails(request):
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
 
-        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone)
         order_total = 0
         product_cost = 0
         tax_price = 0
@@ -3566,6 +3509,7 @@ def getProfitAndLossDetails(request):
         if result:
             for order in result:
                 gross_revenue += order['order_total']
+                total_units +=order['items_order_quantity']
                 # order_total = order['order_total']
                 # tax_price = 0
                 
@@ -3815,23 +3759,31 @@ def profit_loss_chart(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
+    timezone = json_request.get('timezone', 'US/Pacific')
+
 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-
-
-    timezone = json_request.get('timezone', 'US/Pacific')
-    local_tz = pytz.timezone(timezone)
-
-   
     if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        from_date = localized_from_date.astimezone(pytz.UTC)
+        to_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        to_date = to_date.replace(hour=23, minute=59, second=59)
     else:
-        from_date, to_date = get_date_range(preset)
-
-    from_date = local_tz.localize(from_date.replace(tzinfo=None)).astimezone(pytz.utc)
-    to_date = local_tz.localize(to_date.replace(tzinfo=None)).astimezone(pytz.utc)
+        from_date, to_date = get_date_range(preset,timezone)
 
 
 
@@ -3844,7 +3796,7 @@ def profit_loss_chart(request):
         return start_date, end_date
 
 
-    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone):
         gross_revenue_amt = 0
         total_cogs = 0
         refund = 0
@@ -3860,10 +3812,11 @@ def profit_loss_chart(request):
         temp_price = 0
         vendor_funding = 0
 
-        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone)
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
+            total_units +=order['items_order_quantity']
             # temp_price = 0
             
 
@@ -3903,7 +3856,7 @@ def profit_loss_chart(request):
                     else:
                         total_cogs += item.get("w_total_cogs", 0)
                     vendor_funding += item.get("vendor_funding", 0)
-                    total_units += 1
+                    
                     sku = item.get("sku")
                     if sku:
                         sku_set.add(sku)
@@ -3982,7 +3935,7 @@ def profit_loss_chart(request):
             year, month = int(key[:4]), int(key[5:7])
             start, end = get_month_range(year, month)
 
-        data = calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        data = calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone)
 
         values["grossRevenue"][key] = data["grossRevenue"]
         values["expenses"][key] = data["expenses"]
@@ -4008,21 +3961,38 @@ def profitLossExportXl(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset', "Last 30 days")
-
+    timezone_str = json_request.get('timezone', 'US/Pacific')
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
+    if start_date and start_date != "":
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        from_date = localized_from_date.astimezone(pytz.UTC)
+        to_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        to_date = to_date.replace(hour=23, minute=59, second=59)
     else:
-        from_date, to_date = get_date_range(preset)
+        # get_date_range should return UTC datetimes
+        from_date, to_date = get_date_range(preset, timezone_str)
+
     def get_month_range(year, month):
         start_date = datetime(year, month, 1)
         last_day = monthrange(year, month)[1]
         end_date = datetime(year, month, last_day, 23, 59, 59)
         return start_date, end_date
 
-    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str):
         gross_revenue_amt = 0
         total_cogs = 0
         refund = 0
@@ -4036,10 +4006,11 @@ def profitLossExportXl(request):
         temp_price = 0
         vendor_funding = 0
         m_name = ""
-        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
+            total_units +=order['items_order_quantity']
             # temp_price = 0
             tax_price = 0
             marketplace_id = order.get("marketplace_id", "")
@@ -4081,7 +4052,7 @@ def profitLossExportXl(request):
                     else:
                         total_cogs += item.get("w_total_cogs", 0)
                     vendor_funding += item.get("vendor_funding", 0)
-                    total_units += 1
+                    
                     sku = item.get("sku")
                     if sku:
                         sku_set.add(sku)
@@ -4162,7 +4133,7 @@ def profitLossExportXl(request):
             start, end = get_month_range(year, month)
             time_label = f"{year}-{month:02d}"
 
-        row_data = calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        row_data = calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
 
         ws.append([
             row_data.get("Marketplace", ""),
@@ -4187,28 +4158,6 @@ def profitLossExportXl(request):
 
 @csrf_exempt
 def profitLossChartCsv(request):
-
-    def get_date_range(preset):
-        today = datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
-        if preset == "Today":
-            return today, today + timedelta(days=1) - timedelta(seconds=1)
-        elif preset == "Yesterday":
-            yesterday = today - timedelta(days=1)
-            return yesterday, today - timedelta(seconds=1)
-        elif preset == "This Week":
-            start = today - timedelta(days=today.weekday())
-            return start, today + timedelta(days=6 - today.weekday(), hours=23, minutes=59, seconds=59)
-        elif preset == "Last 7 days":
-            return today - timedelta(days=6), today + timedelta(hours=23, minutes=59, seconds=59)
-        elif preset == "Last 14 days":
-            return today - timedelta(days=13), today + timedelta(hours=23, minutes=59, seconds=59)
-        elif preset == "Last 30 days":
-            return today - timedelta(days=29), today + timedelta(hours=23, minutes=59, seconds=59)
-        elif preset == "Last 60 days":
-            return today - timedelta(days=59), today + timedelta(hours=23, minutes=59, seconds=59)
-        elif preset == "Last 90 days":
-            return today - timedelta(days=89), today + timedelta(hours=23, minutes=59, seconds=59)
-        return today, today
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
@@ -4217,13 +4166,30 @@ def profitLossChartCsv(request):
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset',"Last 7 days")
 
+    timezone_str = json_request.get('timezone', 'US/Pacific')
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
+    if start_date and start_date != "":
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        from_date = localized_from_date.astimezone(pytz.UTC)
+        to_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        to_date = to_date.replace(hour=23, minute=59, second=59)
     else:
-        from_date, to_date = get_date_range(preset)
+        # get_date_range should return UTC datetimes
+        from_date, to_date = get_date_range(preset, timezone_str)
         
     def get_month_range(year, month):
         from calendar import monthrange
@@ -4242,7 +4208,7 @@ def profitLossChartCsv(request):
             current = current.replace(day=1)
         return months
     
-    def dummy_calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+    def dummy_calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str):
         gross_revenue_amt = 0
         total_cogs = 0
         refund = 0
@@ -4256,10 +4222,11 @@ def profitLossChartCsv(request):
         vendor_funding  =0 
         temp_price = 0
         m_name = ""
-        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
+            total_units +=order['items_order_quantity']
             # temp_price = 0
             tax_price = 0
             marketplace_id = order.get("marketplace_id", "")
@@ -4301,7 +4268,7 @@ def profitLossChartCsv(request):
                     else:
                         total_cogs += item.get("w_total_cogs", 0)
                     vendor_funding += item.get("vendor_funding", 0)
-                    total_units += 1
+                    
                     sku = item.get("sku")
                     if sku:
                         sku_set.add(sku)
@@ -4362,7 +4329,7 @@ def profitLossChartCsv(request):
             year, month = int(key[:4]), int(key[5:7])
             start, end = get_month_range(year, month)
 
-        data = dummy_calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        data = dummy_calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
 
         writer.writerow([
             data.get("Marketplace", ""),
@@ -4815,16 +4782,27 @@ def productsDetailsPageSummary(request):
             "$project": {
                 "_id": 0,
                 "sku": "$sku",
-                "asin" : {"$ifNull" : ["$product_id",""]},
-                "product_title" : {"$ifNull" : ["$product_title",""]},
-                "image_url" : {"$ifNull" : ["$image_url",""]},
-
-                "price" : {"$ifNull" : ["$price",0.0]},
-                "stock" : {"$ifNull" : ["$quantity",0]},
-                "review_count" : {"$ifNull" : ["$review_count",0]},
-                "age" : {"$ifNull" : ["$age",0]},
-                "listing_quality_score" : {"$ifNull" : ["$listing_quality_score",0.0]},
-                "currency" : {"$ifNull" : ["$currency",""]},
+                "asin": {"$ifNull": ["$product_id", ""]},
+                "product_title": {"$ifNull": ["$product_title", ""]},
+                "image_url": {"$ifNull": ["$image_url", ""]},
+                "price": {"$ifNull": ["$price", 0.0]},
+                "stock": {"$ifNull": ["$quantity", 0]},
+                "review_count": {"$ifNull": ["$review_count", 0]},
+                "age": {
+                    "$cond": {
+                        "if": {"$ne": ["$product_created_date", None]},
+                        "then": {
+                            "$dateDiff": {
+                                "startDate": "$product_created_date",
+                                "endDate": "$$NOW",
+                                "unit": "month"
+                            }
+                        },
+                        "else": 0
+                    }
+                },
+                "listing_quality_score": {"$ifNull": ["$listing_quality_score", 0.0]},
+                "currency": {"$ifNull": ["$currency", ""]},
             }
         }
     ]
@@ -4882,8 +4860,11 @@ def productsSalesOverview(request):
     from django.utils import timezone
 
     product_id = request.GET.get("product_id")
-    preset = request.GET.get("preset", "").strip().title()  # Normalize preset
-    now = timezone.now()
+    preset = request.GET.get("preset", "")
+    timezone_str = request.GET.get('timezone', 'US/Pacific')
+    local_tz = timezone(timezone_str)
+    now = datetime.now(local_tz)
+    
     is_hourly = False
 
     login_date = now.date()
@@ -4912,7 +4893,7 @@ def productsSalesOverview(request):
         end_date = datetime.strptime(end_date, "%Y-%m-%d")
     else:
         is_hourly = preset in ["Today", "Yesterday"]
-        start_date, end_date = get_date_range(preset)
+        start_date, end_date = get_date_range(preset,timezone_str)
     
 
     if start_date and end_date:
@@ -4952,7 +4933,9 @@ def productsSalesOverview(request):
                 current += timedelta(days=1)
 
     # Calculate dynamic date ranges based on today's date
-    today = datetime.now().date()
+    
+    local_tz = timezone(timezone_str)
+    today = datetime.now(local_tz).date()
     yesterday = today - timedelta(days=1)
     prev_day = yesterday - timedelta(days=1)
     prev_prev_day = prev_day - timedelta(days=1)
@@ -5115,16 +5098,37 @@ def productsTrafficandConversions(request):
     product_obj = DatabaseModel.get_document(Product.objects,{"id" : ObjectId(product_id)},['product_id'])
     data['asin'] = product_obj.product_id
     # Calculate date ranges
-    start_date, end_date = get_date_range(preset)
-    start_date = request.GET.get('start_date')
-    end_date = request.GET.get('end_date')
-    if start_date and end_date:
-        start_date = datetime.strptime(start_date, "%Y-%m-%d")
-        end_date = datetime.strptime(end_date, "%Y-%m-%d")
+    
+    timezone_str = request.GET.get('timezone', 'US/Pacific')
+
+    start_date = request.GET.get("start_date", None)
+    end_date = request.GET.get("end_date", None)
+
+    if start_date != None and start_date != "":
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
-        start_date, end_date = get_date_range(preset)
+        start_date, to_date = get_date_range(preset,timezone_str)
 
     data['date'] = start_date.strftime("%b %d, %Y") + " - " + end_date.strftime("%b %d, %Y")
+
+    if timezone_str != 'UTC':
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
     
     
     # Get daily sales data using existing function
@@ -5984,23 +5988,33 @@ def getProfitAndLossDetailsForProduct(request):
     preset = json_request.get('preset')
 
     preset = json_request.get('preset')
-    timezone = json_request.get('timezone')
-    
+    timezone_str = request.GET.get('timezone', 'US/Pacific')
 
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
+    start_date = request.GET.get("start_date", None)
+    end_date = request.GET.get("end_date", None)
+
     if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
-        from_date, to_date = get_date_range(preset)
-    if timezone:
-        local_tz = pytz.timezone(timezone)
-        # Adjust start_date and end_date to the provided timezone
-        from_date = local_tz.localize(from_date).astimezone(pytz.utc)
-        to_date = local_tz.localize(to_date).astimezone(pytz.utc)
+        start_date, end_date = get_date_range(preset,timezone_str)
     
-    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel):
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str):
         gross_revenue = 0
         total_cogs = 0
         refund = 0
@@ -6013,7 +6027,7 @@ def getProfitAndLossDetailsForProduct(request):
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
 
-        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
         order_total = 0
         # other_price = 0
         tax_price = 0
@@ -6115,9 +6129,9 @@ def getProfitAndLossDetailsForProduct(request):
             'channel_fee' : channel_fee
         }
 
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id=None,brand_id=[],product_id=[],manufacturer_name=[],fulfillment_channel=[],preset=None):
-        current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
-        previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id=None,brand_id=[],product_id=[],manufacturer_name=[],fulfillment_channel=[],preset=None,timezone_str="UTC"):
+        current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
+        previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
 
         def with_delta(metric):
             return {
@@ -6244,13 +6258,12 @@ def getProfitAndLossDetailsForProduct(request):
     # now = current_date
 
     
-    
-    custom_duration = to_date - from_date
-    prev_from_date = from_date - custom_duration
-    prev_to_date = to_date - custom_duration
+    custom_duration = end_date - start_date
+    prev_from_date = start_date - custom_duration
+    prev_to_date = end_date - custom_duration
 
     response_data = {
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,None,[],[product_id],[],[],preset),
+        "custom": create_period_response("Custom", start_date, end_date, prev_from_date, prev_to_date,None,[],[product_id],[],[],preset),
     }
 
     return response_data
@@ -6263,13 +6276,31 @@ def profitlosschartForProduct(request):
     product_id = json_request.get('product_id')
     preset = json_request.get('preset')
 
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
+    timezone_str = request.GET.get('timezone', 'US/Pacific')
+
+    start_date = request.GET.get("start_date", None)
+    end_date = request.GET.get("end_date", None)
+
     if start_date != None and start_date != "":
-        from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
-        from_date, to_date = get_date_range(preset)
+        start_date, end_date = get_date_range(preset,timezone_str)
         
     def get_month_range(year, month):
         start_date = datetime(year, month, 1)
@@ -6278,7 +6309,7 @@ def profitlosschartForProduct(request):
         return start_date, end_date
 
 
-    def calculate_metrics(start_date, end_date,marketplace_id=None,brand_id=[],product_id=[],manufacturer_name=[],fulfillment_channel=[]):
+    def calculate_metrics(start_date, end_date,marketplace_id=None,brand_id=[],product_id=[],manufacturer_name=[],fulfillment_channel=[],timezone_str="UTC"):
         gross_revenue_amt = 0
         total_cogs = 0
         refund = 0
@@ -6294,7 +6325,7 @@ def profitlosschartForProduct(request):
         temp_price = 0
         vendor_funding = 0
 
-        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
             order_total = order.get("order_total", 0)
@@ -6390,17 +6421,17 @@ def profitlosschartForProduct(request):
 
     # Key generation
     if preset in hourly_presets:
-        interval_keys = [(from_date + timedelta(hours=i)).strftime("%Y-%m-%d %H:00:00") 
-                         for i in range(0, int((to_date - from_date).total_seconds() // 3600) + 1)]
+        interval_keys = [(start_date + timedelta(hours=i)).strftime("%Y-%m-%d %H:00:00") 
+                         for i in range(0, int((end_date - start_date).total_seconds() // 3600) + 1)]
         interval_type = "hour"
     elif preset in daily_presets:
-        interval_keys = [(from_date + timedelta(days=i)).strftime("%Y-%m-%d 00:00:00") 
-                         for i in range((to_date - from_date).days + 1)]
+        interval_keys = [(start_date + timedelta(days=i)).strftime("%Y-%m-%d 00:00:00") 
+                         for i in range((end_date - start_date).days + 1)]
         interval_type = "day"
     else:
         interval_keys = generate_month_keys(
-            from_date.year, from_date.month,
-            to_date.year, to_date.month
+            start_date.year, start_date.month,
+            end_date.year, end_date.month
         )
         interval_type = "month"
 
@@ -6441,13 +6472,31 @@ def getrevenuedetailsForProduct(request):
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", None)
     product_id = json_request.get("product_id", None)
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
+    timezone_str = request.GET.get('timezone', 'US/Pacific')
+
+    start_date = request.GET.get("start_date", None)
+    end_date = request.GET.get("end_date", None)
+
     if start_date != None and start_date != "":
-        start_date = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
-        start_date, end_date = get_date_range(preset)
+        start_date, end_date = get_date_range(preset,timezone_str)
 
     if preset in ['Today', 'Yesterday']:
         date_range_label = f"{start_date.strftime('%b %d, %Y')} - {start_date.strftime('%b %d, %Y')}"
@@ -6468,11 +6517,11 @@ def getrevenuedetailsForProduct(request):
     # Use threading to fetch data concurrently
 
     def fetch_total():
-        return totalRevenueCalculationForProduct(start_date, end_date,None, [], [product_id], [], None)
+        return totalRevenueCalculationForProduct(start_date, end_date,None, [], [product_id], [], None,timezone_str)
 
 
     def fetch_compare_total():
-        return totalRevenueCalculation(compare_startdate, compare_enddate, None, [], [product_id],[], None)
+        return totalRevenueCalculation(compare_startdate, compare_enddate, None, [], [product_id],[], None,timezone_str)
 
     
 
@@ -6514,16 +6563,35 @@ def getInventryLogForProductdaywise(request):
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
     product_id = json_request.get("product_id")
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
+    timezone_str = request.GET.get('timezone', 'US/Pacific')
+
+    start_date = request.GET.get("start_date", None)
+    end_date = request.GET.get("end_date", None)
+
     if start_date != None and start_date != "":
-        start_date = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
-        start_date, end_date = get_date_range(preset)
+        start_date, end_date = get_date_range(preset,timezone_str)
 
 
-    
+    if timezone_str != 'UTC':
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
     if preset in ['Today', 'Yesterday']:
         date_range_label = f"{start_date.strftime('%b %d, %Y')} - {start_date.strftime('%b %d, %Y')}"

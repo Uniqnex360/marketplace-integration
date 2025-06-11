@@ -15,7 +15,7 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 from django.http import HttpResponse
-from omnisight.operations.helium_utils import get_date_range
+from omnisight.operations.helium_utils import get_date_range, convertLocalTimeToUTC
 
 
 
@@ -1135,13 +1135,22 @@ def ordersCountForDashboard(request):
     start_date = request.GET.get('start_date')  # Custom start date
     end_date = request.GET.get('end_date')  # Custom end date
     preset = request.GET.get("preset", "Today")
+    timezone_str = request.get('timezone', 'US/Pacific')
 
-    match_conditions = {}
+    
     if start_date != None and start_date != "":
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
     else:
-        start_date, end_date = get_date_range(preset)
+        start_date, end_date = get_date_range(preset,timezone_str)
+
+    
+    
+    # Convert local timezone dates to UTC
+    if timezone_str != 'UTC':
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+
+    match_conditions = {}
 
     match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
 
@@ -1316,13 +1325,16 @@ def salesAnalytics(request):
     date_range = json_request.get('date_range', 'all')  # 'week', 'month', 'year', or 'all'
     start_date = json_request.get('start_date')  # Optional custom start date
     end_date = json_request.get('end_date')  # Optional custom end date
+    timezone_str = json_request.get('timezone', 'US/Pacific')
 
     preset = json_request.get("preset", "Today")        
     if start_date != None and start_date != "":
         start_date = datetime.strptime(start_date, '%Y-%m-%d')
         end_date = datetime.strptime(end_date, '%Y-%m-%d')
     else:
-        start_date, end_date = get_date_range(preset)
+        start_date, end_date = get_date_range(preset,timezone_str)
+    if timezone_str != 'UTC':
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
     # Match conditions
     match_conditions = {}
@@ -1612,13 +1624,30 @@ def change_sign(value):
     
 @csrf_exempt
 def getSalesTrendPercentage(request):
+    import pytz
+    from pytz import timezone
+
     data = dict()
     json_request = JSONParser().parse(request)
     range_type = json_request.get('range_type', 'month')  # 'day', 'week', 'month', 'year'
     marketplace_id = json_request.get('marketplace_id')  # Marketplace filter (e.g., 'amazon', 'walmart')
+    timezone_str = json_request.get('timezone', 'US/Pacific')
+    
+    # Get current time and convert to local time based on timezone_str
+    local_tz = timezone(timezone_str)
+    now = datetime.now(local_tz)
+    
+    local_tz = pytz.timezone(timezone_str)
+        
+    # If dates are naive (no timezone), localize them
+    if now.tzinfo is None:
+        now = local_tz.localize(now)
+    # Convert to UTC
+    now = now.astimezone(pytz.UTC)
+    now = now.replace(tzinfo=None)
+    
 
     # Determine date ranges based on range_type
-    now = datetime.now()
     if range_type == 'day':
         current_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         previous_start = current_start - timedelta(days=1)
