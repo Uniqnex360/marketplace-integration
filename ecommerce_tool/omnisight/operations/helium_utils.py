@@ -189,65 +189,90 @@ def get_date_range(preset, time_zone_str="UTC"):
 
 
 
-def grossRevenue(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacuture_name=[],fulfillment_channel=None):
+def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None, 
+                product_id=None, manufacuture_name=[], fulfillment_channel=None, 
+                timezone='UTC'):
+    import pytz
+    
+    # Convert local timezone dates to UTC
+    if timezone != 'UTC':
+        local_tz = pytz.timezone(timezone)
+        
+        # If dates are naive (no timezone), localize them
+        if start_date.tzinfo is None:
+            start_date = local_tz.localize(start_date)
+        if end_date.tzinfo is None:
+            end_date = local_tz.localize(end_date)
+        
+        # Convert to UTC
+        start_date = start_date.astimezone(pytz.UTC)
+        end_date = end_date.astimezone(pytz.UTC)
+    
+    # Remove timezone info for MongoDB query (assuming your MongoDB driver expects naive UTC)
+    start_date = start_date.replace(tzinfo=None)
+    end_date = end_date.replace(tzinfo=None)
+    
     pipeline = [
-            {
-                "$project" : {
-                    "_id" : 1,
-                    "name" : 1,
-                    "image_url" : 1,
-                }
+        {
+            "$project": {
+                "_id": 1,
+                "name": 1,
+                "image_url": 1,
             }
-        ]
+        }
+    ]
     marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
-    match=dict()
+    
+    match = dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
+    match['order_status'] = {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
+    
+    # Rest of your existing code...
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+    if marketplace_id not in [None, "", "all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
-
-    if manufacuture_name != None and manufacuture_name != "" and manufacuture_name != []:
-        ids = getproductIdListBasedonManufacture(manufacuture_name,start_date, end_date)
+    
+    if manufacuture_name not in [None, "", []]:
+        ids = getproductIdListBasedonManufacture(manufacuture_name, start_date, end_date)
+        match["_id"] = {"$in": ids}
+    elif product_id not in [None, "", []]:
+        product_id = [ObjectId(pid) for pid in product_id]
+        ids = getOrdersListBasedonProductId(product_id, start_date, end_date)
+        match["_id"] = {"$in": ids}
+    elif brand_id not in [None, "", []]:
+        brand_id = [ObjectId(bid) for bid in brand_id]
+        ids = getproductIdListBasedonbrand(brand_id, start_date, end_date)
         match["_id"] = {"$in": ids}
     
-    elif product_id != None and product_id != "" and product_id != []:
-        product_id = [ObjectId(pid) for pid in product_id]
-        ids = getOrdersListBasedonProductId(product_id,start_date, end_date)
-        match["_id"] = {"$in": ids}
-
-    elif brand_id != None and brand_id != "" and brand_id != []:
-        brand_id = [ObjectId(bid) for bid in brand_id]
-        ids = getproductIdListBasedonbrand(brand_id,start_date, end_date)
-        match["_id"] = {"$in": ids}
-
     pipeline = [
-            {
-                "$match": match
-            },
-            {
-                "$project": {
-                    "_id" : 1,
-                    "order_date": 1,
-                    "order_items": 1,
-                    "order_total": 1,
-                    "marketplace_id" : 1,
-                    # "marketplace_name": "$marketplace_ins.name",
-                    "marketplace_id": 1,
-                    "currency": 1,
-                    "shipping_address": 1,
-                    "shipping_information": 1,
-                    "shipping_price" : {"$ifNull": ["$ShippingPrice", 0.0]},
-                    "items_order_quantity" : {"$ifNull": ["$ItemsOrderQuantity", 0]},
-                }
+        {
+            "$match": match
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "order_date": 1,
+                "order_items": 1,
+                "order_total": 1,
+                "marketplace_id": 1,
+                "marketplace_id": 1,
+                "currency": 1,
+                "shipping_address": 1,
+                "shipping_information": 1,
+                "shipping_price": {"$ifNull": ["$ShippingPrice", 0.0]},
+                "items_order_quantity": {"$ifNull": ["$ItemsOrderQuantity", 0]},
             }
-        ]
+        }
+    ]
+    
     order_list = list(Order.objects.aggregate(*pipeline))
+    
     for order_ins in order_list:
         for marketplace in marketplace_list:
             order_ins['marketplace_name'] = marketplace['name']
         del order_ins['marketplace_id']
+    
     return order_list
 
 
@@ -292,7 +317,26 @@ def get_previous_periods(current_start, current_end):
     return response_data
 
 
-def refundOrder(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacuture_name=[],fulfillment_channel=None):
+def refundOrder(start_date, end_date, marketplace_id=None,brand_id=None,product_id=None,manufacuture_name=[],fulfillment_channel=None,timezone='UTC'):
+    import pytz
+    
+    # Convert local timezone dates to UTC
+    if timezone != 'UTC':
+        local_tz = pytz.timezone(timezone)
+        
+        # If dates are naive (no timezone), localize them
+        if start_date.tzinfo is None:
+            start_date = local_tz.localize(start_date)
+        if end_date.tzinfo is None:
+            end_date = local_tz.localize(end_date)
+        
+        # Convert to UTC
+        start_date = start_date.astimezone(pytz.UTC)
+        end_date = end_date.astimezone(pytz.UTC)
+    
+    # Remove timezone info for MongoDB query (assuming your MongoDB driver expects naive UTC)
+    start_date = start_date.replace(tzinfo=None)
+    end_date = end_date.replace(tzinfo=None)
     match=dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
     match['order_status'] = "Refunded"
@@ -747,8 +791,11 @@ def calculate_metricss(
     product_id,
     manufacturer_name,
     fulfillment_channel,
-    include_extra_fields=False
+    timezone='UTC',
+    include_extra_fields=False,
+    use_threads=False
 ):
+    import pytz
     gross_revenue = 0
     total_cogs = 0
     net_profit = 0
@@ -763,11 +810,29 @@ def calculate_metricss(
     unitSessionPercentage = 0
     sku_set = set()
 
-    result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
+    result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone)
     all_item_ids = [ObjectId(item_id) for order in result for item_id in order['order_items']]
-    refund_ins = refundOrder(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
-
+    refund_ins = refundOrder(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone)
     refund = len(refund_ins)
+    
+    
+    # Convert local timezone dates to UTC
+    if timezone != 'UTC':
+        local_tz = pytz.timezone(timezone)
+        
+        # If dates are naive (no timezone), localize them
+        if from_date.tzinfo is None:
+            from_date = local_tz.localize(from_date)
+        if to_date.tzinfo is None:
+            to_date = local_tz.localize(to_date)
+        
+        # Convert to UTC
+        from_date = from_date.astimezone(pytz.UTC)
+        to_date = to_date.astimezone(pytz.UTC)
+    
+    # Remove timezone info for MongoDB query (assuming your MongoDB driver expects naive UTC)
+    from_date = from_date.replace(tzinfo=None)
+    to_date = to_date.replace(tzinfo=None)
 
     item_pipeline = [
         { "$match": { "_id": { "$in": all_item_ids } } },
@@ -808,7 +873,6 @@ def calculate_metricss(
                 temp_price += item_data['price']
                 tax_price += item_data.get('tax_price', 0)
 
-                # Amazon vs Non-Amazon COGS
                 if order.get('marketplace_name') == "Amazon":
                     total_cogs += item_data.get('total_cogs', 0)
                     shipping_cost += item_data.get('a_shipping_cost', 0)
@@ -836,34 +900,28 @@ def calculate_metricss(
                                 "page_views": {"$sum": "$page_views"},
                                 "sessions": {"$sum": "$sessions"}
                             }
-                        },
-                        {
-                            "$project": {
-                                "_id": 0,
-                                "page_views": 1,
-                                "sessions": 1
-                            }
                         }
                     ]
                     result = list(pageview_session_count.objects.aggregate(*pipeline))
                     for P_ins in result:
                         page_views += P_ins.get('page_views', 0)
                         sessions += P_ins.get('sessions', 0)
-
-                    del item_data['p_id']
                 except:
                     pass
 
-    # Process orders in parallel using threads
-    threads = []
-    for order in result:
-        thread = threading.Thread(target=process_order, args=(order,))
-        threads.append(thread)
-        thread.start()
-
-    # Wait for all threads to complete
-    for thread in threads:
-        thread.join()
+    # Modified threading approach
+    if use_threads:
+        # Use a ThreadPool with limited workers
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(process_order, order) for order in result]
+            for future in as_completed(futures):
+                future.result()  # This will raise exceptions if any occurred
+    else:
+        # Process sequentially
+        for order in result:
+            process_order(order)
 
     net_profit = (temp_price - total_cogs) + vendor_funding
     margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
