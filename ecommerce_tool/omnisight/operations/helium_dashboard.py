@@ -434,11 +434,12 @@ def LatestOrdersTodayAPIView(request):
                             },
                             "quantityOrdered": {"$sum": "$ProductDetails.QuantityOrdered"},
                             "unitPrice": {"$first": "$Pricing.ItemPrice.Amount"},
-                            "totalPrice": {
-                                "$sum": {
-                                    "$multiply": ["$Pricing.ItemPrice.Amount", "$ProductDetails.QuantityOrdered"]
-                                }
-                            }
+                            "Platform" : {"$first": "$Platform"},
+                            # "totalPrice": {
+                            #     "$sum": {
+                            #         "$multiply": ["$Pricing.ItemPrice.Amount", "$ProductDetails.QuantityOrdered"]
+                            #     }
+                            # }
                         }
                     },
                     {
@@ -451,7 +452,8 @@ def LatestOrdersTodayAPIView(request):
                             "imageUrl": "$_id.imageUrl",
                             "quantityOrdered": "$quantityOrdered",
                             "unitPrice": "$unitPrice",
-                            "totalPrice": {"$round": ["$totalPrice", 2]},
+                            "Platform" : "$Platform",
+                            # "totalPrice": {"$round": ["$totalPrice", 2]},
                             "purchaseDate": "$_id.purchaseDate"
                         }
                     }
@@ -459,6 +461,14 @@ def LatestOrdersTodayAPIView(request):
 
                 item_results = list(OrderItems.objects.aggregate(*item_pipeline))
                 for item in item_results:
+                    try:
+                        if item["Platform"] == "Walmart":
+                            price = item["unitPrice"] * item['quantityOrdered']
+                        elif item["Platform"] == "Amazon":
+                            price = item["unitPrice"]
+                    except:
+                        price = 0
+                            
                     orders_out.append({
                         "id" : str(item["id"]),
                         "sellerSku": item["sku"],
@@ -466,7 +476,7 @@ def LatestOrdersTodayAPIView(request):
                         "title": item["title"],
                         "quantityOrdered": item["quantityOrdered"],
                         "imageUrl": item["imageUrl"],
-                        "price": item["totalPrice"],
+                        "price": price,
                         "purchaseDate": item["purchaseDate"]
                     })
 
