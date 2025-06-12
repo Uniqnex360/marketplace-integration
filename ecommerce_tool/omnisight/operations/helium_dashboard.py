@@ -38,9 +38,12 @@ def get_metrics_by_date_range(request):
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     timezone_str = json_request.get('timezone', 'US/Pacific')
     
-    # Get current time and convert to local time based on timezone_str
+    # Parse target_date_str to extract the date
+    target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
+
+    # Get current time and combine it with the target_date
     local_tz = timezone(timezone_str)
-    current_time = datetime.now(local_tz)
+    current_time = datetime.now(local_tz).replace(year=target_date.year, month=target_date.month, day=target_date.day)
 
     # Parse target date and convert to local time
     target_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -642,6 +645,8 @@ def updatedRevenueWidgetAPIView(request):
     manufacturer_name = json_request.get("manufacturer_name", None)
     fulfillment_channel = json_request.get("fulfillment_channel", None)
     timezone_str = json_request.get('timezone', 'US/Pacific')
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
 
     
     if start_date != None and start_date != "":
@@ -977,11 +982,10 @@ def get_top_products(request):
         end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
-        # Ensure dates are timezone-aware if get_date_range does not return them as such
-        if start_date.tzinfo is None:
-            start_date = pytz.utc.localize(start_date)
-        if end_date.tzinfo is None:
-            end_date = pytz.utc.localize(end_date)
+        
+
+    if timezone_str != 'UTC':
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
 
     # Calculate the duration in hours
@@ -5993,15 +5997,14 @@ def getProfitAndLossDetailsForProduct(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     json_request = JSONParser().parse(request)
-    print(json_request)
     product_id = json_request.get('product_id')
     preset = json_request.get('preset')
 
     preset = json_request.get('preset')
-    timezone_str = request.GET.get('timezone', 'US/Pacific')
+    timezone_str = json_request.get('timezone', 'US/Pacific')
 
-    start_date = request.GET.get("start_date", None)
-    end_date = request.GET.get("end_date", None)
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
         # Convert string dates to datetime in the specified timezone
@@ -6286,10 +6289,10 @@ def profitlosschartForProduct(request):
     product_id = json_request.get('product_id')
     preset = json_request.get('preset')
 
-    timezone_str = request.GET.get('timezone', 'US/Pacific')
+    timezone_str = json_request.get('timezone', 'US/Pacific')
 
-    start_date = request.GET.get("start_date", None)
-    end_date = request.GET.get("end_date", None)
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
         # Convert string dates to datetime in the specified timezone
@@ -6482,10 +6485,10 @@ def getrevenuedetailsForProduct(request):
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", None)
     product_id = json_request.get("product_id", None)
-    timezone_str = request.GET.get('timezone', 'US/Pacific')
+    timezone_str = json_request.get('timezone', 'US/Pacific')
 
-    start_date = request.GET.get("start_date", None)
-    end_date = request.GET.get("end_date", None)
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
         # Convert string dates to datetime in the specified timezone
@@ -6573,10 +6576,10 @@ def getInventryLogForProductdaywise(request):
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
     product_id = json_request.get("product_id")
-    timezone_str = request.GET.get('timezone', 'US/Pacific')
+    timezone_str = json_request.get('timezone', 'US/Pacific')
 
-    start_date = request.GET.get("start_date", None)
-    end_date = request.GET.get("end_date", None)
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
         # Convert string dates to datetime in the specified timezone
@@ -6600,13 +6603,15 @@ def getInventryLogForProductdaywise(request):
         start_date, end_date = get_date_range(preset,timezone_str)
 
 
-    if timezone_str != 'UTC':
-        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+    
 
     if preset in ['Today', 'Yesterday']:
         date_range_label = f"{start_date.strftime('%b %d, %Y')} - {start_date.strftime('%b %d, %Y')}"
     else:
         date_range_label = f"{start_date.strftime('%b %d, %Y')} - {end_date.strftime('%b %d, %Y')}"
+
+    if timezone_str != 'UTC':
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
     # Generate all dates between start_date and end_date
     date_range = [start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1)]
 
@@ -6739,3 +6744,117 @@ def productUnitProfitability(request):
             "net_profit" : round(price - (p_cost + s_cost + fee), 2)
         })
     return reponse_list
+
+
+
+@csrf_exempt
+def productNetprofit(request):
+    json_request = JSONParser().parse(request)
+    preset = json_request.get("preset", "Today")
+    product_id = json_request.get("product_id")
+    timezone_str = json_request.get('timezone', 'US/Pacific')
+
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
+
+    if start_date != None and start_date != "":
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
+    else:
+        start_date, end_date = get_date_range(preset,timezone_str)
+
+    if timezone_str != 'UTC':
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+
+
+    product_obj = DatabaseModel.get_document(Product.objects,{"id" : product_id})
+    
+    amazon_p_cost = round(product_obj.product_cost, 2) if product_obj.product_cost else 0
+    amazon_s_cost = round(product_obj.a_shipping_cost, 2) if product_obj.a_shipping_cost else 0
+    amazon_fee = round(product_obj.referral_fee, 2) if product_obj.referral_fee else 0
+
+    
+    walmart_p_cost = round(product_obj.w_product_cost, 2) if product_obj.w_product_cost else 0
+    walmart_s_cost = round(product_obj.w_shiping_cost, 2) if product_obj.w_shiping_cost else 0
+    walmart_fee = round(product_obj.walmart_fee, 2) if product_obj.walmart_fee else 0
+
+
+    def calculate_product_net_profit(product_id, start_date, end_date):
+        gross_revenue = 0
+        channel_fee = 0
+        shipping_cost = 0
+        product_cost = 0
+        base_price = 0
+        tax_price = 0
+
+        # Fetch orders within the specified date range
+        orders = grossRevenue(start_date, end_date, None, [], [product_id], [], None,timezone_str)
+
+        for order in orders:
+            gross_revenue += order.get("order_total", 0)
+            total_units = order.get("items_order_quantity", 0)
+            
+
+            for item_id in order.get("order_items", []):
+                item_pipeline = [
+                    {"$match": {"_id": item_id}},
+                    {
+                        "$project": {
+                            "price": { "$ifNull":["$Pricing.ItemPrice.Amount",0]},
+                            "tax_price": { "$ifNull":["$Pricing.ItemTax.Amount",0]}
+                        }
+                    }
+                ]
+                item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                if item_result:
+                    item = item_result[0]
+                    base_price += item.get("price", 0)
+                    tax_price += item.get("tax_price", 0)
+
+
+            if order['marketplace_name'] == "Amazon":
+                
+                shipping_cost += (amazon_s_cost * total_units)
+                product_cost += (amazon_p_cost * total_units)
+                channel_fee += (amazon_fee * total_units)
+            else:
+                
+                shipping_cost += (walmart_s_cost * total_units)
+                product_cost += (walmart_p_cost * total_units)
+                channel_fee += (walmart_fee * total_units)
+                
+        return {
+            "gross_revenue" : round(gross_revenue,2),
+            "tax_price" : round(tax_price, 2),
+            "base_price": round(base_price, 2),
+            "product_cost": round(product_cost, 2),
+            "shipping_cost": round(shipping_cost, 2),
+            "channel_fee": round(channel_fee, 2),
+            "cogs": round(product_cost, 2) + round(shipping_cost, 2),
+            "gross_profit": round(base_price - (product_cost + shipping_cost), 2),
+            "net_profit": round(base_price - (product_cost + shipping_cost + channel_fee), 2)
+        }
+
+
+    data = calculate_product_net_profit(product_id, start_date, end_date)
+    return data
+
+    
+
+
+    

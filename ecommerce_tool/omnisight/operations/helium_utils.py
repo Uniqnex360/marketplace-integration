@@ -172,7 +172,8 @@ def get_date_range(preset, time_zone_str="UTC"):
     
     elif preset == "Last Week":
         start = today - timedelta(days=today.weekday() + 7)
-        return start, (start + timedelta(days=6)).replace(hour=23, minute=59, second=59)
+        end = start + timedelta(days=6)
+        return start.replace(hour=0, minute=0, second=0, microsecond=0), end.replace(hour=23, minute=59, second=59)
     elif preset == "Last 7 days":
         return today - timedelta(days=7), (today - timedelta(days=1)).replace(hour=23, minute=59, second=59)
     elif preset == "Last 14 days":

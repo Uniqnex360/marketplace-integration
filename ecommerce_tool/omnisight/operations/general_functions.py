@@ -16,6 +16,8 @@ from openpyxl.utils import get_column_letter
 from io import BytesIO
 from django.http import HttpResponse
 from omnisight.operations.helium_utils import get_date_range, convertLocalTimeToUTC
+import pytz
+from pytz import timezone
 
 
 
@@ -297,6 +299,8 @@ def getOrdersBasedOnProduct(request):
     product_id = request.GET.get('product_id')
     skip = int(request.GET.get('skip',0))  # Default skip = 0 if not provided
     limit = int(request.GET.get('limit', 10))  # Default limit = 100 if not provided
+    sort_by = request.GET.get('sort_by', 'order_date')
+    sort_by_value = int(request.GET.get('sort_by_value', -1)) 
 
     count_pipeline = [
         {
@@ -348,13 +352,22 @@ def getOrdersBasedOnProduct(request):
             "$match": {
                 "order_items_ins.ProductDetails.product_id": ObjectId(product_id)
             }
-        },
-        {
+        }]
+    if sort_by != None and sort_by != "":
+        sort = {
+            "$sort": {
+                sort_by: sort_by_value
+            }
+        }
+    else:
+        sort = {
             "$sort": {
                 "order_date": -1
             }
-        },
-        {
+        }
+    pipeline.append(sort)
+        
+    pipeline.extend([   {
             "$skip": skip
         },
         {
@@ -402,7 +415,7 @@ def getOrdersBasedOnProduct(request):
                 "marketplace_name": "$marketplace_ins.name"
             }
         }
-    ]
+    ])
     orders = list(Order.objects.aggregate(*pipeline, allowDiskUse=True))
 
     data['total_count'] = total_count
@@ -1139,8 +1152,23 @@ def ordersCountForDashboard(request):
 
     
     if start_date != None and start_date != "":
-        start_date = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
 
@@ -1329,8 +1357,23 @@ def salesAnalytics(request):
 
     preset = json_request.get("preset", "Today")        
     if start_date != None and start_date != "":
-        start_date = datetime.strptime(start_date, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+        # Convert string dates to datetime in the specified timezone
+        local_tz = pytz.timezone(timezone_str)
+        
+        # Create naive datetime objects
+        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        
+        # Localize to the specified timezone
+        localized_from_date = local_tz.localize(naive_from_date)
+        localized_to_date = local_tz.localize(naive_to_date)
+        
+        # Convert to UTC
+        start_date = localized_from_date.astimezone(pytz.UTC)
+        end_date = localized_to_date.astimezone(pytz.UTC)
+        
+        # For end date, include the entire day (up to 23:59:59)
+        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
     if timezone_str != 'UTC':
