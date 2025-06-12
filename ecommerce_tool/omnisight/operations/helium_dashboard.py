@@ -1635,6 +1635,20 @@ def get_products_with_pagination(request):
             "products": products,
             "tab_type" : "sku"
         }
+    import math
+
+    def clean_json_floats(obj):
+        if isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return None
+            return obj
+        elif isinstance(obj, dict):
+            return {k: clean_json_floats(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [clean_json_floats(i) for i in obj]
+        return obj
+    response_data['products'] = clean_json_floats(response_data['products'])
+
 
     return response_data
 
