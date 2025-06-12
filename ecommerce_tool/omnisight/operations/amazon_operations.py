@@ -942,7 +942,6 @@ def save_or_update_pageview_session_count(data, today_date):
 
 
 def fetch_sales_traffic_report(aws_access_key_id,aws_secret_access_key,role_arn,client_id,client_secret,refresh_token,report_date,region="us-east-1"):
-    print("kkkkkkkkkkkkkkkkkkkk",report_date)
     # 1. Assume Role
     sts_client = boto3.client(
         'sts',
@@ -1183,41 +1182,13 @@ def syncRecentAmazonOrders():
     def process_row(row, marketplace_id):
         s = row
         if s['sales-channel'] != "Non-Amazon":
-            merchant_order_id = str(s['merchant-order-id']) if pd.notna(s.get('merchant-order-id')) else ""
-            sales_channel = str(s['sales-channel']) if pd.notna(s.get('sales-channel')) else ""
-            items_order_quantity = int(s['quantity']) if pd.notna(s.get('quantity')) else 0
-            product_name = str(s['product-name']) if pd.notna(s.get('product-name')) else ""
-            sku = str(s['sku']) if pd.notna(s.get('sku')) else ""
-            asin = str(s['asin']) if pd.notna(s.get('asin')) else ""
-            number_of_items = int(s['number-of-items']) if pd.notna(s.get('number-of-items')) else 0
-            currency = str(s['currency']) if pd.notna(s.get('currency')) else "USD"
-            item_price = float(s['item-price']) if pd.notna(s.get('item-price')) else 0.0
-            item_tax = float(s['item-tax']) if pd.notna(s.get('item-tax')) else 0.0
-            shipping_price = float(s['shipping-price']) if pd.notna(s.get('shipping-price')) else 0.0
-            shipping_tax = float(s['shipping-tax']) if pd.notna(s.get('shipping-tax')) else 0.0
-            item_promotion_discount = float(s['item-promotion-discount']) if pd.notna(s.get('item-promotion-discount')) else 0.0
-            item_promotion_discount_tax = float(s['item-promotion-discount-tax']) if pd.notna(s.get('item-promotion-discount-tax')) else 0.0
-
-            if currency != "USD":
-                item_price = safe_convert(currency, item_price)
-                item_tax = safe_convert(currency, item_tax)
-                shipping_price = safe_convert(currency, shipping_price)
-                shipping_tax = safe_convert(currency, shipping_tax)
-                item_promotion_discount = safe_convert(currency, item_promotion_discount)
-                item_promotion_discount_tax = safe_convert(currency, item_promotion_discount_tax)
-
-            ship_address = {}
-            if pd.notna(s.get('ship-city')): ship_address['City'] = str(s['ship-city'])
-            if pd.notna(s.get('ship-state')): ship_address['StateOrRegion'] = str(s['ship-state'])
-            if pd.notna(s.get('ship-postal-code')): ship_address['PostalCode'] = str(s['ship-postal-code'])
-            if pd.notna(s.get('ship-country')): ship_address['CountryCode'] = str(s['ship-country'])
-
             purchase_order_id = str(s['amazon-order-id']) if pd.notna(s.get('amazon-order-id')) else ""
-            order_date = datetime.strptime(s['purchase-date'], "%Y-%m-%dT%H:%M:%S%z") if pd.notna(s.get('purchase-date')) else datetime.now()
+            items_order_quantity = int(s['quantity']) if pd.notna(s.get('quantity')) else 0
+            shipping_price = float(s['shipping-price']) if pd.notna(s.get('shipping-price')) else 0.0
+            merchant_order_id = str(s['merchant-order-id']) if pd.notna(s.get('merchant-order-id')) else ""
             order_status = str(s['order-status']) if pd.notna(s.get('order-status')) else ""
-            last_update_date = datetime.strptime(s['last-updated-date'], "%Y-%m-%dT%H:%M:%S%z") if pd.notna(s.get('last-updated-date')) else datetime.now()
-            fulfillment_channel = "MFN" if s['fulfillment-channel'] == "Merchant" else "AFN"
-            ship_service_level = str(s['ship-service-level']) if pd.notna(s.get('ship-service-level')) else ""
+            sales_channel = str(s['sales-channel']) if pd.notna(s.get('sales-channel')) else ""
+            
 
             order_obj = Order.objects(purchase_order_id=purchase_order_id).only('id', 'order_items').first()
             if order_obj:
@@ -1229,6 +1200,36 @@ def syncRecentAmazonOrders():
                     "order_status": order_status
                 })
             else:
+                product_name = str(s['product-name']) if pd.notna(s.get('product-name')) else ""
+                sku = str(s['sku']) if pd.notna(s.get('sku')) else ""
+                asin = str(s['asin']) if pd.notna(s.get('asin')) else ""
+                number_of_items = int(s['number-of-items']) if pd.notna(s.get('number-of-items')) else 0
+                currency = str(s['currency']) if pd.notna(s.get('currency')) else "USD"
+                item_price = float(s['item-price']) if pd.notna(s.get('item-price')) else 0.0
+                item_tax = float(s['item-tax']) if pd.notna(s.get('item-tax')) else 0.0
+                shipping_tax = float(s['shipping-tax']) if pd.notna(s.get('shipping-tax')) else 0.0
+                item_promotion_discount = float(s['item-promotion-discount']) if pd.notna(s.get('item-promotion-discount')) else 0.0
+                item_promotion_discount_tax = float(s['item-promotion-discount-tax']) if pd.notna(s.get('item-promotion-discount-tax')) else 0.0
+
+                if currency != "USD":
+                    item_price = safe_convert(currency, item_price)
+                    item_tax = safe_convert(currency, item_tax)
+                    shipping_price = safe_convert(currency, shipping_price)
+                    shipping_tax = safe_convert(currency, shipping_tax)
+                    item_promotion_discount = safe_convert(currency, item_promotion_discount)
+                    item_promotion_discount_tax = safe_convert(currency, item_promotion_discount_tax)
+
+                ship_address = {}
+                if pd.notna(s.get('ship-city')): ship_address['City'] = str(s['ship-city'])
+                if pd.notna(s.get('ship-state')): ship_address['StateOrRegion'] = str(s['ship-state'])
+                if pd.notna(s.get('ship-postal-code')): ship_address['PostalCode'] = str(s['ship-postal-code'])
+                if pd.notna(s.get('ship-country')): ship_address['CountryCode'] = str(s['ship-country'])
+
+                
+                order_date = datetime.strptime(s['purchase-date'], "%Y-%m-%dT%H:%M:%S%z") if pd.notna(s.get('purchase-date')) else datetime.now()
+                last_update_date = datetime.strptime(s['last-updated-date'], "%Y-%m-%dT%H:%M:%S%z") if pd.notna(s.get('last-updated-date')) else datetime.now()
+                fulfillment_channel = "MFN" if s['fulfillment-channel'] == "Merchant" else "AFN"
+                ship_service_level = str(s['ship-service-level']) if pd.notna(s.get('ship-service-level')) else ""
                 p_obj = Product.objects(sku=sku).only('id').first()
                 product_id = p_obj.id if p_obj else None
 
