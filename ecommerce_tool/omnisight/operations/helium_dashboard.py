@@ -1636,7 +1636,7 @@ def get_products_with_pagination(request):
             "tab_type" : "sku"
         }
 
-    return JsonResponse(response_data, safe=False)
+    return response_data
 
 
 ########################--------------------------------------------------------------------------------------------------------##########
