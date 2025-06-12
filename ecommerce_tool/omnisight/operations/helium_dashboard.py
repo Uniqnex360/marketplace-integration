@@ -1258,6 +1258,10 @@ def get_products_with_pagination(request):
     else:
         start_date, end_date = get_date_range(preset,timezone_str)  
     today_start_date, today_end_date = get_date_range("Today",timezone_str)
+    
+    if timezone_str != 'UTC':
+        today_start_date,today_end_date = convertLocalTimeToUTC(today_start_date, today_end_date, timezone_str)
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
@@ -1419,44 +1423,44 @@ def get_products_with_pagination(request):
 
 
 
-                    # today_ins = getdaywiseproductssold(today_start_date, today_end_date,p_ins['id'],False)
-                    # for t_ins in today_ins:
-                    #     current_sales_today += t_ins['total_price']
-                    # pr_ins = getdaywiseproductssold(start_date, end_date, p_ins['id'], False)
-                    # compare_start, compare_end = getPreviousDateRange(start_date, end_date)
-                    # compare_ins = getdaywiseproductssold(compare_start, compare_end, p_ins['id'], False)
-                    # # p_compare
-                    # for p in pr_ins:
-                    #     current_units += p['total_quantity']
-                    #     current_revenue += p['total_price']
-                    # current_revenue = round(current_revenue, 2)
-                    # current_netprofit = round(((current_revenue - (temp_cogs * current_units)) + (p_ins['vendor_funding'] * current_units)), 2)
-                    # current_margin = round((current_netprofit / current_revenue) * 100 if current_revenue > 0 else 0, 2)
+                    today_ins = getdaywiseproductssold(today_start_date, today_end_date,p_ins['id'],False)
+                    for t_ins in today_ins:
+                        current_sales_today += t_ins['total_price']
+                    pr_ins = getdaywiseproductssold(start_date, end_date, p_ins['id'], False)
+                    compare_start, compare_end = getPreviousDateRange(start_date, end_date)
+                    compare_ins = getdaywiseproductssold(compare_start, compare_end, p_ins['id'], False)
+                    # p_compare
+                    for p in pr_ins:
+                        current_units += p['total_quantity']
+                        current_revenue += p['total_price']
+                    current_revenue = round(current_revenue, 2)
+                    current_netprofit = round(((current_revenue - (temp_cogs * current_units)) + (p_ins['vendor_funding'] * current_units)), 2)
+                    current_margin = round((current_netprofit / current_revenue) * 100 if current_revenue > 0 else 0, 2)
 
-                    # for c in compare_ins:
-                    #     previous_units += c['total_quantity']
-                    #     previous_revenue += c['total_price']
+                    for c in compare_ins:
+                        previous_units += c['total_quantity']
+                        previous_revenue += c['total_price']
 
                     
                     
-                    # previous_netprofit = ((previous_revenue - (temp_cogs * previous_units)) + (p_ins['vendor_funding'] * previous_units))
-                    # previous_margin = (previous_netprofit / previous_revenue) * 100 if previous_revenue > 0 else 0
-                    # previous_netprofit = round((previous_netprofit - current_netprofit), 2)
-                    # previous_margin = round((previous_margin - current_margin), 2)
+                    previous_netprofit = ((previous_revenue - (temp_cogs * previous_units)) + (p_ins['vendor_funding'] * previous_units))
+                    previous_margin = (previous_netprofit / previous_revenue) * 100 if previous_revenue > 0 else 0
+                    previous_netprofit = round((previous_netprofit - current_netprofit), 2)
+                    previous_margin = round((previous_margin - current_margin), 2)
 
-                    # previous_revenue = round((previous_revenue - current_revenue), 2)
-                    # previous_units = previous_units - current_units
+                    previous_revenue = round((previous_revenue - current_revenue), 2)
+                    previous_units = previous_units - current_units
 
 
-                    # total_salesForToday += current_sales_today
-                    # total_unitsSoldForToday += current_units
-                    # total_grossRevenue += current_revenue
-                    # total_netprofit += current_netprofit
-                    # total_margin += current_margin
-                    # total_unitsSoldForPeriod += previous_units
-                    # total_grossRevenueforPeriod += previous_revenue
-                    # total_netProfitforPeriod += previous_netprofit
-                    # total_marginforPeriod += previous_margin
+                    total_salesForToday += current_sales_today
+                    total_unitsSoldForToday += current_units
+                    total_grossRevenue += current_revenue
+                    total_netprofit += current_netprofit
+                    total_margin += current_margin
+                    total_unitsSoldForPeriod += previous_units
+                    total_grossRevenueforPeriod += previous_revenue
+                    total_netProfitforPeriod += previous_netprofit
+                    total_marginforPeriod += previous_margin
 
 
 
@@ -1464,23 +1468,23 @@ def get_products_with_pagination(request):
                 p_dict['stock'] = stock
                 p_dict['price_start'] = min(price_range) if price_range else 0
                 p_dict['price_end'] = max(price_range) if price_range else 0
-                p_dict['cogs'] = cogs
-                p_dict['salesForToday'] = total_salesForToday
+                p_dict['cogs'] = round(cogs,2)
+                p_dict['salesForToday'] = round(total_salesForToday,2)
                 
                 
-                p_dict['unitsSoldForToday'] = total_unitsSoldForToday
-                p_dict['unitsSoldForPeriod'] = total_unitsSoldForPeriod
+                p_dict['unitsSoldForToday'] = round(total_unitsSoldForToday,2)
+                p_dict['unitsSoldForPeriod'] = round(total_unitsSoldForPeriod,2)
                 p_dict['refunds'] = 0
                 p_dict['refundsforPeriod'] = 0
                 p_dict['refundsAmount'] = 0
                 p_dict['refundsAmountforPeriod'] = 0
-                p_dict['grossRevenue'] = total_grossRevenue
-                p_dict['grossRevenueforPeriod'] = total_grossRevenueforPeriod
-                p_dict['netProfit'] = total_netprofit
-                p_dict['netProfitforPeriod'] = total_netProfitforPeriod
-                p_dict['margin'] = total_margin
-                p_dict['marginforPeriod'] = total_marginforPeriod
-                p_dict['totalchannelFees'] = cogs
+                p_dict['grossRevenue'] = round(total_grossRevenue, 2)
+                p_dict['grossRevenueforPeriod'] = round(total_grossRevenueforPeriod, 2)
+                p_dict['netProfit'] = round(total_netprofit, 2)
+                p_dict['netProfitforPeriod'] = round(total_netProfitforPeriod, 2)
+                p_dict['margin'] = round(total_margin, 2)
+                p_dict['marginforPeriod'] = round(total_marginforPeriod, 2)
+                p_dict['totalchannelFees'] = round(cogs, 2)
                 products.append(p_dict)
 
 
