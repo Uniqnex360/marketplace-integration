@@ -1650,7 +1650,7 @@ def get_products_with_pagination(request):
     response_data['products'] = clean_json_floats(response_data['products'])
 
 
-    return response_data
+    return JsonResponse(response_data,safe=False)
 
 
 ########################--------------------------------------------------------------------------------------------------------##########
