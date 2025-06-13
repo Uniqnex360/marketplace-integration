@@ -516,7 +516,9 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     start_date_utc = start_date_utc.replace(tzinfo=None)
     end_date_utc = end_date_utc.replace(tzinfo=None)
     
-    # Create time buckets
+    # Create time buckets and maintain a mapping of UTC keys to local dates
+    bucket_to_local_date_map = {}
+    
     if preset in ["Today", "Yesterday"]:
         # For hourly data, work with UTC buckets
         time_buckets = [(start_date_utc + timedelta(hours=i)).replace(minute=0, second=0, microsecond=0) 
@@ -536,6 +538,12 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
             # Convert local midnight to UTC
             utc_bucket = current_date.astimezone(pytz.UTC).replace(tzinfo=None)
             time_buckets.append(utc_bucket)
+            
+            # Store the mapping of UTC bucket to local date
+            utc_key = utc_bucket.strftime(time_format)
+            local_date_key = current_date.strftime(time_format)
+            bucket_to_local_date_map[utc_key] = local_date_key
+            
             current_date += timedelta(days=1)
 
     # Initialize graph data with all time periods
@@ -678,29 +686,36 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         for future in futures:
             future.result()
 
-    # Convert the keys in graph_data to user's timezone and filter
+    # Convert to final output with correct dates
     converted_graph_data = {}
     
     # Get the requested date range (just the dates)
     start_date_only = original_start_date.date()
     end_date_only = original_end_date.date()
     
-    for utc_time_key, data in graph_data.items():
-        utc_dt = datetime.strptime(utc_time_key, time_format).replace(tzinfo=pytz.UTC)
-        local_dt = utc_dt.astimezone(user_timezone)
-        local_time_key = local_dt.strftime(time_format)
-        
-        # For daily data, only include dates within the requested range
-        if preset not in ["Today", "Yesterday"]:
-            local_date = local_dt.date()
-            # Only include if the date is within the original requested range
-            if start_date_only <= local_date <= end_date_only:
-                converted_graph_data[local_time_key] = data
-                converted_graph_data[local_time_key]["current_date"] = local_time_key
-        else:
-            # For hourly data, include all
+    if preset in ["Today", "Yesterday"]:
+        # For hourly data, convert normally
+        for utc_time_key, data in graph_data.items():
+            utc_dt = datetime.strptime(utc_time_key, time_format).replace(tzinfo=pytz.UTC)
+            local_dt = utc_dt.astimezone(user_timezone)
+            local_time_key = local_dt.strftime(time_format)
+            
             converted_graph_data[local_time_key] = data
             converted_graph_data[local_time_key]["current_date"] = local_time_key
+    else:
+        # For daily data, use the pre-mapped local dates
+        for utc_time_key, data in graph_data.items():
+            # Get the correct local date from our mapping
+            local_time_key = bucket_to_local_date_map.get(utc_time_key)
+            
+            if local_time_key:
+                # Parse the local date to check if it's in range
+                local_date = datetime.strptime(local_time_key, time_format).date()
+                
+                # Only include if the date is within the original requested range
+                if start_date_only <= local_date <= end_date_only:
+                    converted_graph_data[local_time_key] = data
+                    converted_graph_data[local_time_key]["current_date"] = local_time_key
 
     return converted_graph_data
 
