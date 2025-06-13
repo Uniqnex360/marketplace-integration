@@ -275,7 +275,7 @@ def fetchProductDetails(request):
                 "image_url": {"$ifNull": ["$image_url", ""]},
                 "image_urls": {"$ifNull": ["$image_urls", []]},
                 "vendor_funding": {"$round": [{"$ifNull": ["$vendor_funding", 0.0]}, 2]},
-                "veddor_discount": {"$round": [{"$ifNull": ["$vendor_discount", 0.0]}, 2]},
+                "vendor_discount": {"$round": [{"$ifNull": ["$vendor_discount", 0.0]}, 2]},
                 "product_cost": {"$round": [{"$ifNull": ["$product_cost", 0]}, 2]},
                 "referral_fee": {"$round": [{"$ifNull": ["$referral_fee", 0]}, 2]},
                 "a_shipping_cost": {"$round": [{"$ifNull": ["$a_shipping_cost", 0]}, 2]},

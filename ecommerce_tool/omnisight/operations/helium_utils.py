@@ -497,13 +497,17 @@ def pageViewsandSessionCount(start_date,end_date,product_id):
 def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, product_id=None, 
                   manufacturer_name=None, fulfillment_channel=None, timezone="UTC"):
     import pytz
+    
+    # Store the original timezone for later conversion
+    user_timezone = pytz.timezone(timezone) if timezone != 'UTC' else pytz.UTC
+    
+    # Convert to UTC for database queries
     if timezone != 'UTC':
-        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
+        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
+    
     # Remove timezone info for MongoDB query (assuming your MongoDB driver expects naive UTC)
     start_date = start_date.replace(tzinfo=None)
     end_date = end_date.replace(tzinfo=None)
-
- 
     
     # Determine time buckets based on preset
     if preset in ["Today", "Yesterday"]:
@@ -628,6 +632,11 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         net_profit = (temp_other_price - total_cogs) + vendor_funding
         profit_margin = round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0
 
+        # Convert the UTC time back to user's timezone
+        utc_dt = datetime.strptime(time_key, time_format).replace(tzinfo=pytz.UTC)
+        local_dt = utc_dt.astimezone(user_timezone)
+        local_time_key = local_dt.strftime(time_format)
+
         graph_data[time_key] = {
             "gross_revenue": round(gross_revenue, 2),
             "net_profit": round(net_profit, 2),
@@ -636,7 +645,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
             "units_sold": total_units,
             "refund_amount": round(refund_amount, 2),
             "refund_quantity": refund_quantity,
-            "date": time_key
+            "date": local_time_key  # Use the converted local time
         }
 
     # Process time buckets with limited threading
@@ -646,7 +655,15 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         for future in futures:
             future.result()  # Wait for completion and raise any exceptions
 
-    return graph_data
+    # Convert the keys in graph_data to user's timezone
+    converted_graph_data = {}
+    for utc_time_key, data in graph_data.items():
+        utc_dt = datetime.strptime(utc_time_key, time_format).replace(tzinfo=pytz.UTC)
+        local_dt = utc_dt.astimezone(user_timezone)
+        local_time_key = local_dt.strftime(time_format)
+        converted_graph_data[local_time_key] = data
+
+    return converted_graph_data
 
 
 def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None,timezone_str="UTC"):

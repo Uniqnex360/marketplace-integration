@@ -6738,7 +6738,9 @@ def productUnitProfitability(request):
         s_cost = round(product_obj.a_shipping_cost, 2) if product_obj.a_shipping_cost else 0
         fee = round(product_obj.referral_fee, 2) if product_obj.referral_fee else 0
         reponse_list.append({
+            "asin" : product_obj.product_id,
             "channel" : "Amazon",
+            "channel_image" :  DatabaseModel.get_document(Marketplace.objects,{"name" : "Amazon"},['image_url']).image_url,
             "base_price" : price,
             "product_cost" : p_cost,
             "shipping_cost" : s_cost,
@@ -6753,7 +6755,9 @@ def productUnitProfitability(request):
         s_cost = round(product_obj.w_shiping_cost, 2) if product_obj.w_shiping_cost else 0
         fee = round(product_obj.walmart_fee, 2) if product_obj.walmart_fee else 0
         reponse_list.append({
+            "wpid" : product_obj.product_id,
             "channel" : "Walmart",
+            "channel_image" : DatabaseModel.get_document(Marketplace.objects,{"name" : "Walmart"},['image_url']).image_url,
             "base_price" : price,
             "product_cost" : p_cost,
             "shipping_cost" : s_cost,
@@ -6874,6 +6878,20 @@ def productNetprofit(request):
     return data
 
     
+def cogsGraph(request):
+    product_id = request.GET.get('product_id')
+    product_obj = DatabaseModel.get_document(Product.objects,{"id" : product_id})
+
+    # Fetch marketplace IDs
+    marketplace_ids = product_obj.marketplace_ids
+
+    response_list = [{
+        "date_range": product_obj.product_created_date.strftime("%b %d, %Y") + " - Current" if product_obj.product_created_date else "N/A - Current",
+        "product_cost": round(product_obj.product_cost, 2) if product_obj.product_cost else 0,
+        "shipping_cost": round(product_obj.a_shipping_cost, 2) if product_obj.a_shipping_cost else 0,
+        "amazon_fee": round(product_obj.referral_fee, 2) if product_obj.referral_fee else 0,
+        "total_cogs": round(product_obj.total_cogs, 2) if product_obj.total_cogs else 0,
+    }]
 
 
-    
+    return response_list
