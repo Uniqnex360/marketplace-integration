@@ -1,6 +1,6 @@
 from celery import shared_task
-from omnisight.operations.walmart_operations import syncRecentWalmartOrders
-from omnisight.operations.amazon_operations import syncRecentAmazonOrders,sync_inventory, syncPageviews
+from omnisight.operations.walmart_operations import syncRecentWalmartOrders, syncWalmartPrice
+from omnisight.operations.amazon_operations import syncRecentAmazonOrders,sync_inventory, syncPageviews,FetchProductsDetails
 
 @shared_task
 def sync_orders():
@@ -33,4 +33,19 @@ def sync_inventry():
     print("PageViews Sync starting........................")
     sync_inventory()
     print("Inventory Sync completed........................")
+    return True
+
+
+@shared_task
+def sync_price():
+    print("Amazon Price Sync starting........................")
+    FetchProductsDetails()
+    print("Walmart Price Sync completed........................")
+    return True
+
+@shared_task
+def sync_WalmartPrice():
+    print("Amazon Price Sync starting........................")
+    syncWalmartPrice()
+    print("Walmart Price Sync completed........................")
     return True

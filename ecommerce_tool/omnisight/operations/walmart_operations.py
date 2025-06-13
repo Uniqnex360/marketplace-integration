@@ -697,3 +697,61 @@ def syncRecentWalmartOrders():
             t.join()
 
     return orders
+
+
+def get_all_walmart_items(access_token, limit=50):
+    url = "https://marketplace.walmartapis.com/v3/items"
+    headers = {
+        "WM_SEC.ACCESS_TOKEN": access_token,
+        "WM_SVC.NAME": "Walmart Marketplace",
+        "WM_QOS.CORRELATION_ID": "123456abcdef",  # any random unique ID
+        "Accept": "application/json"
+    }
+
+    start = 0
+    items = []
+    while True:
+        params = {
+            "limit": limit,
+            "offset": start
+        }
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        data = response.json()
+        items.extend(data.get("ItemResponse", []))
+        for ins in items:
+            print(ins)
+        if len(data.get("ItemResponse", [])) < limit:
+            break
+        start += limit
+
+    return items
+
+
+def syncWalmartPrice():
+    token = oauthFunction()
+    products = get_all_walmart_items(token)
+    market_place_id = DatabaseModel.get_document(Marketplace.objects,{"name" : "Walmart"},['id']).id
+
+
+    for row in products:
+
+        try:
+            price = row['price']['amount']
+        except:
+            price = 0.0
+
+        published_status = row['publishedStatus']
+        
+
+        product_obj = DatabaseModel.get_document(Product.objects,{"sku" : row['sku'],"marketplace_id" : market_place_id},['id','price'])
+        if product_obj:
+            if product_obj.price != price:
+                DatabaseModel.update_documents(Product.objects, {"sku" : row['sku'],"marketplace_id" : market_place_id}, {"published_status": published_status,"price": price})
+                productPriceChange(
+                    product_id=product_obj.id,
+                    old_price=product_obj.price,
+                    new_price=price,
+                    reason="Price updated from Walmart API"
+                ).save()
+    return True

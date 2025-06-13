@@ -508,3 +508,13 @@ class inventry_log(Document):
     product_id = ReferenceField(Product)
     available = IntField(default=0)
     reserved = IntField(default=0)
+
+
+
+class productPriceChange(Document):
+    product_id = ReferenceField(Product)
+    old_price = FloatField(default=0.0)
+    new_price = FloatField(default=0.0)
+    change_date = DateTimeField(default=datetime.now())
+    reason = StringField(default="Price update")
+    

@@ -1,5 +1,5 @@
 from mongoengine import Q
-from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund,Brand,inventry_log
+from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund,Brand,inventry_log,productPriceChange
 from mongoengine.queryset.visitor import Q
 from dateutil.relativedelta import relativedelta
 from django.views.decorators.csrf import csrf_exempt
@@ -6677,3 +6677,39 @@ def cogsGraph(request):
 
 
     return response_list
+
+
+def priceGraph(request):
+    product_id = request.GET.get('product_id')
+    preset = request.GET.get('preset', 'Today')
+    timezone_str = request.GET.get('timezone', 'US/Pacific')
+    start_date, end_date = get_date_range(preset, timezone_str)
+
+    # Generate all dates between start_date and end_date
+    date_range = [start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1)]
+
+    # Fetch price change logs for the given product and date range
+    price_changes = productPriceChange.objects.filter(
+        product_id=product_id,
+        change_date__gte=start_date,
+        change_date__lte=end_date
+    ).order_by('change_date')
+
+    # Create a dictionary for quick lookup
+    price_change_dict = {change.change_date.date(): change.new_price for change in price_changes}
+
+    # Fetch the product's current price
+    product_obj = Product.objects.filter(id=product_id).first()
+    current_price = product_obj.price if product_obj else 0.0
+
+    # Prepare the response data
+    response_data = []
+    last_known_price = current_price  # Start with the current price of the product
+    for date in date_range:
+        price = price_change_dict.get(date.date(), last_known_price)
+        response_data.append({
+            "date": date.strftime('%b %d'),
+            "price": round(price, 2)
+        })
+        
+    return response_data

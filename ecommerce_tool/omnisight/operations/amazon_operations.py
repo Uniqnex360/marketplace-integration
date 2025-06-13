@@ -1284,3 +1284,86 @@ def syncRecentAmazonOrders():
         print("Amazon orders synced successfully.")
 
         return True
+    
+
+def FetchProductsDetails():
+    credentials = {
+        'lwa_app_id': AMAZON_API_KEY,
+        'lwa_client_secret': AMAZON_SECRET_KEY,
+        'refresh_token': REFRESH_TOKEN,
+        'aws_access_key': Acccess_Key,
+        'aws_secret_key': Secret_Access_Key,
+        'role_arn': Role_ARN
+    }
+
+    report = Reports(
+        marketplace=Marketplaces.US,
+        credentials=credentials
+    ).create_report(reportType='GET_MERCHANT_LISTINGS_ALL_DATA')
+
+    report_id = report.payload['reportId']
+    print(f"Report created with ID: {report_id}")
+
+    while True:
+        response = Reports(marketplace=Marketplaces.US, credentials=credentials).get_report(report_id)
+        report_status = response.payload['processingStatus']
+        print(f"Report status: {report_status}")
+
+        if report_status == 'DONE':
+            break
+        elif report_status in ['CANCELLED', 'FATAL']:
+            raise Exception(f"Report {report_id} failed with status: {report_status}")
+
+        time.sleep(30)
+
+    document_id = response.payload['reportDocumentId']
+    doc = Reports(marketplace=Marketplaces.US, credentials=credentials).get_report_document(reportDocumentId=document_id)
+    download_url = doc.payload['url']
+
+    res = requests.get(download_url)
+    res.raise_for_status()
+
+    if 'compressionAlgorithm' in doc.payload and doc.payload['compressionAlgorithm'] == 'GZIP':
+        buf = BytesIO(res.content)
+        with gzip.GzipFile(fileobj=buf) as f:
+            raw_bytes = f.read()
+    else:
+        raw_bytes = res.content
+
+    try:
+        content = raw_bytes.decode('utf-8')
+    except UnicodeDecodeError:
+        try:
+            content = raw_bytes.decode('cp1252')
+        except UnicodeDecodeError:
+            content = raw_bytes.decode('latin1')
+
+    df = pd.read_csv(StringIO(content), sep='\t', low_memory=False)
+    # Print all rows line by line
+    for index, row in df.iterrows():
+        
+        row_data = row.to_dict()
+        sku = ""
+        if pd.notna(row_data['seller-sku']):
+            sku = row_data['seller-sku']
+
+        price = 0.0
+        if pd.notna(row_data['price']):
+            price = row_data['price']
+
+        published_status = "Active"
+        if pd.notna(row_data['status']):
+            published_status = row_data['status']
+
+        product_obj = DatabaseModel.get_document(Product.objects,{"sku" : sku},['id','price'])
+        if product_obj:
+            if product_obj.price != price:
+                DatabaseModel.update_documents(Product.objects, {"sku": sku}, {"published_status": published_status,"price": price})
+                productPriceChange(
+                    product_id=product_obj.id,
+                    old_price=product_obj.price,
+                    new_price=price,
+                    reason="Price updated from Amazon report"
+                ).save()
+
+    return True
