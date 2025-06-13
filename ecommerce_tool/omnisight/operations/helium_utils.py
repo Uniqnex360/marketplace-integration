@@ -7,6 +7,19 @@ import threading
 import pandas as pd
 from pytz import timezone
 
+def convertdateTotimezone(start_date,end_date,timezone_str):
+    import pytz
+    local_tz = pytz.timezone(timezone_str)
+        
+    naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
+    naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+    
+    naive_to_date = naive_to_date.replace(hour=23, minute=59, second=59)
+    
+    start_date = local_tz.localize(naive_from_date)
+    end_date = local_tz.localize(naive_to_date)
+    return start_date, end_date
+
 def convertLocalTimeToUTC(start_date, end_date, timezone_str):
     import pytz
     local_tz = pytz.timezone(timezone_str)

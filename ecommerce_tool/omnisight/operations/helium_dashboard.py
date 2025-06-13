@@ -19,7 +19,7 @@ from bson import ObjectId
 from calendar import monthrange
 from ecommerce_tool.settings import MARKETPLACE_ID,SELLER_ID
 from django.db.models import Sum, Q
-from omnisight.operations.helium_utils import calculate_metricss, get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount, getproductIdListBasedonManufacture,totalRevenueCalculation,get_graph_data, totalRevenueCalculationForProduct, get_top_movers, convertLocalTimeToUTC
+from omnisight.operations.helium_utils import calculate_metricss, get_date_range, grossRevenue, get_previous_periods, refundOrder,AnnualizedRevenueAPIView,getOrdersListBasedonProductId, getproductIdListBasedonbrand, getdaywiseproductssold, pageViewsandSessionCount, getproductIdListBasedonManufacture,totalRevenueCalculation,get_graph_data, totalRevenueCalculationForProduct, get_top_movers, convertLocalTimeToUTC, convertdateTotimezone
 from ecommerce_tool.crud import DatabaseModel
 from omnisight.operations.common_utils import calculate_listing_score
 import threading
@@ -519,23 +519,7 @@ def RevenueWidgetAPIView(request):
 
     
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
 
@@ -650,23 +634,7 @@ def updatedRevenueWidgetAPIView(request):
 
     
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
 
@@ -1238,23 +1206,7 @@ def get_products_with_pagination(request):
 
 
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)  
     today_start_date, today_end_date = get_date_range("Today",timezone_str)
@@ -2047,23 +1999,7 @@ def allMarketplaceData(request):
     end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        from_date = localized_from_date.astimezone(pytz.UTC)
-        to_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        to_date = to_date.replace(hour=23, minute=59, second=59)
+       from_date, to_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         from_date, to_date = get_date_range(preset,timezone_str)
 
@@ -2331,23 +2267,7 @@ def allMarketplaceDataxl(request):
     end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        from_date = localized_from_date.astimezone(pytz.UTC)
-        to_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        to_date = to_date.replace(hour=23, minute=59, second=59)
+        from_date, to_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         from_date, to_date = get_date_range(preset,timezone_str)
 
@@ -2506,23 +2426,7 @@ def downloadMarketplaceDataCSV(request):
     end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        from_date = localized_from_date.astimezone(pytz.UTC)
-        to_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        to_date = to_date.replace(hour=23, minute=59, second=59)
+        from_date, to_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         from_date, to_date = get_date_range(preset,timezone_str)
 
@@ -3497,23 +3401,7 @@ def getProfitAndLossDetails(request):
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        from_date = localized_from_date.astimezone(pytz.UTC)
-        to_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        to_date = to_date.replace(hour=23, minute=59, second=59)
+        from_date, to_date = convertdateTotimezone(start_date,end_date,timezone)
     else:
         from_date, to_date = get_date_range(preset,timezone)
 
@@ -3797,23 +3685,7 @@ def profit_loss_chart(request):
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        from_date = localized_from_date.astimezone(pytz.UTC)
-        to_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        to_date = to_date.replace(hour=23, minute=59, second=59)
+        from_date, to_date = convertdateTotimezone(start_date,end_date,timezone)
     else:
         from_date, to_date = get_date_range(preset,timezone)
 
@@ -5137,25 +5009,9 @@ def productsTrafficandConversions(request):
     end_date = request.GET.get("end_date", None)
 
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
-        start_date, to_date = get_date_range(preset,timezone_str)
+        start_date, end_date = get_date_range(preset,timezone_str)
 
     data['date'] = start_date.strftime("%b %d, %Y") + " - " + end_date.strftime("%b %d, %Y")
 
@@ -6025,23 +5881,7 @@ def getProfitAndLossDetailsForProduct(request):
     end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
     
@@ -6313,23 +6153,7 @@ def profitlosschartForProduct(request):
     end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
         
@@ -6509,30 +6333,16 @@ def getrevenuedetailsForProduct(request):
     end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
+
 
     if preset in ['Today', 'Yesterday']:
         date_range_label = f"{start_date.strftime('%b %d, %Y')} - {start_date.strftime('%b %d, %Y')}"
     else:
         date_range_label = f"{start_date.strftime('%b %d, %Y')} - {end_date.strftime('%b %d, %Y')}"
+
     def get_previous_date_range(start_date, end_date):
         duration = end_date - start_date
         previous_start_date = start_date - duration - timedelta(days=1)
@@ -6600,23 +6410,7 @@ def getInventryLogForProductdaywise(request):
     end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
 
@@ -6782,23 +6576,7 @@ def productNetprofit(request):
     end_date = json_request.get("end_date", None)
 
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
 

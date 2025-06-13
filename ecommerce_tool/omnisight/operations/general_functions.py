@@ -15,7 +15,7 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 from django.http import HttpResponse
-from omnisight.operations.helium_utils import get_date_range, convertLocalTimeToUTC
+from omnisight.operations.helium_utils import get_date_range, convertLocalTimeToUTC,convertdateTotimezone
 import pytz
 from pytz import timezone
 
@@ -1008,23 +1008,7 @@ def ordersCountForDashboard(request):
 
     
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
 
@@ -1213,23 +1197,7 @@ def salesAnalytics(request):
 
     preset = json_request.get("preset", "Today")        
     if start_date != None and start_date != "":
-        # Convert string dates to datetime in the specified timezone
-        local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
-        naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
-        start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
     if timezone_str != 'UTC':
