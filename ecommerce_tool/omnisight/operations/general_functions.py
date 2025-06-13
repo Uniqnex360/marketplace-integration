@@ -300,7 +300,7 @@ def getOrdersBasedOnProduct(request):
     product_id = request.GET.get('product_id')
     skip = int(request.GET.get('skip', 0))
     limit = int(request.GET.get('limit', 10))
-    sort_by = request.GET.get('sort_by', 'order_date')
+    sort_by = request.GET.get('sort_by')
     sort_by_value = int(request.GET.get('sort_by_value', -1)) 
 
     # Step 1: Get relevant order_item IDs based on product_id
@@ -315,10 +315,13 @@ def getOrdersBasedOnProduct(request):
     # Step 3: Fetch orders with pagination
     sort_field = sort_by if sort_by else "order_date"
     sort_order = sort_by_value if sort_by_value else -1
+    
 
     orders_queryset = Order.objects.filter(order_items__in=matching_order_items)\
-        .order_by(f"{'-' if sort_order == -1 else ''}{sort_field}")\
-        .skip(skip).limit(limit)
+            .order_by(f"{sort_order}{sort_field}")\
+            .skip(skip).limit(limit - skip)
+   
+    
 
     # Step 4: Convert to dictionary and fetch marketplace in one go
     order_list = list(orders_queryset)
