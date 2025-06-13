@@ -75,7 +75,7 @@ def getProductList(request):
     if brand_id_list != None and brand_id_list != "" and brand_id_list != []:
         match['brand_id'] = {"$in":[ObjectId(brand_id) for brand_id in brand_id_list]}
     if search_query != None and search_query != "":
-        search_query = search_query.strip() 
+        search_query = re.escape(search_query.strip())
         match["$or"] = [
             {"product_title": {"$regex": search_query, "$options": "i"}},
             {"sku": {"$regex": search_query, "$options": "i"}},
@@ -294,164 +294,14 @@ def fetchProductDetails(request):
     return data
 
 
-def getOrdersBasedOnProduct(request):
-    data = dict()
-    product_id = request.GET.get('product_id')
-    skip = int(request.GET.get('skip',0))  # Default skip = 0 if not provided
-    limit = int(request.GET.get('limit', 10))  # Default limit = 100 if not provided
-    sort_by = request.GET.get('sort_by', 'order_date')
-    sort_by_value = int(request.GET.get('sort_by_value', -1)) 
-
-    count_pipeline = [
-        {
-            "$match": {
-                "order_items": {"$exists": True, "$ne": []}
-            }
-        },
-        {
-            "$lookup": {
-                "from": "order_items",
-                "localField": "order_items",
-                "foreignField": "_id",
-                "as": "order_items"
-            }
-        },
-        {
-            "$unwind": "$order_items"
-        },
-        {
-            "$match": {
-                "order_items.ProductDetails.product_id": ObjectId(product_id)
-            }
-        },
-        {
-            "$count": "total_count"
-        }
-    ]
-    total_count_result = list(Order.objects.aggregate(*count_pipeline))
-    total_count = total_count_result[0]['total_count'] if total_count_result else 0
-
-    pipeline = [
-        {
-            "$match": {
-                "order_items": {"$exists": True, "$ne": []}
-            }
-        },
-        {
-            "$lookup": {
-                "from": "order_items",
-                "localField": "order_items",
-                "foreignField": "_id",
-                "as": "order_items_ins"
-            }
-        },
-        {
-            "$unwind": "$order_items_ins"
-        },
-        {
-            "$match": {
-                "order_items_ins.ProductDetails.product_id": ObjectId(product_id)
-            }
-        }]
-    if sort_by != None and sort_by != "":
-        sort = {
-            "$sort": {
-                sort_by: sort_by_value
-            }
-        }
-    else:
-        sort = {
-            "$sort": {
-                "order_date": -1
-            }
-        }
-    pipeline.append(sort)
-        
-    pipeline.extend([   {
-            "$skip": skip
-        },
-        {
-            "$limit": limit
-        },
-        {
-            "$group": {
-                "_id": "$_id",
-                "purchase_order_id": {"$first": "$purchase_order_id"},
-                "order_date": {"$first": "$order_date"},
-                "order_status": {"$first": "$order_status"},
-                "order_total": {"$first": "$order_total"},
-                "currency": {"$first": "$currency"},
-                "marketplace_id": {"$first": "$marketplace_id"}
-            }
-        },
-        {
-            "$lookup": {
-                "from": "marketplace",
-                "localField": "marketplace_id",
-                "foreignField": "_id",
-                "as": "marketplace_ins"
-            }
-        },
-        {
-            "$unwind": {
-                "path": "$marketplace_ins",
-                "preserveNullAndEmptyArrays": True
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "id": {"$toString": "$_id"},
-                "purchase_order_id": 1,
-                "order_date": {
-                    "$dateToString": {
-                        "format": "%Y-%m-%dT%H:%M:%S.%LZ",
-                        "date": "$order_date",
-                    }
-                },
-                "order_status": 1,
-                "order_total": {"$round": ["$order_total", 2]},
-                "currency": 1,
-                "marketplace_name": "$marketplace_ins.name"
-            }
-        }
-    ])
-    orders = list(Order.objects.aggregate(*pipeline, allowDiskUse=True))
-
-    data['total_count'] = total_count
-    data['orders'] = orders
-    custom_pipeline = [
-        {
-            "$match": {
-                "ordered_products.product_id" : ObjectId(product_id)
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "id": {"$toString" : "$_id"},
-                "purchase_order_id": "$order_id",
-                "order_date": "$purchase_order_date",
-                "order_status": 1,
-                "order_total": "$total_price",
-                "currency": {"$ifNull" : ["$currency","USD"]},
-                "marketplace_name": "custom"
-            }
-        }
-    ]
-    custom_orders = list(custom_order.objects.aggregate(*custom_pipeline))
-    orders.extend(custom_orders)
-
-    data['orders'] = orders
-    return data
-
-
 
 def getOrdersBasedOnProduct(request):
     data = {'total_count': 0, 'orders': []}
     product_id = request.GET.get('product_id')
     skip = int(request.GET.get('skip', 0))
     limit = int(request.GET.get('limit', 10))
+    sort_by = request.GET.get('sort_by', 'order_date')
+    sort_by_value = int(request.GET.get('sort_by_value', -1)) 
 
     # Step 1: Get relevant order_item IDs based on product_id
     matching_order_items = list(OrderItems.objects.filter(ProductDetails__product_id=ObjectId(product_id)).only('id'))
@@ -463,9 +313,12 @@ def getOrdersBasedOnProduct(request):
     total_count = Order.objects.filter(order_items__in=matching_order_items).count()
 
     # Step 3: Fetch orders with pagination
+    sort_field = sort_by if sort_by else "order_date"
+    sort_order = sort_by_value if sort_by_value else -1
+
     orders_queryset = Order.objects.filter(order_items__in=matching_order_items)\
-        .order_by("-order_date")\
-        .skip(skip).limit(limit - skip)
+        .order_by(f"{'-' if sort_order == -1 else ''}{sort_field}")\
+        .skip(skip).limit(limit)
 
     # Step 4: Convert to dictionary and fetch marketplace in one go
     order_list = list(orders_queryset)
@@ -530,7 +383,7 @@ def fetchAllorders(request):
     search_query = json_request.get('search_query')
         
     if market_place_id != None and market_place_id != "" and market_place_id != "all" and market_place_id == "custom":
-        search_query = search_query.strip() 
+        search_query = re.escape(search_query.strip()) 
         match = { "$match" : 
                     {"order_id": {"$regex": search_query, "$options": "i"}}}
         pipeline.append(match)
@@ -595,7 +448,7 @@ def fetchAllorders(request):
         pipeline.append(match)
         count_pipeline.append(match)
     if search_query != None and search_query != "":
-        search_query = search_query.strip() 
+        search_query = re.escape(search_query.strip())
         match = { "$match" : 
                     {"purchase_order_id": {"$regex": search_query, "$options": "i"}}}
             # {"sku": {"$regex": search_query, "$options": "i"}},
@@ -2325,7 +2178,7 @@ def fetchInventryList(request):
     # if brand_id_list != None and brand_id_list != "" and brand_id_list != []:
     #     match['brand_id'] = {"$in":[ObjectId(brand_id) for brand_id in brand_id_list]}
     if search_query != None and search_query != "":
-        search_query = search_query.strip() 
+        search_query = re.escape(search_query.strip())
         match["$or"] = [
             {"product_title": {"$regex": search_query, "$options": "i"}},
             {"sku": {"$regex": search_query, "$options": "i"}},

@@ -1287,7 +1287,7 @@ def get_products_with_pagination(request):
             match["sku"] = {"$regex": sku_search, "$options": "i"}
 
     if search_query:
-        search_query = search_query.strip() 
+        search_query = re.escape(search_query.strip())
         match["$or"] = [
             {"product_title": {"$regex": search_query, "$options": "i"}},
             {"sku": {"$regex": search_query, "$options": "i"}},
@@ -5219,7 +5219,7 @@ def getSKUlist(request):
     pipeline = []
 
     if search_query != None and search_query != "":
-        search_query = search_query.strip() 
+        search_query = re.escape(search_query.strip())
         match["sku"] = {"$regex": search_query, "$options": "i"}
 
     
@@ -5263,7 +5263,7 @@ def getproductIdlist(request):
     manufacturer_name = json_request.get('manufacturer_name')
 
     if search_query != None and search_query != "":
-        search_query = search_query.strip() 
+        search_query = re.escape(search_query.strip())
         match["product_id"] = {"$regex": search_query, "$options": "i"}
 
     
@@ -5306,7 +5306,7 @@ def getBrandListforfilter(request):
 
 
     if search_query != None and search_query != "":
-        search_query = search_query.strip() 
+        search_query = re.escape(search_query.strip())
         match["name"] = {"$regex": search_query, "$options": "i"}
 
     
@@ -5347,7 +5347,7 @@ def obtainManufactureNames(request):
     pipeline = []
 
     if search_query != None and search_query != "":
-        search_query = search_query.strip() 
+        search_query = re.escape(search_query.strip()) 
         match["manufacturer_name"] = {"$regex": search_query, "$options": "i"}
 
     
@@ -6723,10 +6723,11 @@ def updateProductDetails(request):
     return True
 
 
-
+@csrf_exempt
 def productUnitProfitability(request):
+    json_request = JSONParser().parse(request)
+    product_id = json_request.get("product_id")
     reponse_list =[]
-    product_id = request.GET.get('product_id')
     product_obj = DatabaseModel.get_document(Product.objects,{"id" : product_id})
     marketplaces = [ins.name for ins in product_obj.marketplace_ids]
     has_amazon = "Amazon" in marketplaces
@@ -6741,7 +6742,7 @@ def productUnitProfitability(request):
             "base_price" : price,
             "product_cost" : p_cost,
             "shipping_cost" : s_cost,
-            "cogs" : p_cost + s_cost,
+            "cogs" : round(p_cost + s_cost,2),
             "gross_profit" : round(price - (p_cost + s_cost), 2),
             "amazon_fee" : fee,
             "net_profit" : round(price - (p_cost + s_cost + fee), 2)
@@ -6752,11 +6753,11 @@ def productUnitProfitability(request):
         s_cost = round(product_obj.w_shiping_cost, 2) if product_obj.w_shiping_cost else 0
         fee = round(product_obj.walmart_fee, 2) if product_obj.walmart_fee else 0
         reponse_list.append({
-            "channel" : "Amazon",
+            "channel" : "Walmart",
             "base_price" : price,
             "product_cost" : p_cost,
             "shipping_cost" : s_cost,
-            "cogs" : p_cost + s_cost,
+            "cogs" : round(p_cost + s_cost,2),
             "gross_profit" : round(price - (p_cost + s_cost), 2),
             "walmart_fee" : fee,
             "net_profit" : round(price - (p_cost + s_cost + fee), 2)
@@ -6800,7 +6801,7 @@ def productNetprofit(request):
         start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
 
-    product_obj = DatabaseModel.get_document(Product.objects,{"id" : product_id})
+    product_obj = DatabaseModel.get_document(Product.objects,{"id" : ObjectId(product_id)})
     
     amazon_p_cost = round(product_obj.product_cost, 2) if product_obj.product_cost else 0
     amazon_s_cost = round(product_obj.a_shipping_cost, 2) if product_obj.a_shipping_cost else 0
