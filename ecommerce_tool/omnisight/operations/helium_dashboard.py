@@ -6732,6 +6732,7 @@ def productUnitProfitability(request):
     marketplaces = [ins.name for ins in product_obj.marketplace_ids]
     has_amazon = "Amazon" in marketplaces
     has_walmart = "Walmart" in marketplaces
+    vendor_funding = round(product_obj.vendor_funding, 2) if product_obj.vendor_funding else 0
     if has_amazon:
         price = round(product_obj.price, 2) if product_obj.price else 0
         p_cost = round(product_obj.product_cost, 2) if product_obj.product_cost else 0
@@ -6747,7 +6748,7 @@ def productUnitProfitability(request):
             "cogs" : round(p_cost + s_cost,2),
             "gross_profit" : round(price - (p_cost + s_cost), 2),
             "amazon_fee" : fee,
-            "net_profit" : round(price - (p_cost + s_cost + fee), 2)
+            "net_profit" : round((price - (p_cost + s_cost + fee)) + vendor_funding, 2)
         })
     if has_walmart:
         price = round(product_obj.price, 2) if product_obj.price else 0
@@ -6764,7 +6765,7 @@ def productUnitProfitability(request):
             "cogs" : round(p_cost + s_cost,2),
             "gross_profit" : round(price - (p_cost + s_cost), 2),
             "walmart_fee" : fee,
-            "net_profit" : round(price - (p_cost + s_cost + fee), 2)
+            "net_profit" : round((price - (p_cost + s_cost + fee)) + vendor_funding, 2)
         })
     return reponse_list
 
@@ -6815,6 +6816,7 @@ def productNetprofit(request):
     walmart_p_cost = round(product_obj.w_product_cost, 2) if product_obj.w_product_cost else 0
     walmart_s_cost = round(product_obj.w_shiping_cost, 2) if product_obj.w_shiping_cost else 0
     walmart_fee = round(product_obj.walmart_fee, 2) if product_obj.walmart_fee else 0
+    t_vendor_funding = round(product_obj.vendor_funding, 2) if product_obj.vendor_funding else 0
 
 
     def calculate_product_net_profit(product_id, start_date, end_date):
@@ -6824,6 +6826,7 @@ def productNetprofit(request):
         product_cost = 0
         base_price = 0
         tax_price = 0
+        vendor_funding = 0
 
         # Fetch orders within the specified date range
         orders = grossRevenue(start_date, end_date, None, [], [product_id], [], None,timezone_str)
@@ -6860,6 +6863,7 @@ def productNetprofit(request):
                 shipping_cost += (walmart_s_cost * total_units)
                 product_cost += (walmart_p_cost * total_units)
                 channel_fee += (walmart_fee * total_units)
+            vendor_funding += (t_vendor_funding * total_units)
                 
         return {
             "gross_revenue" : round(gross_revenue,2),
@@ -6870,7 +6874,7 @@ def productNetprofit(request):
             "channel_fee": round(channel_fee, 2),
             "cogs": round(product_cost, 2) + round(shipping_cost, 2),
             "gross_profit": round(base_price - (product_cost + shipping_cost), 2),
-            "net_profit": round(base_price - (product_cost + shipping_cost + channel_fee), 2)
+            "net_profit": round((base_price - (product_cost + shipping_cost + channel_fee)) + vendor_funding, 2)
         }
 
 
