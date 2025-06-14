@@ -6696,7 +6696,7 @@ def priceGraph(request):
     ).order_by('change_date')
 
     # Create a dictionary for quick lookup
-    price_change_dict = {change.change_date.date(): change.new_price for change in price_changes}
+    price_change_dict = {change.change_date.date(): change.old_price for change in price_changes}
 
     # Fetch the product's current price
     product_obj = Product.objects.filter(id=product_id).first()
