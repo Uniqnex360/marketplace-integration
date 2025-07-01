@@ -1555,7 +1555,7 @@ def get_batch_sales_data(start_date, end_date, product_ids):
     sales_data = {}
     try:
         # Adjust this line according to your sales model
-        results = list(Sales.objects.aggregate(*sales_pipeline))
+        results = list(Product.objects.aggregate(*sales_pipeline))
         for result in results:
             sales_data[result['_id']] = {
                 'total_quantity': result['total_quantity'],
@@ -5085,43 +5085,62 @@ def getproductIdlist(request):
     marketplace_id = json_request.get('marketplace_id')
     brand_id = json_request.get('brand_id')
     search_query = json_request.get('search_query')
-    match =dict()
-    pipeline = []
     manufacturer_name = json_request.get('manufacturer_name')
+    match = dict()
+    pipeline = []
 
-    if search_query != None and search_query != "":
+    # Normalize brand_id and manufacturer_name to lists if needed
+    if brand_id and isinstance(brand_id, str):
+        brand_id = [brand_id]
+    if manufacturer_name and isinstance(manufacturer_name, str):
+        manufacturer_name = [manufacturer_name]
+
+    # Print the brand(s) received in the query
+    if brand_id and brand_id not in ["", [], "custom"]:
+        brand_list = [ObjectId(i) for i in brand_id]
+        # Use id, NOT _id for MongoEngine
+        brand_objs = list(Brand.objects.filter(id__in=brand_list))
+        brand_names = [b.name for b in brand_objs]
+        print("Brands received in the query:", ", ".join(brand_names))
+        match['brand_id'] = {"$in": brand_list}
+    else:
+        brand_names = []
+
+    if search_query:
         search_query = re.escape(search_query.strip())
         match["product_id"] = {"$regex": search_query, "$options": "i"}
 
-    
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+    if marketplace_id and marketplace_id not in ["", "all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
-    if brand_id != None and brand_id != "" and brand_id != [] and brand_id != "custom":
-        brand_list = [ObjectId(i) for i in brand_id]
-        match['brand_id'] = {"$in":brand_list}
 
-    if manufacturer_name != None and manufacturer_name != "" and manufacturer_name != [] and manufacturer_name != "custom":
-        match['manufacturer_name'] = {"$in":manufacturer_name}
-        
-    if match != {}:
+    if manufacturer_name and manufacturer_name not in ["", [], "custom"]:
+        match['manufacturer_name'] = {"$in": manufacturer_name}
+
+    if match:
         pipeline.append({"$match": match})
+    else:
+        pipeline.append({"$sample": {"size": 10}})  # Only sample when no filters
 
-    pipeline.extend([
-        {
-            "$project": {
-                "_id": 0,
-                "id" : {"$toString": "$_id"},
-                "Asin": "$product_id",
-            }
+    pipeline.append({
+        "$project": {
+            "_id": 0,
+            "id": {"$toString": "$_id"},
+            "Asin": "$product_id",
+            "product_title": "$product_title"  # Add product title for printing
         }
-    ])
-    if match =={}:
-        pipeline.append({
-            "$sample": {"size": 10}  # Randomly select 10 documents
-        })
-    asin_list = list(Product.objects.aggregate(*pipeline))
-    return asin_list
+    })
 
+    asin_list = list(Product.objects.aggregate(*pipeline))
+
+    # Print product names under the brand(s)
+    if brand_names:
+        print(f"Products under brand(s) {', '.join(brand_names)}:")
+    else:
+        print("Products (no brand filter):")
+    for product in asin_list:
+        print(f"  - {product.get('product_title', 'Unknown')}")
+
+    return asin_list
 
 def getBrandListforfilter(request):
     data = dict()
