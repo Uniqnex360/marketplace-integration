@@ -16,10 +16,10 @@ Including another URLconf
 """
 from django.urls import path
 from omnisight.operations.common_operations import checkEmailExistOrNot, signupUser,loginUser, forgotPassword, changePassword
-from omnisight.operations.walmart_operations import updateOrdersItemsDetails, fetchAllorders1, syncRecentWalmartOrders
+# from omnisight.operations.walmart_operations import updateOrdersItemsDetails, fetchAllorders1, syncRecentWalmartOrders
 from omnisight.operations.general_functions import getMarketplaceList, getProductList, getProductCategoryList, getBrandList, fetchProductDetails,fetchAllorders, fetchOrderDetails, ordersCountForDashboard,totalSalesAmount, getOrdersBasedOnProduct, createManualOrder, getProductListForOrdercreation,listManualOrders, fetchManualOrderDetails, getSalesTrendPercentage, fetchSalesSummary, salesAnalytics, mostSellingProducts, fetchTopSellingCategories, updateManualOrder, fetchInventryList, exportOrderReport, createUser, updateUser, listUsers,fetchUserDetails, fetchRoles,getProductVariant
 
-from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders,ShipStationShippingCostAPIView
+# from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders,ShipStationShippingCostAPIView
 
 from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist,InsightsProductWise,getCitywiseSales,exportCitywiseSalesExcel,downloadCitywiseSalesCSV,obtainManufactureNames, getBrandListforfilter,productsDetailsPageSummary,productsSalesOverview, productsListingQualityScore, productsTrafficandConversions, getProfitAndLossDetailsForProduct, profitlosschartForProduct, getrevenuedetailsForProduct, getInventryLogForProductdaywise, getProductInformation, updatedRevenueWidgetAPIView, updateProductDetails, productUnitProfitability, productNetprofit, cogsGraph, priceGraph
 
@@ -74,13 +74,13 @@ urlpatterns = [
 
 
     # #AMAZON URLS
-    path('updateAmazonProductsBasedonAsins/',updateAmazonProductsBasedonAsins,name="updateAmazonProductsBasedonAsins"),
-    path('updateOrdersItemsDetailsAmazon/',updateOrdersItemsDetailsAmazon,name="updateOrdersItemsDetailsAmazon"),
-    path("syncRecentAmazonOrders/",syncRecentAmazonOrders,name="syncRecentAmazonOrders"),
+    # path('updateAmazonProductsBasedonAsins/',updateAmazonProductsBasedonAsins,name="updateAmazonProductsBasedonAsins"),
+    # path('updateOrdersItemsDetailsAmazon/',updateOrdersItemsDetailsAmazon,name="updateOrdersItemsDetailsAmazon"),
+    # path("syncRecentAmazonOrders/",syncRecentAmazonOrders,name="syncRecentAmazonOrders"),
 
-    #Walmart
-    path('updateOrdersItemsDetails/',updateOrdersItemsDetails,name='updateOrdersItemsDetails'),
-    path("syncRecentWalmartOrders/",syncRecentWalmartOrders,name="syncRecentWalmartOrders"),
+    # #Walmart
+    # path('updateOrdersItemsDetails/',updateOrdersItemsDetails,name='updateOrdersItemsDetails'),
+    # path("syncRecentWalmartOrders/",syncRecentWalmartOrders,name="syncRecentWalmartOrders"),
 
     #Inventry
     path("fetchInventryList/",fetchInventryList,name="fetchInventryList"),
