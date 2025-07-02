@@ -1583,19 +1583,28 @@ def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
+    try:
+        json_request = JSONParser().parse(request)
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    marketplace_id = json_request.get('marketplace_id')
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel', None)
+    fulfillment_channel = json_request.get('fulfillment_channel')
     timezone_str = json_request.get('timezone', 'US/Pacific')
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
     # 🔁 Optimized metric function (no threading inside)
 >>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
     def calculate_metrics_sync(start_date, end_date):
+=======
+    # ⚡ Optimized synchronous metric call
+    def calculate_metrics_range(start_date, end_date):
+>>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
         return calculate_metricss(
             start_date, end_date,
             marketplace_id, brand_id,
@@ -1606,22 +1615,21 @@ def getPeriodWiseData(request):
         )
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     # ✅ Format helper
 >>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
+=======
+>>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end, current_metrics):
-        period_format = {
-            "current": {"from": to_utc_format(current_start)},
-            "previous": {"from": to_utc_format(prev_start)}
-        }
-        if label not in ['Today', 'Yesterday']:
-            period_format["current"]["to"] = to_utc_format(current_end)
-            period_format["previous"]["to"] = to_utc_format(prev_end)
-
         output = {
             "label": label,
-            "period": period_format
+            "period": {
+                "current": {"from": to_utc_format(current_start)},
+                "previous": {"from": to_utc_format(prev_start)}
+            }
         }
+<<<<<<< HEAD
         for key in current_metrics:
 <<<<<<< HEAD
             output[key] = {
@@ -1633,9 +1641,17 @@ def getPeriodWiseData(request):
 =======
             output[key] = {"current": current_metrics[key]}
 
+=======
+        if label not in ['Today', 'Yesterday']:
+            output["period"]["current"]["to"] = to_utc_format(current_end)
+            output["period"]["previous"]["to"] = to_utc_format(prev_end)
+
+        for key, val in current_metrics.items():
+            output[key] = {"current": val}
+>>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
         return output
 
-    # ✅ Use a cache key to avoid recomputing
+    # ✅ Short cache key to avoid redundant execution
     cache_key = f"period_metrics:{marketplace_id}:{timezone_str}"
     cached = cache.get(cache_key)
     if cached:
@@ -1643,8 +1659,12 @@ def getPeriodWiseData(request):
 
     start_time = time.time()
 
+<<<<<<< HEAD
     # 📆 Compute date ranges
 >>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
+=======
+    # 🗓 Date ranges
+>>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1653,6 +1673,7 @@ def getPeriodWiseData(request):
         "lastYear": get_date_range("Last Year", timezone_str)
     }
 
+<<<<<<< HEAD
 <<<<<<< HEAD
     # Prepare arguments for parallel execution
     period_params = [
@@ -1700,6 +1721,8 @@ def getPeriodWiseData(request):
             )
 =======
     # 🧮 Prepare metric runs
+=======
+>>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
     period_params = [
         ("Yesterday",
          date_ranges["yesterday"][0], date_ranges["yesterday"][1],
@@ -1718,23 +1741,37 @@ def getPeriodWiseData(request):
          date_ranges["lastYear"][0], date_ranges["lastYear"][1]),
     ]
 
-    # 🔁 Serial execution (no threads)
+    # ⚡ Parallel processing using ThreadPoolExecutor
     response_data = {}
-    for label, current_start, current_end, prev_start, prev_end in period_params:
-        current_metrics = calculate_metrics_sync(current_start, current_end)
-        key = label.lower().replace(" ", "")
-        response_data[key] = format_period_metrics(
-            label, current_start, current_end, prev_start, prev_end, current_metrics
-        )
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_label = {
+            executor.submit(calculate_metrics_range, cur_start, cur_end): (label, cur_start, cur_end, prev_start, prev_end)
+            for label, cur_start, cur_end, prev_start, prev_end in period_params
+        }
 
-    # ✅ Cache the response for 5 minutes (optional)
+        for future in as_completed(future_to_label):
+            label, cur_start, cur_end, prev_start, prev_end = future_to_label[future]
+            key = label.lower().replace(" ", "")
+            try:
+                current_metrics = future.result(timeout=60)
+                response_data[key] = format_period_metrics(label, cur_start, cur_end, prev_start, prev_end, current_metrics)
+            except Exception as e:
+                print(f"[ERROR] Failed to calculate {label}: {e}")
+                response_data[key] = {
+                    "label": label,
+                    "error": f"Failed to compute metrics for {label}"
+                }
+
     cache.set(cache_key, response_data, timeout=300)
 
+<<<<<<< HEAD
     print(f"⏱️ getPeriodWiseData executed in {round(time.time() - start_time, 2)} seconds")
 >>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
 
+=======
+    print(f"⏱️ getPeriodWiseData executed in {round(time.time() - start_time, 2)}s")
+>>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
     return JsonResponse(response_data, safe=False)
-
 @csrf_exempt
 def getPeriodWiseDataXl(request):
     json_request = JSONParser().parse(request)
@@ -5235,12 +5272,8 @@ def getBrandListforfilter(request):
                 "name" : 1
             }
         },
-        {
-            "$skip" : skip
-        },
-        {
-            "$limit" : 10
-        }
+        
+        
     ])
     
     brand_list = list(Brand.objects.aggregate(*(pipeline)))
