@@ -5182,12 +5182,8 @@ def getBrandListforfilter(request):
                 "name" : 1
             }
         },
-        {
-            "$skip" : skip
-        },
-        {
-            "$limit" : 10
-        }
+        
+        
     ])
     
     brand_list = list(Brand.objects.aggregate(*(pipeline)))
