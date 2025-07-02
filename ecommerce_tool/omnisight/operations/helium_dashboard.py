@@ -6,6 +6,8 @@ from dateutil.relativedelta import relativedelta
 from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime,timedelta
 from bson.son import SON
+import time
+from django.core.cache import cache 
 from django.http import JsonResponse
 from django.http import HttpResponse
 import openpyxl
@@ -1589,16 +1591,24 @@ def getPeriodWiseData(request):
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = json_request.get('timezone', 'US/Pacific')
 
+<<<<<<< HEAD
+=======
+    # 🔁 Optimized metric function (no threading inside)
+>>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
     def calculate_metrics_sync(start_date, end_date):
         return calculate_metricss(
-            start_date, end_date, 
-            marketplace_id, brand_id, 
-            product_id, manufacturer_name, 
+            start_date, end_date,
+            marketplace_id, brand_id,
+            product_id, manufacturer_name,
             fulfillment_channel,
             timezone_str, False,
             use_threads=False
         )
 
+<<<<<<< HEAD
+=======
+    # ✅ Format helper
+>>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end, current_metrics):
         period_format = {
             "current": {"from": to_utc_format(current_start)},
@@ -1613,12 +1623,28 @@ def getPeriodWiseData(request):
             "period": period_format
         }
         for key in current_metrics:
+<<<<<<< HEAD
             output[key] = {
                 "current": current_metrics[key],
             }
         return output
 
     # Compute all date ranges first
+=======
+            output[key] = {"current": current_metrics[key]}
+
+        return output
+
+    # ✅ Use a cache key to avoid recomputing
+    cache_key = f"period_metrics:{marketplace_id}:{timezone_str}"
+    cached = cache.get(cache_key)
+    if cached:
+        return JsonResponse(cached, safe=False)
+
+    start_time = time.time()
+
+    # 📆 Compute date ranges
+>>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1627,6 +1653,7 @@ def getPeriodWiseData(request):
         "lastYear": get_date_range("Last Year", timezone_str)
     }
 
+<<<<<<< HEAD
     # Prepare arguments for parallel execution
     period_params = [
         (
@@ -1671,6 +1698,40 @@ def getPeriodWiseData(request):
             response_data[response_data_key] = format_period_metrics(
                 label, current_start, current_end, prev_start, prev_end, current_metrics
             )
+=======
+    # 🧮 Prepare metric runs
+    period_params = [
+        ("Yesterday",
+         date_ranges["yesterday"][0], date_ranges["yesterday"][1],
+         date_ranges["yesterday"][0] - timedelta(days=1),
+         date_ranges["yesterday"][0] - timedelta(seconds=1)),
+        ("Last 7 Days",
+         date_ranges["last7Days"][0], date_ranges["last7Days"][1],
+         date_ranges["last7Days"][0] - timedelta(days=7),
+         date_ranges["last7Days"][0] - timedelta(seconds=1)),
+        ("Last 30 Days",
+         date_ranges["last30Days"][0], date_ranges["last30Days"][1],
+         date_ranges["last30Days"][0] - timedelta(days=30),
+         date_ranges["last30Days"][0] - timedelta(seconds=1)),
+        ("Year to Date",
+         date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
+         date_ranges["lastYear"][0], date_ranges["lastYear"][1]),
+    ]
+
+    # 🔁 Serial execution (no threads)
+    response_data = {}
+    for label, current_start, current_end, prev_start, prev_end in period_params:
+        current_metrics = calculate_metrics_sync(current_start, current_end)
+        key = label.lower().replace(" ", "")
+        response_data[key] = format_period_metrics(
+            label, current_start, current_end, prev_start, prev_end, current_metrics
+        )
+
+    # ✅ Cache the response for 5 minutes (optional)
+    cache.set(cache_key, response_data, timeout=300)
+
+    print(f"⏱️ getPeriodWiseData executed in {round(time.time() - start_time, 2)} seconds")
+>>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
 
     return JsonResponse(response_data, safe=False)
 
