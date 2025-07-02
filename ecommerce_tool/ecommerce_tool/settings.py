@@ -21,41 +21,59 @@ load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
-CORS_ALLOW_ALL_ORIGINS = False
 
-# CORS_ORIGIN_ALLOW_ALL = True
+# CORS Configuration - FIXED
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 
+# Alternative: Use specific origins instead of CORS_ALLOW_ALL_ORIGINS = True
+# If you want to be more specific, comment out CORS_ALLOW_ALL_ORIGINS above and uncomment below:
+# CORS_ALLOW_ALL_ORIGINS = False
+# CORS_ALLOWED_ORIGINS = [
+#     "http://34.195.154.218",
+#     "http://localhost:3000",
+#     "http://192.168.30.191:4200",
+#     "https://b2bop.netlify.app"
+# ]
 
-CORS_ALLOWED_ORIGINS = [
-    "http://34.195.154.218",
-    "http://localhost:3000",
-    "http://192.168.30.191:4200",
-    "https://b2bop.netlify.app"
-]
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
      "http://34.195.154.218",
+    "http://34.195.154.218",
     "http://192.168.30.191:4200",
     "https://b2bop.netlify.app"
 ]
-#CORS_ALLOW_CREDENTIALS = True
+
 CORS_ALLOW_HEADERS = list(default_headers) + [
     'content-type',
+    'authorization',
+    'x-requested-with',
+    'accept',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
 ]
 
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
 
 # Application definition
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -71,7 +89,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',  # MUST be first
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -79,7 +97,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'ecommerce_tool.custom_mideleware.customMiddleware' #custom middle ware
+    'ecommerce_tool.custom_mideleware.customMiddleware'  # custom middleware
 ]
 
 ROOT_URLCONF = 'ecommerce_tool.urls'
@@ -101,7 +119,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'ecommerce_tool.wsgi.application'
-
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
@@ -130,8 +147,6 @@ connect(
     # alias='default'
 )
 
-
-
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
 
@@ -150,7 +165,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
@@ -161,7 +175,6 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 
 USE_TZ = True
-
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
@@ -184,28 +197,24 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 #     ),
 # }
 
+# API Keys and External Service Configuration
 
-
-
-# Read API keys
-#WALMART API KEYS
+# WALMART API KEYS
 WALMART_API_KEY = os.getenv('WALMART_API_KEY')
 WALMART_SECRET_KEY = os.getenv('WALMART_SECRET_KEY')
 
-#AMAZON API KEYS
+# AMAZON API KEYS
 AMAZON_API_KEY = os.getenv('AMAZON_API_KEY')
 AMAZON_SECRET_KEY = os.getenv('AMAZON_SECRET_KEY')
 REFRESH_TOKEN = os.getenv('AMAZON_REFRESH_TOKEN')
 MARKETPLACE_ID = os.getenv('MARKETPLACE_ID')
 SELLER_ID = os.getenv('SELLER_ID')
 
-
-Role_ARN =  os.getenv('Role_ARN')
-Acccess_Key= os.getenv('Acccess_Key')
+Role_ARN = os.getenv('Role_ARN')
+Acccess_Key = os.getenv('Acccess_Key')
 Secret_Access_Key = os.getenv('Secret_Access_Key')
 
-
-#SENDGRID API KEYS
+# SENDGRID API KEYS
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
 
 # Sellercloud API credentials
@@ -214,12 +223,7 @@ SELLERCLOUD_PASSWORD = os.getenv('SELLERCLOUD_PASSWORD')
 SELLERCLOUD_COMPANY_ID = os.getenv('SELLERCLOUD_COMPANY_ID')  # Replace with your actual company ID
 SELLERCLOUD_SERVER_ID = os.getenv('SELLERCLOUD_SERVER_ID')  # Replace with your actual server ID
 
-
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY')
-
-
-
+# Celery Configuration
 CELERY_BROKER_URL = 'redis://localhost:6379/0'  # Change if using RabbitMQ
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
