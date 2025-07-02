@@ -1595,16 +1595,10 @@ def getPeriodWiseData(request):
     fulfillment_channel = json_request.get('fulfillment_channel')
     timezone_str = json_request.get('timezone', 'US/Pacific')
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
+
     # 🔁 Optimized metric function (no threading inside)
->>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
-    def calculate_metrics_sync(start_date, end_date):
-=======
     # ⚡ Optimized synchronous metric call
     def calculate_metrics_range(start_date, end_date):
->>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
         return calculate_metricss(
             start_date, end_date,
             marketplace_id, brand_id,
@@ -1614,13 +1608,8 @@ def getPeriodWiseData(request):
             use_threads=False
         )
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
+
     # ✅ Format helper
->>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
-=======
->>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end, current_metrics):
         output = {
             "label": label,
@@ -1629,26 +1618,13 @@ def getPeriodWiseData(request):
                 "previous": {"from": to_utc_format(prev_start)}
             }
         }
-<<<<<<< HEAD
         for key in current_metrics:
-<<<<<<< HEAD
             output[key] = {
                 "current": current_metrics[key],
             }
         return output
 
     # Compute all date ranges first
-=======
-            output[key] = {"current": current_metrics[key]}
-
-=======
-        if label not in ['Today', 'Yesterday']:
-            output["period"]["current"]["to"] = to_utc_format(current_end)
-            output["period"]["previous"]["to"] = to_utc_format(prev_end)
-
-        for key, val in current_metrics.items():
-            output[key] = {"current": val}
->>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
         return output
 
     # ✅ Short cache key to avoid redundant execution
@@ -1659,12 +1635,8 @@ def getPeriodWiseData(request):
 
     start_time = time.time()
 
-<<<<<<< HEAD
     # 📆 Compute date ranges
->>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
-=======
     # 🗓 Date ranges
->>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1673,8 +1645,6 @@ def getPeriodWiseData(request):
         "lastYear": get_date_range("Last Year", timezone_str)
     }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
     # Prepare arguments for parallel execution
     period_params = [
         (
@@ -1719,10 +1689,6 @@ def getPeriodWiseData(request):
             response_data[response_data_key] = format_period_metrics(
                 label, current_start, current_end, prev_start, prev_end, current_metrics
             )
-=======
-    # 🧮 Prepare metric runs
-=======
->>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
     period_params = [
         ("Yesterday",
          date_ranges["yesterday"][0], date_ranges["yesterday"][1],
@@ -1764,13 +1730,9 @@ def getPeriodWiseData(request):
 
     cache.set(cache_key, response_data, timeout=300)
 
-<<<<<<< HEAD
     print(f"⏱️ getPeriodWiseData executed in {round(time.time() - start_time, 2)} seconds")
->>>>>>> 986c82a15946c1cbee740c319eb10d416c929c00
 
-=======
     print(f"⏱️ getPeriodWiseData executed in {round(time.time() - start_time, 2)}s")
->>>>>>> 8dca745b36d9d832a63fc5cd7a8ee28bd8db9303
     return JsonResponse(response_data, safe=False)
 @csrf_exempt
 def getPeriodWiseDataXl(request):
