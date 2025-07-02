@@ -48,6 +48,7 @@ CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
+     "http://34.195.154.218",
     "http://34.195.154.218",
     "http://192.168.30.191:4200",
     "https://b2bop.netlify.app"
