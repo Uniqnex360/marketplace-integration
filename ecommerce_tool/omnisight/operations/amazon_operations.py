@@ -1289,6 +1289,18 @@
 # syncRecentAmazonOrders()
     
 
+# # def FetchProductsDetails():
+# #     credentials = {
+# #         'lwa_app_id': AMAZON_API_KEY,
+# #         'lwa_client_secret': AMAZON_SECRET_KEY,
+# #         'refresh_token': REFRESH_TOKEN,
+# #         'aws_access_key': Acccess_Key,
+# #         'aws_secret_key': Secret_Access_Key,
+# #         'role_arn': Role_ARN
+# #     }
+# syncRecentAmazonOrders()
+    
+
 # def FetchProductsDetails():
 #     credentials = {
 #         'lwa_app_id': AMAZON_API_KEY,
@@ -1298,18 +1310,6 @@
 #         'aws_secret_key': Secret_Access_Key,
 #         'role_arn': Role_ARN
 #     }
-syncRecentAmazonOrders()
-    
-
-def FetchProductsDetails():
-    credentials = {
-        'lwa_app_id': AMAZON_API_KEY,
-        'lwa_client_secret': AMAZON_SECRET_KEY,
-        'refresh_token': REFRESH_TOKEN,
-        'aws_access_key': Acccess_Key,
-        'aws_secret_key': Secret_Access_Key,
-        'role_arn': Role_ARN
-    }
 
 #     report = Reports(
 #         marketplace=Marketplaces.US,
