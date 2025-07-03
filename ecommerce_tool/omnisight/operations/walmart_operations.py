@@ -6,6 +6,7 @@
 # import pandas as pd
 # from ecommerce_tool.crud import DatabaseModel
 # from bson import ObjectId
+# from concurrent.futures import ThreadPoolExecutor
 # import json
 # from datetime import datetime, timedelta
 # import threading
@@ -566,7 +567,6 @@
 
 
 # def syncRecentWalmartOrders():
-#     from pytz import timezone,utc
 #     access_token = oauthFunction()
 #     marketplace_id = DatabaseModel.get_document(
 #         Marketplace.objects, {'name': "Walmart"}, ['id']
@@ -613,91 +613,62 @@
 #     orders = list(unique_orders.values())
 
 #     def process_order(row):
-#         po_id = str(row.get('purchaseOrderId', ""))
-#         existing_order = list(Order.objects.aggregate([
-#             {"$match": {"purchase_order_id": po_id}},
-#             {"$limit": 1},
-#             {"$project": {"_id": 1, "order_items": 1}},
-#         ]))
-
-#         if existing_order:
-#             print(f"Order {po_id} already exists. Updating status...")
-#             status = row['orderLines']['orderLine'][0]['orderLineStatuses']['orderLineStatus'][0]['status']
-#             DatabaseModel.update_documents(Order.objects, {"purchase_order_id": po_id}, {"order_status": status})
-#             return
-
-#         print(f"Creating order {po_id}...")
-
-#         order_date_ts = row.get('orderDate')
-#         order_date = datetime.fromtimestamp(int(order_date_ts) / 1000) if order_date_ts else None
-
-#         ship_node = row.get('shipNode', {})
-#         order_details = row.get('orderLines', {})
-#         order_lines = order_details.get('orderLine', [])
-#         order_items = []
-#         order_total = 0
-#         currency = "USD"
-
-#         for order_line in order_lines:
-#             for charge in order_line.get('charges', {}).get('charge', []):
-#                 try:
-#                     tax = float(charge.get('tax', {}).get('taxAmount', {}).get('amount', 0))
-#                 except:
-#                     tax = 0
-#                 try:
-#                     order_total += float(charge['chargeAmount']['amount']) + tax
-#                 except:
-#                     order_total += 0
-#                 currency = charge['chargeAmount'].get('currency', currency)
-
-#             order_items.append(process_walmart_order(order_line, order_date, po_id))
-
-#         order_status = order_lines[0].get('orderLineStatuses', {}).get('orderLineStatus', [{}])[0].get('status', "")
-
 #         try:
+#             po_id = str(row.get('purchaseOrderId', ""))
+#             if Order.objects(purchase_order_id=po_id).only('id').first():
+#                 print(f"Order {po_id} already exists. Updating status...")
+#                 status = row['orderLines']['orderLine'][0]['orderLineStatuses']['orderLineStatus'][0]['status']
+#                 DatabaseModel.update_documents(Order.objects, {"purchase_order_id": po_id}, {"order_status": status})
+#                 return
+
+#             print(f"Creating order {po_id}...")
+#             order_date_ts = row.get('orderDate')
+#             order_date = datetime.fromtimestamp(int(order_date_ts) / 1000) if order_date_ts else None
+
+#             ship_node = row.get('shipNode', {})
+#             order_lines = row.get('orderLines', {}).get('orderLine', [])
+#             order_items = []
+#             order_total = 0
+#             currency = "USD"
+
+#             for order_line in order_lines:
+#                 for charge in order_line.get('charges', {}).get('charge', []):
+#                     try:
+#                         tax = float(charge.get('tax', {}).get('taxAmount', {}).get('amount', 0))
+#                         order_total += float(charge['chargeAmount']['amount']) + tax
+#                         currency = charge['chargeAmount'].get('currency', currency)
+#                     except Exception as e:
+#                         print(f"Charge parse error: {e}")
+
+#                 order_items.append(process_walmart_order(order_line, order_date, po_id))
+
+#             order_status = order_lines[0].get('orderLineStatuses', {}).get('orderLineStatus', [{}])[0].get('status', "")
 #             shipping_info = row.get('shippingInfo', {})
+
+#             order = Order(
+#                 marketplace_id=marketplace_id,
+#                 purchase_order_id=po_id,
+#                 customer_order_id=row.get('customerOrderId', ""),
+#                 customer_email_id=row.get('customerEmailId', ""),
+#                 order_date=order_date,
+#                 shipping_information=shipping_info,
+#                 fulfillment_channel=ship_node.get('type', ""),
+#                 order_details=order_lines,
+#                 order_items=order_items,
+#                 order_total=order_total,
+#                 currency=currency,
+#                 order_status=order_status,
+#                 items_order_quantity=len(order_items),
+#             )
+#             order.save()
 #         except Exception as e:
-#             print(f"⚠️ Error parsing shippingInfo: {e}")
-#             shipping_info = {}
+#             print(f"⚠️ Error processing order {row.get('purchaseOrderId', '')}: {e}")
 
-#         order = Order(
-#             marketplace_id=marketplace_id,
-#             purchase_order_id=po_id,
-#             customer_order_id=row.get('customerOrderId', ""),
-#             customer_email_id=row.get('customerEmailId', ""),
-#             order_date=order_date,
-#             shipping_information=shipping_info,
-#             fulfillment_channel=ship_node.get('type', ""),
-#             order_details=order_lines,
-#             order_items=order_items,
-#             order_total=order_total,
-#             currency=currency,
-#             order_status=order_status,
-#             items_order_quantity=len(order_items),
-#         )
-#         order.save()
-
-#     # Process orders with thread limit
-#     def worker(subset):
-#         for order in subset:
-#             # try:
-#             process_order(order)
-#             # except Exception as e:
-#             #     print(f"⚠️ Error processing order: {e}")
-
-#     # Split orders into batches to limit threads
-#     for i in range(0, len(orders), 1):
-#         threads = []
-#         batch = orders[i:i + 1]
-#         for order_data in batch:
-#             t = threading.Thread(target=worker, args=([order_data],))
-#             t.start()
-#             threads.append(t)
-#         for t in threads:
-#             t.join()
+#     # Use ThreadPoolExecutor for parallel processing
+#     with ThreadPoolExecutor(max_workers=10) as executor:
+#         executor.map(process_order, orders)
 
 #     return orders
-
 
 # def get_all_walmart_items(access_token, limit=50):
 #     url = "https://marketplace.walmartapis.com/v3/items"

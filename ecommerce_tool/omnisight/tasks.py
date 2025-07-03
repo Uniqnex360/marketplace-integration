@@ -6,7 +6,7 @@
 # def sync_orders():
 #     print("Orders Sync starting........................")
 #     walmart_orders = syncRecentWalmartOrders()
-#     amazon_orders = syncRecentAmazonOrders()
+#     # amazon_orders = syncRecentAmazonOrders()
 #     print("Orders Sync completed........................")
     
 #     return f"Synced {len(walmart_orders) + len(amazon_orders)} orders"
