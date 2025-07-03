@@ -5287,12 +5287,12 @@ def getSKUlist(request):
                 "id": {"$toString": "$_id"},
                 "sku": "$sku",
             }
+        },{
+            "$sort":{
+                "sku":1}
         }
     ])
-    if match =={}:
-        pipeline.append({
-            "$limit": 10}  # Randomly select 10 documents
-        )
+    
     sku_list = list(Product.objects.aggregate(*pipeline))
     return sku_list
 
