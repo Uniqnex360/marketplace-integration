@@ -91,7 +91,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # MUST be first
     'django.middleware.security.SecurityMiddleware',
-    'ecommerce_tool.custom_mideleware.LogResponseTimeMiddleware',
+    # 'ecommerce_tool.custom_mideleware.LogResponseTimeMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
