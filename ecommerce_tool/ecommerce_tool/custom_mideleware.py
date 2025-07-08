@@ -31,6 +31,38 @@ SIMPLE_JWT = {
   'AUTH_COOKIE_SECURE': True,    # Whether the auth cookies should be secure (https:// only).
   'AUTH_COOKIE_SAMESITE': 'None',  # Whether to set the flag restricting cookie leaks on cross-site requests. This can be 'Lax', 'Strict', or 'None' to disable the flag.
 }
+import time
+import logging
+
+class LogResponseTimeMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self.logger = logging.getLogger(__name__)
+
+    def __call__(self, request):
+        start_time = time.time()
+
+        # Process the request and get the response
+        response = self.get_response(request)
+
+        end_time = time.time()
+        duration = (end_time - start_time) # in milliseconds
+
+        # Logging request and response time
+        method = request.method
+        path = request.get_full_path()
+        status_code = response.status_code
+
+        print(f"[Middleware] {method} {path} -> {status_code} in {duration:.2f} ms")
+
+        # Print response content (optional - for debugging only)
+        if hasattr(response, 'content'):
+            try:
+                print(f"[Middleware] Response content: {response.content[:500]}")  # Limit for readability
+            except Exception as e:
+                print(f"[Middleware] Could not print response content: {e}")
+
+        return response
 
 def obtainManufactureIdFromToken(request): 
     token = request.COOKIES.get('authentication_token', "")

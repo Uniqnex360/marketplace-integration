@@ -57,7 +57,7 @@ class Product(Document):
     product_id = StringField()  # Can store ASIN, UPC, GTIN, WPID
     product_id_type = StringField()
     
-    price = FloatField()
+    price = FloatField(default=0.0)
     currency = StringField(default="$")
     quantity = IntField(default=0)
     quantity_unit = StringField()
@@ -206,7 +206,7 @@ class access_token(Document):
 
 class Money(EmbeddedDocument):
     CurrencyCode = StringField(required=True)
-    Amount = FloatField(required=True)
+    Amount = FloatField(required=True,default=0.0)
 
 class Pricing(EmbeddedDocument):
     ItemPrice = EmbeddedDocumentField(Money, required=True)
@@ -307,14 +307,14 @@ class Order(Document):
     marketplace_id = ReferenceField(Marketplace)  # Identifier for the marketplace
     payment_method = StringField()  # Type of payment used
     payment_method_details = StringField()  # Detailed information about the payment method
-    order_total = FloatField()  # Total order cost including products, shipping, and taxes
+    order_total = FloatField(default=0.0)  # Total order cost including products, shipping, and taxes
     currency = StringField()  # Currency used for the order
     is_global_express_enabled = BooleanField()  # True if fast shipping is available for international orders
 
 
     order_channel = StringField()  # The channel through which the order was placed
     items_order_quantity = IntField(default=0)  # Number of items in the order
-    shipping_price = FloatField()  # Shipping cost for the order
+    shipping_price = FloatField(default=0.0)  # Shipping cost for the order
 
 
 
@@ -324,9 +324,9 @@ class product_details(EmbeddedDocument):
     product_id = ReferenceField(Product)
     title = StringField(required=True)
     sku = StringField(required=True)
-    unit_price = FloatField()
+    unit_price = FloatField(default=0.0)
     quantity = IntField()
-    quantity_price = FloatField()
+    quantity_price = FloatField(default=0.0)
 
 
 
@@ -337,7 +337,7 @@ class custom_order(Document):
     customer_order_id = StringField()  # ID from the customer's perspective for tracking
     ordered_products = ListField(EmbeddedDocumentField(product_details))  # List of product names
     total_quantity = IntField()
-    total_price = FloatField()
+    total_price = FloatField(default=0.0)
     currency = StringField()
     shipment_type = StringField()  # e.g., "Standard", "Express"
     channel = StringField()  # e.g., "Amazon", "Shopify"
@@ -364,9 +364,9 @@ class custom_order(Document):
 
     # Shipping details
     package_dimensions = StringField()  # e.g., "10x5x3 inches"
-    weight = FloatField()  # Weight of package
+    weight = FloatField(default=0.0)  # Weight of package
     weight_value = StringField()
-    shipment_cost = FloatField()  # Cost of shipping
+    shipment_cost = FloatField(default=0.0)  # Cost of shipping
     shipment_speed = StringField()  # e.g., "Express", "Standard"
     shipment_mode = StringField()  # e.g., "Air", "Ground"
     carrier = StringField()  # Shipping carrier name
@@ -403,10 +403,10 @@ class CityDetails(Document):
     state_name = StringField(max_length=100)
     county_fips = StringField(max_length=20)
     county_name = StringField(max_length=100)
-    lat = FloatField()
-    lng = FloatField()
+    lat = FloatField(default=0.0)
+    lng = FloatField(default=0.0)
     population = IntField()
-    density = FloatField()
+    density = FloatField(default=0.0)
     source = StringField(max_length=100)
     military = BooleanField()
     incorporated = BooleanField()
@@ -442,7 +442,7 @@ class notes_data(Document):
 class Fee(Document):
     marketplace = StringField()
     fee_type = StringField()
-    amount = FloatField()
+    amount = FloatField(default=0.0)
     date =  DateTimeField(default=datetime.now())
 
 

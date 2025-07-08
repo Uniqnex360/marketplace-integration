@@ -181,7 +181,7 @@ def get_metrics_by_date_range(request):
             # other_price += ins['order_total'] - temp_other_price - tax_price
 
             net_profit = (temp_other_price - total_cogs) + vendor_funding
-            margin = (net_profit / gross_revenue) * 100
+            margin = (net_profit / gross_revenue) * 100 if gross_revenue!=0 else 0
         metrics[key] = {
             "gross_revenue": round(gross_revenue, 2),
             "total_cogs": round(total_cogs, 2),

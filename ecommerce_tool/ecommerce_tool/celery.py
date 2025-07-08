@@ -6,8 +6,8 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ecommerce_tool.settings')
 
 app = Celery(
     'ecommerce_tool',
-    broker='redis://localhost:6379/0',  # Redis as the broker
-    backend='redis://localhost:6379/0',  # Optional: Redis for result storage
+    broker='redis://:foobaredUniqnex@localhost:6379/0',
+    backend='redis://:foobaredUniqnex@localhost:6379/0',
 )
 
 # Load task modules from Django settings
