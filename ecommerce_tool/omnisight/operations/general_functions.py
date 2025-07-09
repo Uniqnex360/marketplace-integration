@@ -23,6 +23,7 @@ import math
 from django.http import JsonResponse
 from rest_framework.parsers import JSONParser
 from bson import ObjectId
+from helium_dashboard import sanitize_data
 
 logger = logging.getLogger(__name__)
 
@@ -1025,22 +1026,17 @@ def ordersCountForDashboard(request):
     preset = request.GET.get("preset", "Today")
     timezone_str = request.GET.get('timezone', 'US/Pacific')
 
-    
-    if start_date != None and start_date != "":
-        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
+    if start_date is not None and start_date != "":
+        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
-        start_date, end_date = get_date_range(preset,timezone_str)
+        start_date, end_date = get_date_range(preset, timezone_str)
 
-    
-    
     # Convert local timezone dates to UTC
     if timezone_str != 'UTC':
-        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
     match_conditions = {}
-
     match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
-
 
     if marketplace_id == "all":
         # Count for Order collection
@@ -1095,7 +1091,6 @@ def ordersCountForDashboard(request):
                         "_id": None,
                         "count": {"$sum": 1},
                         "order_value": {"$sum": "$order_total"}
-
                     }
                 }
             ]
@@ -1106,27 +1101,8 @@ def ordersCountForDashboard(request):
             data[ins['name']] = {
                 "count": order_count,
                 "percentage": f"{percentage}%",
-                "order_value" : round(order_value,2)
+                "order_value": round(order_value, 2)
             }
-        # custom_pipeline = [
-        #         {"$match": {**match_conditions}},
-        #         {
-        #             "$group": {
-        #                 "_id": None,
-        #                 "count": {"$sum": 1},
-        #                 "order_value": {"$sum": "$total_price"}
-        #             }
-        #         }
-        #     ]
-        # custom_order_status_count = list(custom_order.objects.aggregate(*(custom_pipeline)))
-        # custom_order_count = custom_order_status_count[0].get('count', 0) if custom_order_status_count else 0
-        # order_value = custom_order_status_count[0].get('order_value', 0) if custom_order_status_count else 0
-        # percentage = round((custom_order_count / total_order_count) * 100, 2) if total_order_count else 0
-        # data['custom'] = {
-        #     "value": custom_order_count,
-        #     "percentage": f"{percentage}%",
-        #     "order_value" : round(order_value,2)
-        # }
     elif marketplace_id != "all" and marketplace_id != "custom":
         # Count for Order collection
         pipeline = [
@@ -1136,7 +1112,6 @@ def ordersCountForDashboard(request):
                     "_id": None,
                     "count": {"$sum": 1},
                     "order_value": {"$sum": "$order_total"}
-
                 }
             }
         ]
@@ -1147,7 +1122,7 @@ def ordersCountForDashboard(request):
         data[marketplace_name] = {
             "value": order_count,
             "percentage": f"{100.00}%",
-            "order_value" : round(order_value,2)
+            "order_value": round(order_value, 2)
         }
         data['total_order_count'] = {
             "value": order_count,
@@ -1155,27 +1130,30 @@ def ordersCountForDashboard(request):
         }
     elif marketplace_id == "custom":
         custom_pipeline = [
-                {"$match": {**match_conditions}},
-                {
-                    "$group": {
-                        "_id": None,
-                        "count": {"$sum": 1},
-                        "order_value": {"$sum": "$total_price"}
-                    }
+            {"$match": {**match_conditions}},
+            {
+                "$group": {
+                    "_id": None,
+                    "count": {"$sum": 1},
+                    "order_value": {"$sum": "$total_price"}
                 }
-            ]
+            }
+        ]
         custom_order_status_count = list(custom_order.objects.aggregate(*(custom_pipeline)))
         custom_order_count = custom_order_status_count[0].get('count', 0) if custom_order_status_count else 0
         order_value = custom_order_status_count[0].get('order_value', 0) if custom_order_status_count else 0
         data['custom'] = {
             "value": custom_order_count,
             "percentage": f"{100.00}%",
-            "order_value" : round(order_value,2)
+            "order_value": round(order_value, 2)
         }
         data['total_order_count'] = {
             "value": custom_order_count,
             "percentage": f"{100.00}%"
         }
+
+    # Sanitize the data before returning
+    data = sanitize_data(data)
 
     return data
 
