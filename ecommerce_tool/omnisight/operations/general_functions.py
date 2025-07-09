@@ -23,7 +23,7 @@ import math
 from django.http import JsonResponse
 from rest_framework.parsers import JSONParser
 from bson import ObjectId
-from helium_dashboard import sanitize_data
+from .helium_dashboard import sanitize_data
 
 logger = logging.getLogger(__name__)
 
