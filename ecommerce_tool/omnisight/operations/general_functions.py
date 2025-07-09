@@ -18,9 +18,27 @@ from django.http import HttpResponse
 from omnisight.operations.helium_utils import get_date_range, convertLocalTimeToUTC,convertdateTotimezone
 import pytz
 from pytz import timezone
+import logging
+import math
+from django.http import JsonResponse
+from rest_framework.parsers import JSONParser
+from bson import ObjectId
+
+logger = logging.getLogger(__name__)
 
 
-
+def sanitize_floats(data):
+    """Recursively replace NaN, inf, -inf with None"""
+    if isinstance(data, dict):
+        return {k: sanitize_floats(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [sanitize_floats(v) for v in data]
+    elif isinstance(data, float):
+        if math.isnan(data) or math.isinf(data):
+            return None  # or 0, or "N/A"
+        return round(data, 2)  # Round floats to 2 decimals
+    else:
+        return data
 
 def getMarketplaceList(request):
     pipeline = [
@@ -1188,121 +1206,140 @@ def totalSalesAmount(request):
 
 @csrf_exempt
 def salesAnalytics(request):
-    data = dict()
-    json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id')  # Optional marketplace filter
-    date_range = json_request.get('date_range', 'all')  # 'week', 'month', 'year', or 'all'
-    start_date = json_request.get('start_date')  # Optional custom start date
-    end_date = json_request.get('end_date')  # Optional custom end date
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    try:
+        data = dict()
+        json_request = JSONParser().parse(request)
+        
+        # Extract params
+        marketplace_id = json_request.get('marketplace_id', 'all')  
+        date_range = json_request.get('date_range', 'all')  
+        start_date = json_request.get('start_date')  
+        end_date = json_request.get('end_date')  
+        timezone_str = json_request.get('timezone', 'US/Pacific')
+        preset = json_request.get("preset", "Today")        
 
-    preset = json_request.get("preset", "Today")        
-    if start_date != None and start_date != "":
-        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
-    else:
-        start_date, end_date = get_date_range(preset,timezone_str)
-    if timezone_str != 'UTC':
-        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
-
-    # Match conditions
-    match_conditions = {}
-    if start_date:
-        match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
-    if marketplace_id != None and marketplace_id != "all" and marketplace_id != "custom":
-        match_conditions["marketplace_id"] = ObjectId(marketplace_id)
-
-    # Pipeline for total sales amount (Order collection)
-    total_sales_pipeline = [
-        {"$match": match_conditions},
-        {"$group": {"_id": None, "total_sales": {"$sum": "$order_total"}}}
-    ]
-    total_sales_result = list(Order.objects.aggregate(*total_sales_pipeline))
-    total_sales = total_sales_result[0]['total_sales'] if total_sales_result else 0
-
-    # Pipeline for total sales amount (custom_order collection)
-    custom_match_conditions = {}
-    if start_date:
-        custom_match_conditions["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
-
-    custom_total_sales_pipeline = [
-        {"$match": custom_match_conditions},
-        {"$group": {"_id": None, "total_sales": {"$sum": "$total_price"}}}
-    ]
-    custom_total_sales_result = list(custom_order.objects.aggregate(*custom_total_sales_pipeline))
-    custom_total_sales = custom_total_sales_result[0]['total_sales'] if custom_total_sales_result else 0
-
-    if marketplace_id == "custom":
-        data['total_sales'] = custom_total_sales
-    else:
-        # Combine total sales from both collections
-        data['total_sales'] = total_sales + custom_total_sales
-
-    # Pipeline for order count and value by order days (Order collection)
-    order_days_pipeline = [
-        {"$match": match_conditions},
-        {
-            "$group": {
-                "_id": {
-                    "year": {"$year": "$order_date"},
-                    "month": {"$month": "$order_date"},
-                    "day": {"$dayOfMonth": "$order_date"}
-                },
-                "order_count": {"$sum": 1},
-                "order_value": {"$sum": "$order_total"}
-            }
-        },
-        {"$sort": {"_id": 1}}
-    ]
-    order_days_data = list(Order.objects.aggregate(*order_days_pipeline))
-
-    # Pipeline for order count and value by order days (custom_order collection)
-    custom_order_days_pipeline = [
-        {"$match": custom_match_conditions},
-        {
-            "$group": {
-                "_id": {
-                    "year": {"$year": "$purchase_order_date"},
-                    "month": {"$month": "$purchase_order_date"},
-                    "day": {"$dayOfMonth": "$purchase_order_date"}
-                },
-                "order_count": {"$sum": 1},
-                "order_value": {"$sum": "$total_price"}
-            }
-        },
-        {"$sort": {"_id": 1}}
-    ]
-    custom_order_days_data = list(custom_order.objects.aggregate(*custom_order_days_pipeline))
-
-    # Combine and format order days data
-    combined_order_days = {}
-    if marketplace_id != "custom":
-        for day in order_days_data:
-            date_key = f"{day['_id']['year']}-{day['_id']['month']:02d}-{day['_id']['day']:02d}"
-            combined_order_days[date_key] = {
-                "order_count": day["order_count"],
-                "order_value": round(day["order_value"], 2)
-            }
-
-    for day in custom_order_days_data:
-        date_key = f"{day['_id']['year']}-{day['_id']['month']:02d}-{day['_id']['day']:02d}"
-        if date_key in combined_order_days:
-            combined_order_days[date_key]["order_count"] += day["order_count"]
-            combined_order_days[date_key]["order_value"] += round(day["order_value"], 2)
+        # Date logic
+        if start_date and start_date != "":
+            start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
         else:
-            combined_order_days[date_key] = {
-                "order_count": day["order_count"],
-                "order_value": round(day["order_value"], 2)
+            start_date, end_date = get_date_range(preset, timezone_str)
+
+        if timezone_str != 'UTC':
+            start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+
+        # Match conditions
+        match_conditions = {}
+        if start_date:
+            match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
+        if marketplace_id not in ["all", "custom"]:
+            match_conditions["marketplace_id"] = ObjectId(marketplace_id)
+
+        custom_match_conditions = {}
+        if start_date:
+            custom_match_conditions["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
+
+        # Total Sales Pipeline (Order collection)
+        total_sales_pipeline = [
+            {"$match": match_conditions},
+            {"$group": {"_id": None, "total_sales": {"$sum": "$order_total"}}}
+        ]
+        total_sales_result = list(Order.objects.aggregate(*total_sales_pipeline))
+        total_sales = total_sales_result[0]['total_sales'] if total_sales_result else 0.0
+
+        # Total Sales Pipeline (custom_order collection)
+        custom_total_sales_pipeline = [
+            {"$match": custom_match_conditions},
+            {"$group": {"_id": None, "total_sales": {"$sum": "$total_price"}}}
+        ]
+        custom_total_sales_result = list(custom_order.objects.aggregate(*custom_total_sales_pipeline))
+        custom_total_sales = custom_total_sales_result[0]['total_sales'] if custom_total_sales_result else 0.0
+
+        # Combine sales
+        if marketplace_id == "custom":
+            data['total_sales'] = custom_total_sales
+        else:
+            combined_sales = total_sales + custom_total_sales
+            data['total_sales'] = combined_sales if combined_sales != float('inf') else 0.0
+
+        # Order Days Pipeline (Order collection)
+        order_days_pipeline = [
+            {"$match": match_conditions},
+            {
+                "$group": {
+                    "_id": {
+                        "year": {"$year": "$order_date"},
+                        "month": {"$month": "$order_date"},
+                        "day": {"$dayOfMonth": "$order_date"}
+                    },
+                    "order_count": {"$sum": 1},
+                    "order_value": {"$sum": "$order_total"}
+                }
+            },
+            {"$sort": {"_id": 1}}
+        ]
+        order_days_data = list(Order.objects.aggregate(*order_days_pipeline))
+
+        # Order Days Pipeline (custom_order collection)
+        custom_order_days_pipeline = [
+            {"$match": custom_match_conditions},
+            {
+                "$group": {
+                    "_id": {
+                        "year": {"$year": "$purchase_order_date"},
+                        "month": {"$month": "$purchase_order_date"},
+                        "day": {"$dayOfMonth": "$purchase_order_date"}
+                    },
+                    "order_count": {"$sum": 1},
+                    "order_value": {"$sum": "$total_price"}
+                }
+            },
+            {"$sort": {"_id": 1}}
+        ]
+        custom_order_days_data = list(custom_order.objects.aggregate(*custom_order_days_pipeline))
+
+        # Combine order days data
+        combined_order_days = {}
+        if marketplace_id != "custom":
+            for day in order_days_data:
+                date_key = f"{day['_id']['year']}-{day['_id']['month']:02d}-{day['_id']['day']:02d}"
+                combined_order_days[date_key] = {
+                    "order_count": day["order_count"],
+                    "order_value": day["order_value"]
+                }
+
+        for day in custom_order_days_data:
+            date_key = f"{day['_id']['year']}-{day['_id']['month']:02d}-{day['_id']['day']:02d}"
+            if date_key in combined_order_days:
+                combined_order_days[date_key]["order_count"] += day["order_count"]
+                combined_order_days[date_key]["order_value"] += day["order_value"]
+            else:
+                combined_order_days[date_key] = {
+                    "order_count": day["order_count"],
+                    "order_value": day["order_value"]
+                }
+
+        # Format order days
+        formatted_order_days = [
+            {
+                "date": date, 
+                "order_count": data["order_count"], 
+                "order_value": data["order_value"] if not math.isnan(data["order_value"]) else 0.0
             }
+            for date, data in sorted(combined_order_days.items())
+        ]
 
-    # Sort combined data by date
-    formatted_order_days = [
-        {"date": date, "order_count": data["order_count"], "order_value": data["order_value"]}
-        for date, data in sorted(combined_order_days.items())
-    ]
+        data['order_days'] = formatted_order_days
 
-    data['order_days'] = formatted_order_days
-    return data
+        # 🔑 SANITIZE RESPONSE DATA
+        sanitized_data = sanitize_floats(data)
+        return sanitized_data
 
+    except ValueError as ve:
+        logger.error("ValueError in salesAnalytics: %s", ve)
+        return JsonResponse({"error": "Invalid data format", "details": str(ve)}, status=400)
+    except Exception as e:
+        logger.error("Unexpected error in salesAnalytics: %s", e)
+        return JsonResponse({"error": "Internal server error", "details": str(e)}, status=500)
 @csrf_exempt
 def mostSellingProducts(request):
     data = dict()

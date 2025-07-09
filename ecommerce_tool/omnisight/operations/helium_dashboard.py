@@ -14,6 +14,7 @@ import openpyxl
 import csv
 from datetime import datetime
 import math
+import pytz
 import threading
 import re
 from bson import ObjectId
@@ -34,25 +35,23 @@ from ecommerce_tool.crud import DatabaseModel
 from omnisight.operations.common_utils import calculate_listing_score
 import threading
 from concurrent.futures import ThreadPoolExecutor
+import math
+from django.utils import timezone
+from concurrent.futures import ThreadPoolExecutor
+from rest_framework.parsers import JSONParser
+from datetime import datetime
 
-
-def clean_float(val):
-    """Converts NaN, inf, or invalid float to 0.0"""
-    try:
-        if val is None or isinstance(val, str):
-            return 0.0
-        if math.isnan(val) or math.isinf(val):
-            return 0.0
-        return round(float(val), 2)
-    except:
-        return 0.0
-
-def clean_dict_floats(d):
-    """Cleans all float values in a dict"""
-    for key in d:
-        if isinstance(d[key], (float, int)):
-            d[key] = clean_float(d[key])
-    return d
+def sanitize_data(data):
+    """Recursively sanitize data to ensure all float values are JSON compliant."""
+    if isinstance(data, dict):
+        return {key: sanitize_data(value) for key, value in data.items()}
+    elif isinstance(data, list):
+        return [sanitize_data(item) for item in data]
+    elif isinstance(data, float):
+        # Replace NaN and infinity with None or 0
+        if math.isnan(data) or data == float('inf') or data == float('-inf'):
+            return 0  # or return None
+    return data
 
 @csrf_exempt
 def get_metrics_by_date_range(request):
@@ -69,7 +68,7 @@ def get_metrics_by_date_range(request):
     target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
 
     # Get current time and combine it with the target_date
-    local_tz = timezone(timezone_str)
+    local_tz = pytz.timezone(timezone_str)
     current_time = datetime.now(local_tz).replace(year=target_date.year, month=target_date.month, day=target_date.day)
 
     # Parse target date and convert to local time
@@ -642,10 +641,6 @@ def RevenueWidgetAPIView(request):
 
 @csrf_exempt
 def updatedRevenueWidgetAPIView(request):
-    from django.utils import timezone
-    import pytz
-    from concurrent.futures import ThreadPoolExecutor
-
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
     compare_startdate = json_request.get("compare_startdate")
@@ -659,31 +654,30 @@ def updatedRevenueWidgetAPIView(request):
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
 
-    
-    if start_date != None and start_date != "":
-        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
+    if start_date is not None and start_date != "":
+        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
-        start_date, end_date = get_date_range(preset,timezone_str)
+        start_date, end_date = get_date_range(preset, timezone_str)
 
     comapre_past = get_previous_periods(start_date, end_date)
 
     # Define all fetch functions first
     def fetch_total():
         return totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id, 
-                                    product_id, manufacturer_name, fulfillment_channel,timezone_str)
+                                       product_id, manufacturer_name, fulfillment_channel, timezone_str)
 
     def fetch_graph_data():
         return get_graph_data(start_date, end_date, preset, marketplace_id, brand_id, 
-                           product_id, manufacturer_name, fulfillment_channel,timezone_str)
+                              product_id, manufacturer_name, fulfillment_channel, timezone_str)
 
     def fetch_compare_total():
         return totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id, 
-                                    brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
+                                       brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
 
     def fetch_compare_graph_data():
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
         return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, 
-                           brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
+                              brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
 
     # Execute all futures within the same context manager
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -749,20 +743,21 @@ def updatedRevenueWidgetAPIView(request):
         "graph": updated_graph,
         "comapre_past": comapre_past
     }
-
     if compare_startdate and compare_startdate != "":
-        difference = {
-    "gross_revenue": clean_float((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0,
-    "net_profit": clean_float((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0,
-    "profit_margin": clean_float((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0,
-    "orders": clean_float((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0,
-    "units_sold": clean_float((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0,
-    "refund_amount": clean_float((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0,
-    "refund_quantity": clean_float((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0,
-}
+        difference = {}
+        for key in ["gross_revenue", "net_profit", "profit_margin", "orders", "units_sold", "refund_amount", "refund_quantity"]:
+            try:
+                current_value = total[key]
+                compare_value = compare_total[key]
+                if not math.isnan(current_value) and not math.isnan(compare_value) and compare_value != 0:
+                    difference[key] = round(((current_value - compare_value) / compare_value * 100), 2)
+                else:
+                    difference[key] = 0
+            except (KeyError, ValueError):
+                difference[key] = 0  # Default to 0 if there's an error
         data['compare_total'] = difference
-
-    # Apply filters based on chooseMatrix
+    # Sanitize the data before returning
+    data = sanitize_data(data)
     name = "Revenue"
     item_pipeline = [{"$match": {"name": name}}]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
@@ -771,12 +766,11 @@ def updatedRevenueWidgetAPIView(request):
         item_result = item_result[0]
         if not item_result['select_all']:
             for field in ['gross_revenue', 'units_sold', 'refund_quantity', 
-                         'refund_amount', 'net_profit', 'profit_margin', 'orders']:
+                           'refund_amount', 'net_profit', 'profit_margin', 'orders']:
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
+                    print('updatedRevenueWidgetAPIView', data)
     return data
-
-
 # @csrf_exempt
 # def get_top_products(request):
 #     json_request = JSONParser().parse(request)
@@ -2869,7 +2863,7 @@ def getProductPerformanceSummary(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     timezone_str = json_request.get('timezone', 'US/Pacific')
-    local_tz = timezone(timezone_str)
+    local_tz = pytz.timezone(timezone_str)
     today = datetime.now(local_tz)
     yesterday_start_date = today - timedelta(days=1)
     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
