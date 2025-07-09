@@ -256,6 +256,7 @@ class OrderItems(Document):
     BuyerInfo = EmbeddedDocumentField(BuyerInfo, default=None)
     created_date = DateTimeField(default=datetime.now())
     document_created_date = DateTimeField()
+    PromotionDiscount = FloatField(required=False)
 
 
 

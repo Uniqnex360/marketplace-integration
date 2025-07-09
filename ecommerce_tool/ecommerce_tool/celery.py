@@ -39,7 +39,7 @@ app.conf.beat_schedule = {
         'task': 'omnisight.tasks.sync_price',
         'schedule': crontab(minute=0, hour='*/4'),
     },
-    'sync-products-every-10-hours': {
+    'sync-walmart-price-every-4-hours': {
         'task': 'omnisight.tasks.sync_WalmartPrice',
         'schedule': crontab(minute=30, hour='*/4'),
     }

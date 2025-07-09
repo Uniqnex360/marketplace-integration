@@ -225,6 +225,7 @@ SELLERCLOUD_COMPANY_ID = os.getenv('SELLERCLOUD_COMPANY_ID')  # Replace with you
 SELLERCLOUD_SERVER_ID = os.getenv('SELLERCLOUD_SERVER_ID')  # Replace with your actual server ID
 
 # Celery Configuration
-CELERY_BROKER_URL = 'redis://:foobaredUniqnex@localhost:6379/0'
+CELERY_BROKER_URL = 'redis://:foobaredUniqnex@127.0.0.1:6379/0'
+
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'

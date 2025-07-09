@@ -10,17 +10,17 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 from datetime import datetime, timedelta
 import threading
-
-
-
+import numpy as np  # For handling NaN values
+import pandas as pd  # For handling DataFrames
+from ecommerce_tool.util.santize_input import sanitize_value
 
 
 # Function to fetch all products with pagination
 def fetchAllProducts(request):
     data = dict()
     user_id = request.GET.get('user_id')
-    offset = int(request.GET.get('skip'))
-    limit = int(request.GET.get('limit'))
+    offset = sanitize_value(request.GET.get('skip'), default=0, value_type=int)
+    limit = sanitize_value(request.GET.get('limit'), default=100, value_type=int)
 
     ACCESS_TOKEN = getAccesstoken(user_id)
 
@@ -37,7 +37,6 @@ def fetchAllProducts(request):
     all_products = []
     total_items = 0
 
-   
     print("Fetching Products...")
     # Build the request URL with offset pagination
     url = f"{ALL_PRODUCTS_URL}?limit={limit}&offset={offset}"
@@ -59,32 +58,30 @@ def fetchAllProducts(request):
         print(f"❌ Failed to Fetch Products. Status Code: {response.status_code}")
         print("Response:", response.text)
     data = {
-        "total_items" : total_items,
-        "all_products" : all_products
+        "total_items": total_items,
+        "all_products": all_products
     }
     return data
 
 
 def fetchProductDetails(request=None):
-    ACCESS_TOKEN = oauthFunction()#getAccesstoken(user_id)
-    marketplace_id = DatabaseModel.get_document(Marketplace.objects,{"name" : "Walmart"},['id']).id
+    ACCESS_TOKEN = oauthFunction()  # getAccesstoken(user_id)
+    marketplace_id = DatabaseModel.get_document(Marketplace.objects, {"name": "Walmart"}, ['id']).id
 
     pipeline = [
-    {"$match": {
-                "marketplace_id" : marketplace_id
-                }
-    },
-    {
-        "$project": {
-            "_id": 1,
-            "sku" : {"$ifNull" : ["$sku", ""]}
+        {"$match": {
+            "marketplace_id": marketplace_id
+        }},
+        {
+            "$project": {
+                "_id": 1,
+                "sku": {"$ifNull": ["$sku", ""]}
+            }
         }
-    }
-    
     ]
     product_list = list(Product.objects.aggregate(*pipeline))
     for product_ins in product_list:
-        sku= product_ins['sku']
+        sku = product_ins['sku']
         update_obj = {}
         if sku != "":
             # Walmart API URL for product details
@@ -101,7 +98,7 @@ def fetchProductDetails(request=None):
             print(f"Fetching details for SKU: {sku}...")
 
             STOCK_URL = f"https://marketplace.walmartapis.com/v3/inventory/?sku={sku}"
-            
+
             # Send GET request
             response = requests.get(PRODUCT_DETAILS_URL, headers=headers)
             # Headers for authentication
@@ -115,46 +112,40 @@ def fetchProductDetails(request=None):
 
             if response.status_code == 200:
                 try:
-                    print("✅ Product details fetched successfully",sku)
-                    update_obj['price'] = response.json()['ItemResponse'][0]['price']['amount']
+                    print("✅ Product details fetched successfully", sku)
+                    update_obj['price'] = sanitize_value(response.json()['ItemResponse'][0]['price']['amount'], value_type=float)
                 except:
-                     print("❌ Product details doesn't contains price",sku)                   
+                    print("❌ Product details doesn't contain price", sku)
             else:
-                print("❌ Failed to Fetch Products price",sku)
+                print("❌ Failed to Fetch Products price", sku)
 
             if response1.status_code == 200:
                 try:
-                    print("✅Stock Details fetched successfully",sku)
-                    update_obj['quantity'] = response1.json()['quantity']['amount']
+                    print("✅ Stock Details fetched successfully", sku)
+                    update_obj['quantity'] = sanitize_value(response1.json()['quantity']['amount'], value_type=int)
                 except:
-                    print("❌ Product details doesn't contains Inventry",sku) 
+                    print("❌ Product details doesn't contain Inventory", sku)
             else:
-                print("❌ Failed to Fetch Products inventry",sku)
+                print("❌ Failed to Fetch Products inventory", sku)
 
             if update_obj != {}:
-                DatabaseModel.update_documents(Product.objects,{"id" : product_ins['_id']},update_obj)
-            
+                DatabaseModel.update_documents(Product.objects, {"id": product_ins['_id']}, update_obj)
 
     return True
 
 
-# sku="CH-5219795-2PK"
-# fetchProductDetails()
-
-def saveProductCategory(marketplace_id,name,level,parent_id):
-
+def saveProductCategory(marketplace_id, name, level, parent_id):
     pipeline = [
-    {"$match": {"name": name,
-                "marketplace_id" : marketplace_id}},
-    {
-        "$project": {
-            "_id": 1
-        }
+        {"$match": {"name": name,
+                    "marketplace_id": marketplace_id}},
+        {
+            "$project": {
+                "_id": 1
+            }
         },
         {
-            "$limit" : 1
+            "$limit": 1
         }
-    
     ]
     product_category_obj = list(Category.objects.aggregate(*pipeline))
     if product_category_obj != []:
@@ -164,14 +155,13 @@ def saveProductCategory(marketplace_id,name,level,parent_id):
             Category, {
                 "name": name,
                 "level": level,
-                "marketplace_id" : marketplace_id,
+                "marketplace_id": marketplace_id,
             }
         )
         product_category_id = product_category_obj.id
-    if parent_id != None:
-        DatabaseModel.update_documents(Category.objects,{"id" : product_category_id},{"parent_category_id" : ObjectId(parent_id)})
+    if parent_id is not None:
+        DatabaseModel.update_documents(Category.objects, {"id": product_category_id}, {"parent_category_id": ObjectId(parent_id)})
     return product_category_id
-
 
 
 # Function to process the Excel file
@@ -187,13 +177,13 @@ def process_excel_for_walmart(file_path):
             parent_category = None
 
             for level, category_name in enumerate(breadcrumb_path):
-                s=saveProductCategory(marketplace_id,category_name,level,parent_category)
+                s = saveProductCategory(marketplace_id, category_name, level, parent_category)
                 parent_category = s
 
             # The last level category
             last_level_category = breadcrumb_path[-1]
         else:
-            last_level_category =""
+            last_level_category = ""
 
         # Create the product
         price_data = eval(row['price'])  # Convert string representation of dict to actual dict
@@ -205,45 +195,39 @@ def process_excel_for_walmart(file_path):
 
         product = Product(
             marketplace_id=marketplace_id,
-            sku=str(row['sku']) if pd.notnull(row['sku']) else "",
-            product_id=str(row['wpid']) if pd.notnull(row['wpid']) else "",
-            upc=str(int(row['upc'])) if pd.notnull(row['upc']) else "",
-            gtin=str(int(row['gtin'])) if pd.notnull(row['gtin']) else "",
-            product_title=row['productName'] if pd.notnull(row['productName']) else "",
-            category=last_level_category if pd.notnull(last_level_category) else "",
-            shelf_path=shelf_path,
-            product_type=row['productType'] if pd.notnull(row['productType']) else "",
-            item_condition=row['condition'] if pd.notnull(row['condition']) else "",
-            availability=row['availability'] if pd.notnull(row['availability']) else "",
-            price=price_data['amount'] if pd.notnull(price_data['amount']) else 0.0,
-            currency=price_data['currency'] if pd.notnull(price_data['currency']) else "",
-            published_status=row['publishedStatus'] if pd.notnull(row['publishedStatus']) else "",
-            unpublished_reasons=row['unpublishedReasons'] if pd.notnull(row['unpublishedReasons']) else "",
-            lifecycle_status=row['lifecycleStatus'] if pd.notnull(row['lifecycleStatus']) else "",
-            is_duplicate=bool(row['isDuplicate']),
+            sku=sanitize_value(str(row['sku']), value_type=str),
+            product_id=sanitize_value(str(row['wpid']), value_type=str),
+            upc=sanitize_value(str(int(row['upc'])), value_type=str),
+            gtin=sanitize_value(str(int(row['gtin'])), value_type=str),
+            product_title=sanitize_value(row['productName'], value_type=str),
+            category=sanitize_value(last_level_category, value_type=str),
+            shelf_path=sanitize_value(shelf_path, value_type=str),
+            product_type=sanitize_value(row['productType'], value_type=str),
+            item_condition=sanitize_value(row['condition'], value_type=str),
+            availability=sanitize_value(row['availability'], value_type=str),
+            price=sanitize_value(price_data['amount'], default=0.0, value_type=float),
+            currency=sanitize_value(price_data['currency'], value_type=str),
+            published_status=sanitize_value(row['publishedStatus'], value_type=str),
+            unpublished_reasons=sanitize_value(row['unpublishedReasons'], value_type=str),
+            lifecycle_status=sanitize_value(row['lifecycleStatus'], value_type=str),
+            is_duplicate=sanitize_value(row['isDuplicate'], value_type=bool),
         )
         product.save()
-
-
-
-# file_path1 = "/home/lexicon/walmart/Walmart-high-level-products.xlsx"
-# process_excel_for_walmart(file_path1)
-
 
 
 def fetchAllorders1(request):
     orders = []
     user_id = request.GET.get('user_id')
     access_token = getAccesstoken(user_id)
-    limit = int(request.GET.get('limit', 100))  # Default limit = 100 if not provided
-    skip = int(request.GET.get('skip', 0))  # Default skip = 0 if not provided
-    
+    limit = sanitize_value(request.GET.get('limit'), default=100, value_type=int)  # Default limit = 100 if not provided
+    skip = sanitize_value(request.GET.get('skip'), default=0, value_type=int)  # Default skip = 0 if not provided
+
     base_url = "https://marketplace.walmartapis.com/v3/orders"
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "WM_SEC.ACCESS_TOKEN": access_token,  
-        "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),  
-        "WM_SVC.NAME": "Walmart Marketplace",  
+        "WM_SEC.ACCESS_TOKEN": access_token,
+        "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),
+        "WM_SVC.NAME": "Walmart Marketplace",
         "Accept": "application/json"
     }
 
@@ -251,7 +235,7 @@ def fetchAllorders1(request):
     next_cursor = None  # Pagination cursor
 
     while total_fetched < (skip + limit):
-        print(skip ,limit)
+        print(skip, limit)
         # Construct the URL with cursor if available
         url = f"{base_url}?createdStartDate=2024-01-01T00:00:00Z&limit=100"
         if next_cursor:
@@ -276,12 +260,11 @@ def fetchAllorders1(request):
             next_cursor = result.get("list", {}).get("meta", {}).get("nextCursor")
             if not next_cursor:
                 break  # No more pages left
-            
+
         else:
             print(f"❌ Error fetching orders: [HTTP {response.status_code}] {response.text}")
             break
     return orders[:limit]  # Return the exact number of requested orders
-
 
 
 def fetchOrderDetails(request):
@@ -315,7 +298,6 @@ def fetchOrderDetails(request):
     return data
 
 
-
 def fetchBrand(request):
     data = dict()
     user_id = request.GET.get('user_id')
@@ -334,7 +316,6 @@ def fetchBrand(request):
         "WM_SVC.NAME": "Walmart Marketplace",  # Walmart Service Name
         "Accept": "application/json",
         "Content-Type": "application/json"
-
     }
 
     response = requests.get(ORDER_DETAILS_URL, headers=headers)
@@ -356,7 +337,6 @@ def process_excel_for_walmartorders(file_path):
     marketplace_id = ObjectId('67c9460fa5194f500892c0d2')
 
     for index, row in df.iterrows():
-        # print(f"Processing row {index + 1}...",row)
         print(f"Processing row {index}...")
         shipNode = eval(row['shipNode']) if pd.notnull(row['shipNode']) else {}
         order_details = eval(row['orderLines']) if pd.notnull(row['orderLines']) else []
@@ -365,8 +345,8 @@ def process_excel_for_walmartorders(file_path):
         order_status = ""
         for order_line_ins in order_details['orderLine']:
             for charge_ins in order_line_ins['charges']['charge']:
-                tax =0
-                if charge_ins['tax'] != None:
+                tax = 0
+                if charge_ins['tax'] is not None:
                     tax = float(charge_ins['tax']['taxAmount']['amount'])
                 order_total += float(charge_ins['chargeAmount']['amount']) + tax
                 currency = charge_ins['chargeAmount']['currency']
@@ -375,51 +355,43 @@ def process_excel_for_walmartorders(file_path):
 
         order_date = row['orderDate'] if pd.notnull(row['orderDate']) else ""
         if order_date != "":
-            order_date = datetime.fromtimestamp(int(order_date)/1000)
-        
+            order_date = datetime.fromtimestamp(int(order_date) / 1000)
 
-        order_obj = DatabaseModel.get_document(Order.objects,{"purchase_order_id" : str(row['purchaseOrderId'])})
-        if order_obj != None:
+        order_obj = DatabaseModel.get_document(Order.objects, {"purchase_order_id": str(row['purchaseOrderId'])})
+        if order_obj is not None:
             print(f"Order with purchase order ID {row['purchaseOrderId']} already exists. Skipping...")
-            DatabaseModel.update_documents(Order.objects,{"purchase_order_id" : str(row['purchaseOrderId'])},{"order_status" : order_status,"currency" : currency,"order_total" : order_total})     
-            
+            DatabaseModel.update_documents(Order.objects, {"purchase_order_id": str(row['purchaseOrderId'])}, {"order_status": order_status, "currency": currency, "order_total": order_total})
+
         else:
             print(f"Creating order with purchase order ID {row['purchaseOrderId']}...")
             order = Order(
                 marketplace_id=marketplace_id,
-                purchase_order_id=str(row['purchaseOrderId']) if pd.notnull(row['purchaseOrderId']) else "",
-                customer_order_id=str(row['customerOrderId']) if pd.notnull(row['customerOrderId']) else "",
-                customer_email_id=str(row['customerEmailId']) if pd.notnull(row['customerEmailId']) else "",
-                order_date = order_date,
-                shipping_information = eval(row['shippingInfo']) if pd.notnull(row['shippingInfo']) else "",
-                fulfillment_channel = shipNode['type'],
-                order_details = order_details['orderLine'],
-                order_total = order_total,
-                currency = currency,
-                order_status = order_status,
+                purchase_order_id=sanitize_value(str(row['purchaseOrderId']), value_type=str),
+                customer_order_id=sanitize_value(str(row['customerOrderId']), value_type=str),
+                customer_email_id=sanitize_value(str(row['customerEmailId']), value_type=str),
+                order_date=order_date,
+                shipping_information=eval(row['shippingInfo']) if pd.notnull(row['shippingInfo']) else "",
+                fulfillment_channel=sanitize_value(shipNode['type'], value_type=str),
+                order_details=order_details['orderLine'],
+                order_total=order_total,
+                currency=sanitize_value(currency, value_type=str),
+                order_status=sanitize_value(order_status, value_type=str),
             )
             order.save()
 
 
-
-file_path1 = "/home/lexicon/walmart/WALMARTORDER@orders.xlsx"
-# process_excel_for_walmartorders(file_path1)
-
-
-
-def saveBrand(marketplace_id,name):
+def saveBrand(marketplace_id, name):
     pipeline = [
-    {"$match": {"name": name,
-                "marketplace_id" : marketplace_id}},
-    {
-        "$project": {
-            "_id": 1
-        }
+        {"$match": {"name": name,
+                    "marketplace_id": marketplace_id}},
+        {
+            "$project": {
+                "_id": 1
+            }
         },
         {
-            "$limit" : 1
+            "$limit": 1
         }
-    
     ]
     brand_obj = list(Brand.objects.aggregate(*pipeline))
     if brand_obj != []:
@@ -428,7 +400,7 @@ def saveBrand(marketplace_id,name):
         brand_obj = DatabaseModel.save_documents(
             Brand, {
                 "name": name,
-                "marketplace_id" : marketplace_id,
+                "marketplace_id": marketplace_id,
             }
         )
         brand_id = brand_obj.id
@@ -441,21 +413,12 @@ def update_product_images_from_csv(file_path):
 
     for index, row in df.iterrows():
         print(f"Processing row {index + 1}...")
-        sku = str(row['SKU']) if pd.notnull(row['SKU']) else ""
-        quantity = row['Input Quantity'] if pd.notnull(row['Input Quantity']) else ""
-        # try:
-        #     brand_name = brand_name = row['Brand'] if pd.notnull(row['Brand']) else ""
-        #     brand_id = saveBrand(marketplace_id,brand_name)
-        # except:
-        #     brand_name = ""
-        #     brand_id = None
+        sku = sanitize_value(str(row['SKU']), value_type=str)
+        quantity = sanitize_value(row['Input Quantity'], value_type=int)
 
         if sku and quantity:
             product = DatabaseModel.get_document(Product.objects, {"sku": sku, "marketplace_id": marketplace_id})
             if product:
-                # product.image_url = image_url
-                # product.brand_id = brand_id
-                # product.brand_name = brand_name
                 product.quantity = quantity
                 product.save()
                 print(f"✅ Updated image for SKU: {sku}")
@@ -464,17 +427,11 @@ def update_product_images_from_csv(file_path):
         else:
             print(f"❌ Invalid data in row {index + 1}")
 
-# # Example usage
-# file_path = "/home/lexicon/walmart/InventoryReport_10001414684_2025-03-13T032956.541000.csv"
-# update_product_images_from_csv(file_path)
 
-
-
-
-def process_walmart_order(json_data,order_date=None,po_id =""):
+def process_walmart_order(json_data, order_date=None, po_id=""):
     """Processes a single Walmart order item and saves it to the OrderItems collection."""
     try:
-        product = DatabaseModel.get_document(Product.objects, {"sku": json_data.get("item", {}).get("sku", "Unknown SKU"),}, ["id"])
+        product = DatabaseModel.get_document(Product.objects, {"sku": json_data.get("item", {}).get("sku", "Unknown SKU"), }, ["id"])
         product_id = product.id if product else None
     except:
         product_id = None
@@ -490,12 +447,12 @@ def process_walmart_order(json_data,order_date=None,po_id =""):
         }
 
     try:
-        tax_price ={
-            "CurrencyCode": json_data['charges']['charge'][0]['tax']['taxAmount']['currency'],
+        tax_price = {
+            "CurrencyCode": json_data ['charges']['charge'][0]['tax']['taxAmount']['currency'],
             "Amount": float(json_data['charges']['charge'][0]['tax']['taxAmount']['amount'])
         }
     except:
-        tax_price =  {
+        tax_price = {
             "CurrencyCode": "USD",
             "Amount": 0.0
         }
@@ -511,7 +468,7 @@ def process_walmart_order(json_data,order_date=None,po_id =""):
         created_date=order_date if order_date else datetime.now(),
         Platform="Walmart",
         ProductDetails=ProductDetails(
-            product_id= product_id,
+            product_id=product_id,
             Title=json_data.get("item", {}).get("productName", "Unknown Product"),
             SKU=json_data.get("item", {}).get("sku", "Unknown SKU"),
             Condition=json_data.get("item", {}).get("condition", "Unknown Condition"),
@@ -547,7 +504,6 @@ def process_walmart_order(json_data,order_date=None,po_id =""):
     return order_item  # Return reference to saved OrderItems document
 
 
-
 def updateOrdersItemsDetails(request):
     """Updates order items details for Walmart orders in the database."""
     marketplace_id = DatabaseModel.get_document(Marketplace.objects, {"name": "Walmart"}).id
@@ -562,8 +518,6 @@ def updateOrdersItemsDetails(request):
         DatabaseModel.update_documents(Order.objects, {"id": ins.id}, {"order_items": order_items})
 
     return True
-
-
 
 
 def syncRecentWalmartOrders():
@@ -648,16 +602,16 @@ def syncRecentWalmartOrders():
             order = Order(
                 marketplace_id=marketplace_id,
                 purchase_order_id=po_id,
-                customer_order_id=row.get('customerOrderId', ""),
-                customer_email_id=row.get('customerEmailId', ""),
+                customer_order_id=sanitize_value(row.get('customerOrderId', ""), value_type=str),
+                customer_email_id=sanitize_value(row.get('customerEmailId', ""), value_type=str),
                 order_date=order_date,
                 shipping_information=shipping_info,
-                fulfillment_channel=ship_node.get('type', ""),
+                fulfillment_channel=sanitize_value(ship_node.get('type', ""), value_type=str),
                 order_details=order_lines,
                 order_items=order_items,
                 order_total=order_total,
-                currency=currency,
-                order_status=order_status,
+                currency=sanitize_value(currency, value_type=str),
+                order_status=sanitize_value(order_status, value_type=str),
                 items_order_quantity=len(order_items),
             )
             order.save()
@@ -669,6 +623,7 @@ def syncRecentWalmartOrders():
         executor.map(process_order, orders)
 
     return orders
+
 
 def get_all_walmart_items(access_token, limit=50):
     url = "https://marketplace.walmartapis.com/v3/items"
@@ -699,29 +654,23 @@ def get_all_walmart_items(access_token, limit=50):
     return items
 
 
-syncRecentWalmartOrders()
-
-
 def syncWalmartPrice():
     token = oauthFunction()
     products = get_all_walmart_items(token)
-    market_place_id = DatabaseModel.get_document(Marketplace.objects,{"name" : "Walmart"},['id']).id
-
+    market_place_id = DatabaseModel.get_document(Marketplace.objects, {"name": "Walmart"}, ['id']).id
 
     for row in products:
-
         try:
-            price = row['price']['amount']
+            price = sanitize_value(row['price']['amount'], value_type=float)
         except:
             price = 0.0
 
-        published_status = row['publishedStatus']
-        
+        published_status = sanitize_value(row['publishedStatus'], value_type=str)
 
-        product_obj = DatabaseModel.get_document(Product.objects,{"sku" : row['sku'],"marketplace_id" : market_place_id},['id','price'])
+        product_obj = DatabaseModel.get_document(Product.objects, {"sku": row['sku'], "marketplace_id": market_place_id}, ['id', 'price'])
         if product_obj:
             if product_obj.price != price:
-                DatabaseModel.update_documents(Product.objects, {"sku" : row['sku'],"marketplace_id" : market_place_id}, {"published_status": published_status,"price": price})
+                DatabaseModel.update_documents(Product.objects, {"sku": row['sku'], "marketplace_id": market_place_id}, {"published_status": published_status, "price": price})
                 productPriceChange(
                     product_id=product_obj.id,
                     old_price=product_obj.price,
@@ -729,3 +678,5 @@ def syncWalmartPrice():
                     reason="Price updated from Walmart API"
                 ).save()
     return True
+
+syncRecentWalmartOrders()
