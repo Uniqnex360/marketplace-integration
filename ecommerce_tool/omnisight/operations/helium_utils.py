@@ -4,6 +4,9 @@ from datetime import datetime,timedelta
 from dateutil.relativedelta import relativedelta
 from ecommerce_tool.crud import DatabaseModel
 import threading
+import math
+import logging
+logger = logging.getLogger(__name__)
 import pandas as pd
 from pytz import timezone
 
@@ -506,51 +509,77 @@ def pageViewsandSessionCount(start_date,end_date,product_id):
     return views_list
 
 
-
+def create_empty_bucket_data(time_key):
+    """Return a valid empty data structure for a time bucket"""
+    return {
+        "gross_revenue": 0.0,
+        "net_profit": 0.0,
+        "profit_margin": 0.0,
+        "orders": 0,
+        "units_sold": 0,
+        "refund_amount": 0.0,
+        "refund_quantity": 0,
+        "current_date": time_key
+    }
+    
 def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, product_id=None, 
                   manufacturer_name=None, fulfillment_channel=None, timezone="UTC"):
     import pytz
-    from datetime import datetime, timedelta
-    from bson import ObjectId
-    from concurrent.futures import ThreadPoolExecutor
-
+    
+    # Store the original timezone for later conversion
     user_timezone = pytz.timezone(timezone) if timezone != 'UTC' else pytz.UTC
+    
+    # Store original dates in user timezone
     original_start_date = start_date
     original_end_date = end_date
-
+    
+    # Convert to UTC for database queries
     if timezone != 'UTC':
         start_date_utc, end_date_utc = convertLocalTimeToUTC(start_date, end_date, timezone)
     else:
         start_date_utc = start_date
         end_date_utc = end_date
-
+    
+    # Remove timezone info for MongoDB query
     start_date_utc = start_date_utc.replace(tzinfo=None)
     end_date_utc = end_date_utc.replace(tzinfo=None)
-
+    
+    # Create time buckets and maintain a mapping of UTC keys to local dates
     bucket_to_local_date_map = {}
-
+    
     if preset in ["Today", "Yesterday"]:
+        # For hourly data, work with UTC buckets
         time_buckets = [(start_date_utc + timedelta(hours=i)).replace(minute=0, second=0, microsecond=0) 
-                        for i in range(24)]
+                      for i in range(24)]
         time_format = "%Y-%m-%d %H:00:00"
     else:
+        # For daily data, create buckets based on the requested date range
         time_buckets = []
         time_format = "%Y-%m-%d 00:00:00"
+        
+        # Start from beginning of first day
         current_date = original_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        # End at beginning of day after last day
         end_date_midnight = original_end_date.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-
+        
         while current_date < end_date_midnight:
+            # Convert local midnight to UTC
             utc_bucket = current_date.astimezone(pytz.UTC).replace(tzinfo=None)
             time_buckets.append(utc_bucket)
-
+            
+            # Store the mapping of UTC bucket to local date
             utc_key = utc_bucket.strftime(time_format)
             local_date_key = current_date.strftime(time_format)
             bucket_to_local_date_map[utc_key] = local_date_key
-
+            
             current_date += timedelta(days=1)
 
-    graph_data = {
-        dt.strftime(time_format): {
+    # Initialize graph data with all time periods
+    graph_data = {}
+    
+    for dt in time_buckets:
+        time_key = dt.strftime(time_format)
+        graph_data[time_key] = {
             "gross_revenue": 0,
             "net_profit": 0,
             "profit_margin": 0,
@@ -558,11 +587,17 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
             "units_sold": 0,
             "refund_amount": 0,
             "refund_quantity": 0
-        } for dt in time_buckets
-    }
+        }
 
-    query_end_date = end_date_utc + timedelta(days=1) if preset not in ["Today", "Yesterday"] and timezone != 'UTC' else end_date_utc
+    # For the overall query, we need to extend the end date to capture all orders
+    # that fall within the last day when converted to user timezone
+    if preset not in ["Today", "Yesterday"] and timezone != 'UTC':
+        # Add one day to ensure we capture all orders in the last day
+        query_end_date = end_date_utc + timedelta(days=1)
+    else:
+        query_end_date = end_date_utc
 
+    # Get all orders for the entire range
     match = {
         'order_status__in': ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped'],
         'order_date__gte': start_date_utc,
@@ -573,6 +608,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id not in [None, "", "all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
+    
     if manufacturer_name not in [None, "", []]:
         ids = getproductIdListBasedonManufacture(manufacturer_name, start_date_utc, end_date_utc)
         match["id__in"] = ids
@@ -585,115 +621,160 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         ids = getproductIdListBasedonbrand(brand_id, start_date_utc, end_date_utc)
         match["id__in"] = ids
 
+    # Get orders by bucket
     orders_by_bucket = {}
     for dt in time_buckets:
         bucket_start = dt
-        bucket_end = dt + timedelta(hours=1 if preset in ["Today", "Yesterday"] else 24)
+        if preset in ["Today", "Yesterday"]:
+            bucket_end = dt + timedelta(hours=1)
+        else:
+            bucket_end = dt + timedelta(days=1)
+        
         bucket_match = match.copy()
         bucket_match['order_date__gte'] = bucket_start
         bucket_match['order_date__lt'] = bucket_end
+        
         orders = DatabaseModel.list_documents(Order.objects, bucket_match)
         orders_by_bucket[dt.strftime(time_format)] = list(orders)
 
     def process_time_bucket(time_key):
         nonlocal graph_data, orders_by_bucket
 
-        bucket_orders = orders_by_bucket.get(time_key, [])
-        gross_revenue = 0
-        total_cogs = 0
-        refund_amount = 0
-        refund_quantity = 0
-        total_units = 0
-        temp_other_price = 0
-        vendor_funding = 0
+    bucket_orders = orders_by_bucket.get(time_key, [])
+    gross_revenue = 0.0
+    total_cogs = 0.0
+    refund_amount = 0.0
+    refund_quantity = 0
+    total_units = 0
+    temp_other_price = 0.0
+    vendor_funding = 0.0
 
+    try:
         bucket_start = datetime.strptime(time_key, time_format).replace(tzinfo=pytz.UTC)
         bucket_end = bucket_start + timedelta(hours=1 if preset in ["Today", "Yesterday"] else 24)
 
+        # Handle refunds
         refund_ins = refundOrder(bucket_start, bucket_end, marketplace_id, brand_id, product_id)
         if refund_ins:
             for ins in refund_ins:
                 if bucket_start <= ins['order_date'] < bucket_end:
-                    refund_amount += ins['order_total']
-                    refund_quantity += len(ins['order_items'])
+                    refund_amount += float(ins.get('order_total', 0))
+                    refund_quantity += len(ins.get('order_items', []))
 
+        # Process orders
         for order in bucket_orders:
-            gross_revenue += order.order_total
-            total_units += order.items_order_quantity or 0
+            try:
+                gross_revenue += float(order.order_total or 0)
+                total_units += int(order.items_order_quantity or 0)
 
-            for item in order.order_items:
-                pipeline = [
-                    {"$match": {"_id": item.id}},
-                    {"$lookup": {
-                        "from": "product",
-                        "localField": "ProductDetails.product_id",
-                        "foreignField": "_id",
-                        "as": "product_ins"
-                    }},
-                    {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                    {"$project": {
-                        "_id": 0,
-                        "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                        "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
-                        "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                        "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                        "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                    }}
-                ]
-                result = list(OrderItems.objects.aggregate(*pipeline))
-                if result:
-                    res = result[0]
+                for item in order.order_items:
+                    try:
+                        pipeline = [
+                            {"$match": {"_id": item.id}},
+                            {"$lookup": {
+                                "from": "product",
+                                "localField": "ProductDetails.product_id",
+                                "foreignField": "_id",
+                                "as": "product_ins"
+                            }},
+                            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                            {"$project": {
+                                "_id": 0,
+                                "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                                "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+                                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                                "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                            }}
+                        ]
+                        result = list(OrderItems.objects.aggregate(*pipeline))
+                        if result:
+                            res = result[0]
 
-                    # Defensive checks
-                    def extract_number(value):
-                        if isinstance(value, dict):
-                            return float(value.get("value", 0))
-                        try:
-                            return float(value)
-                        except:
-                            return 0.0
+                            # Enhanced number extraction with logging
+                            def safe_extract(value, field_name=""):
+                                try:
+                                    if isinstance(value, dict):
+                                        return float(value.get("value", 0))
+                                    return float(value)
+                                except (TypeError, ValueError) as e:
+                                    logger.warning(f"Failed to convert {field_name} value: {value} - {str(e)}")
+                                    return 0.0
 
-                    temp_other_price += extract_number(res.get('price'))
-                    cogs_value = res.get('total_cogs') if order.marketplace_id.name == "Amazon" else res.get('w_total_cogs')
-                    total_cogs += extract_number(cogs_value)
-                    vendor_funding += extract_number(res.get("vendor_funding"))
+                            temp_other_price += safe_extract(res.get('price'), 'price')
+                            cogs_value = res.get('total_cogs') if order.marketplace_id.name == "Amazon" else res.get('w_total_cogs')
+                            total_cogs += safe_extract(cogs_value, 'cogs')
+                            vendor_funding += safe_extract(res.get("vendor_funding"), 'vendor_funding')
 
+                    except Exception as item_error:
+                        logger.error(f"Error processing order item {item.id}: {str(item_error)}")
+                        continue
+
+            except Exception as order_error:
+                logger.error(f"Error processing order {order.id}: {str(order_error)}")
+                continue
+
+        # Calculate metrics with safety checks
         net_profit = (temp_other_price - total_cogs) + vendor_funding
-        profit_margin = round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0
+        
+        try:
+            profit_margin = round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0.0
+            # Handle potential NaN/Inf values
+            if not math.isfinite(profit_margin):
+                profit_margin = 0.0
+        except ZeroDivisionError:
+            profit_margin = 0.0
 
+        # Store results with additional validation
         graph_data[time_key] = {
-            "gross_revenue": round(gross_revenue, 2),
-            "net_profit": round(net_profit, 2),
-            "profit_margin": profit_margin,
-            "orders": len(bucket_orders),
-            "units_sold": total_units,
-            "refund_amount": round(refund_amount, 2),
-            "refund_quantity": refund_quantity
+            "gross_revenue": round(float(gross_revenue), 2),
+            "net_profit": round(float(net_profit), 2),
+            "profit_margin": float(profit_margin),
+            "orders": int(len(bucket_orders)),
+            "units_sold": int(total_units),
+            "refund_amount": round(float(refund_amount), 2),
+            "refund_quantity": int(refund_quantity)
         }
 
+    except Exception as bucket_error:
+        logger.error(f"Error processing time bucket {time_key}: {str(bucket_error)}")
+        graph_data[time_key] = create_empty_bucket_data(time_key)
+
+    # Process time buckets with limited threading
+    from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {executor.submit(process_time_bucket, time_key): time_key for time_key in graph_data}
         for future in futures:
             future.result()
 
+    # Convert to final output with correct dates
     converted_graph_data = {}
+    
+    # Get the requested date range (just the dates)
     start_date_only = original_start_date.date()
     end_date_only = original_end_date.date()
-
+    
     if preset in ["Today", "Yesterday"]:
+        # For hourly data, convert normally
         for utc_time_key, data in graph_data.items():
             utc_dt = datetime.strptime(utc_time_key, time_format).replace(tzinfo=pytz.UTC)
             local_dt = utc_dt.astimezone(user_timezone)
             local_time_key = local_dt.strftime(time_format)
-
+            
             converted_graph_data[local_time_key] = data
             converted_graph_data[local_time_key]["current_date"] = local_time_key
     else:
+        # For daily data, use the pre-mapped local dates
         for utc_time_key, data in graph_data.items():
+            # Get the correct local date from our mapping
             local_time_key = bucket_to_local_date_map.get(utc_time_key)
+            
             if local_time_key:
+                # Parse the local date to check if it's in range
                 local_date = datetime.strptime(local_time_key, time_format).date()
+                
+                # Only include if the date is within the original requested range
                 if start_date_only <= local_date <= end_date_only:
                     converted_graph_data[local_time_key] = data
                     converted_graph_data[local_time_key]["current_date"] = local_time_key
