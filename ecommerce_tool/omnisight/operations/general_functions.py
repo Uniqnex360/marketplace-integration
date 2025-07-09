@@ -1508,192 +1508,125 @@ def change_sign(value):
 @csrf_exempt
 def getSalesTrendPercentage(request):
     import pytz
+    import math
     from pytz import timezone
+    from datetime import datetime, timedelta
+    from rest_framework.parsers import JSONParser
+    from bson import ObjectId
 
-    data = dict()
-    json_request = JSONParser().parse(request)
-    range_type = json_request.get('range_type', 'month')  # 'day', 'week', 'month', 'year'
-    marketplace_id = json_request.get('marketplace_id')  # Marketplace filter (e.g., 'amazon', 'walmart')
-    timezone_str = json_request.get('timezone', 'US/Pacific')
-    
-    # Get current time and convert to local time based on timezone_str
-    local_tz = timezone(timezone_str)
-    now = datetime.now(local_tz)
-    
-    local_tz = pytz.timezone(timezone_str)
-        
-    # If dates are naive (no timezone), localize them
-    if now.tzinfo is None:
-        now = local_tz.localize(now)
-    # Convert to UTC
-    now = now.astimezone(pytz.UTC)
-    now = now.replace(tzinfo=None)
-    
+    try:
+        data = dict()
+        json_request = JSONParser().parse(request)
+        range_type = json_request.get('range_type', 'month')  # 'day', 'week', 'month', 'year'
+        marketplace_id = json_request.get('marketplace_id')
+        timezone_str = json_request.get('timezone', 'US/Pacific')
 
-    # Determine date ranges based on range_type
-    if range_type == 'day':
-        current_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        previous_start = current_start - timedelta(days=1)
-        previous_end = current_start
-    elif range_type == 'week':
-        current_start = now - timedelta(days=now.weekday())
-        current_start = current_start.replace(hour=0, minute=0, second=0, microsecond=0)
-        previous_start = current_start - timedelta(weeks=1)
-        previous_end = current_start
-    elif range_type == 'month':
-        current_start = datetime(now.year, now.month, 1)
-        previous_month_end = current_start - timedelta(days=1)
-        previous_start = datetime(previous_month_end.year, previous_month_end.month, 1)
-        previous_end = current_start
-    elif range_type == 'year':
-        current_start = datetime(now.year, 1, 1)
-        previous_start = datetime(now.year - 1, 1, 1)
-        previous_end = current_start
-    else:
-        data['error'] = "Invalid range_type provided."
-        return data
+        # Timezone handling with error checking
+        try:
+            local_tz = pytz.timezone(timezone_str)
+            now = datetime.now(local_tz)
+            if now.tzinfo is None:
+                now = local_tz.localize(now)
+            now = now.astimezone(pytz.UTC).replace(tzinfo=None)
+        except Exception as e:
+            raise ValueError(f"Invalid timezone handling: {str(e)}")
 
-    # Match pipeline for current and previous ranges
-    match_pipeline = [
-        {
-            "$facet": {
-                "current_range": [
-                    {
-                        "$match": {
-                            "order_date": {
-                                "$gte": current_start,
-                                "$lt": now
-                            },
-                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id and marketplace_id != "custom" and marketplace_id != "all" else {})
-                        }
-                    },
-                    {
-                        "$group": {
-                            "_id": "$marketplace_id",
-                            "sales_value": {"$sum": "$order_total"}
-                        }
-                    }
-                ],
-                "previous_range": [
-                    {
-                        "$match": {
-                            "order_date": {
-                                "$gte": previous_start,
-                                "$lt": previous_end
-                            },
-                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id and marketplace_id != "custom" and marketplace_id != "all" else {})
-                        }
-                    },
-                    {
-                        "$group": {
-                            "_id": "$marketplace_id",
-                            "sales_value": {"$sum": "$order_total"}
-                        }
-                    }
-                ]
+        # Date range calculation
+        if range_type == 'day':
+            current_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            previous_start = current_start - timedelta(days=1)
+            previous_end = current_start
+        elif range_type == 'week':
+            current_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            previous_start = current_start - timedelta(weeks=1)
+            previous_end = current_start
+        elif range_type == 'month':
+            current_start = datetime(now.year, now.month, 1)
+            previous_month_end = current_start - timedelta(days=1)
+            previous_start = datetime(previous_month_end.year, previous_month_end.month, 1)
+            previous_end = current_start
+        elif range_type == 'year':
+            current_start = datetime(now.year, 1, 1)
+            previous_start = datetime(now.year - 1, 1, 1)
+            previous_end = current_start
+        else:
+            raise ValueError("Invalid range_type provided")
+
+        # MongoDB aggregation pipelines
+        def get_match_pipeline():
+            base_match = {
+                "order_date": {
+                    "$gte": current_start,
+                    "$lt": previous_end if 'previous' in locals() else now
+                }
             }
-        }
-    ]
+            if marketplace_id and marketplace_id not in ("custom", "all"):
+                base_match["marketplace_id"] = ObjectId(marketplace_id)
+            return base_match
 
-    custom_match_pipeline = [
-        {
-            "$facet": {
-                "current_range": [
-                    {
-                        "$match": {
-                            "purchase_order_date": {
-                                "$gte": current_start,
-                                "$lt": now
-                            }
-                        }
-                    },
-                    {
-                        "$group": {
-                            "_id": None,
-                            "sales_value": {"$sum": "$total_price"}
-                        }
+        # Main query execution
+        def execute_queries():
+            nonlocal data
+            if marketplace_id == "custom":
+                trend_data = list(custom_order.objects.aggregate(*[{
+                    "$facet": {
+                        "current_range": [{"$match": get_match_pipeline()}],
+                        "previous_range": [{"$match": {"purchase_order_date": {"$gte": previous_start, "$lt": previous_end}}}]
                     }
-                ],
-                "previous_range": [
-                    {
-                        "$match": {
-                            "purchase_order_date": {
-                                "$gte": previous_start,
-                                "$lt": previous_end
-                            }
-                        }
-                    },
-                    {
-                        "$group": {
-                            "_id": None,
-                            "sales_value": {"$sum": "$total_price"}
-                        }
+                }]))
+            else:
+                trend_data = list(Order.objects.aggregate(*[{
+                    "$facet": {
+                        "current_range": [{"$match": get_match_pipeline()}],
+                        "previous_range": [{"$match": {"order_date": {"$gte": previous_start, "$lt": previous_end}}}]
                     }
-                ]
-            }
-        }
-    ]
+                }]))
 
-    if marketplace_id == "custom":
-        trend_data = list(custom_order.objects.aggregate(*custom_match_pipeline))
-    else:
-        trend_data = list(Order.objects.aggregate(*match_pipeline))
-        custom_trend_data = list(custom_order.objects.aggregate(*custom_match_pipeline))
+            return trend_data
 
-        # Combine custom_order data with Order data
-        if custom_trend_data:
-            for key in ["current_range", "previous_range"]:
-                for item in custom_trend_data[0][key]:
-                    trend_data[0][key].append({"_id": "custom", "sales_value": item["sales_value"]})
+        trend_data = execute_queries()
 
-    if trend_data:
-        current_range_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["current_range"]}
-        previous_range_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["previous_range"]}
+        # Data processing with sanitization
+        if trend_data:
+            current_range_data = {str(item["_id"]): sanitize_data(item["sales_value"]) for item in trend_data[0]["current_range"]}
+            previous_range_data = {str(item["_id"]): sanitize_data(item["sales_value"]) for item in trend_data[0]["previous_range"]}
 
-        if marketplace_id == "all":  # Combine all marketplaces
-            current_total = sum(current_range_data.values())
-            previous_total = sum(previous_range_data.values())
-            percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
-            current_percentage = (current_total / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
-            data['trend_percentage'] = [{
-                "id": "All Channels",
-                "current_range_sales": current_total,
-                "previous_range_sales": previous_total,
-                "trend_percentage": round(percentage_change, 2),
-                "current_percentage" : round(current_percentage,2)
-            }]
-        elif marketplace_id == "custom":  # Only custom_order data
-            current_total = current_range_data.get(None, 0)
-            previous_total = previous_range_data.get(None, 0)
-            percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
-            current_percentage = (current_total / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
-            data['trend_percentage'] = [{
-                "id": "Custom Orders",
-                "current_range_sales": current_total,
-                "previous_range_sales": previous_total,
-                "trend_percentage": (round(percentage_change, 2)),
-                "current_percentage" : round(current_percentage,2)
-            }]
-        else:  # Specific marketplace
-            trend_percentage = []
-            marketplace_name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
-            for key in set(current_range_data.keys()).union(previous_range_data.keys()):
-                current_value = current_range_data.get(key, 0)
-                previous_value = previous_range_data.get(key, 0)
-                percentage_change = ((current_value - previous_value) / previous_value * 100) if previous_value != 0 else (100 if current_value > 0 else 0)
-                current_percentage = (current_value / previous_value * 100) if previous_value != 0 else (100 if current_value > 0 else 0)
-                trend_percentage.append({
-                    "id": str(marketplace_name),
-                    "current_range_sales": current_value,
-                    "previous_range_sales": previous_value,
-                    "trend_percentage": (round(percentage_change, 2)),
-                    "current_percentage" : round(current_percentage,2)
-                })
-            data['trend_percentage'] = trend_percentage
-    else:
-        data['trend_percentage'] = []
+            percentage_change = 0.0
+            if marketplace_id == "all":
+                current_total = sum(current_range_data.values())
+                previous_total = sum(previous_range_data.values())
+                percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
+                data['trend_percentage'] = [{
+                    "id": "All Channels",
+                    "current_range_sales": current_total,
+                    "previous_range_sales": previous_total,
+                    "trend_percentage": sanitize_data(percentage_change),
+                }]
+            elif marketplace_id == "custom":
+                current_total = current_range_data.get(None, 0)
+                previous_total = previous_range_data.get(None, 0)
+                percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
+                data['trend_percentage'] = [{
+                    "id": "Custom Orders",
+                    "current_range_sales": current_total,
+                    "previous_range_sales": previous_total,
+                    "trend_percentage": sanitize_data(percentage_change),
+                }]
+            else:
+                marketplace_name = "Specific Marketplace"
+                data['trend_percentage'] = [{
+                    "id": marketplace_name,
+                    "current_range_sales": current_range_data.get(marketplace_id, 0),
+                    "previous_range_sales": previous_range_data.get(marketplace_id, 0),
+                    "trend_percentage": sanitize_data(percentage_change),
+                }]
 
-    return data
+        return JsonResponse(sanitize_data(data), safe=False)
+
+    except Exception as e:
+        error_data = {"error": str(e)}
+        return JsonResponse(sanitize_data(error_data), status=400)
+
 
 @csrf_exempt
 def fetchSalesSummary(request):
