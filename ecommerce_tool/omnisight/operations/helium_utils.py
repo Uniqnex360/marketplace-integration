@@ -510,61 +510,47 @@ def pageViewsandSessionCount(start_date,end_date,product_id):
 def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, product_id=None, 
                   manufacturer_name=None, fulfillment_channel=None, timezone="UTC"):
     import pytz
-    
-    # Store the original timezone for later conversion
+    from datetime import datetime, timedelta
+    from bson import ObjectId
+    from concurrent.futures import ThreadPoolExecutor
+
     user_timezone = pytz.timezone(timezone) if timezone != 'UTC' else pytz.UTC
-    
-    # Store original dates in user timezone
     original_start_date = start_date
     original_end_date = end_date
-    
-    # Convert to UTC for database queries
+
     if timezone != 'UTC':
         start_date_utc, end_date_utc = convertLocalTimeToUTC(start_date, end_date, timezone)
     else:
         start_date_utc = start_date
         end_date_utc = end_date
-    
-    # Remove timezone info for MongoDB query
+
     start_date_utc = start_date_utc.replace(tzinfo=None)
     end_date_utc = end_date_utc.replace(tzinfo=None)
-    
-    # Create time buckets and maintain a mapping of UTC keys to local dates
+
     bucket_to_local_date_map = {}
-    
+
     if preset in ["Today", "Yesterday"]:
-        # For hourly data, work with UTC buckets
         time_buckets = [(start_date_utc + timedelta(hours=i)).replace(minute=0, second=0, microsecond=0) 
-                      for i in range(24)]
+                        for i in range(24)]
         time_format = "%Y-%m-%d %H:00:00"
     else:
-        # For daily data, create buckets based on the requested date range
         time_buckets = []
         time_format = "%Y-%m-%d 00:00:00"
-        
-        # Start from beginning of first day
         current_date = original_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        # End at beginning of day after last day
         end_date_midnight = original_end_date.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        
+
         while current_date < end_date_midnight:
-            # Convert local midnight to UTC
             utc_bucket = current_date.astimezone(pytz.UTC).replace(tzinfo=None)
             time_buckets.append(utc_bucket)
-            
-            # Store the mapping of UTC bucket to local date
+
             utc_key = utc_bucket.strftime(time_format)
             local_date_key = current_date.strftime(time_format)
             bucket_to_local_date_map[utc_key] = local_date_key
-            
+
             current_date += timedelta(days=1)
 
-    # Initialize graph data with all time periods
-    graph_data = {}
-    
-    for dt in time_buckets:
-        time_key = dt.strftime(time_format)
-        graph_data[time_key] = {
+    graph_data = {
+        dt.strftime(time_format): {
             "gross_revenue": 0,
             "net_profit": 0,
             "profit_margin": 0,
@@ -572,17 +558,11 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
             "units_sold": 0,
             "refund_amount": 0,
             "refund_quantity": 0
-        }
+        } for dt in time_buckets
+    }
 
-    # For the overall query, we need to extend the end date to capture all orders
-    # that fall within the last day when converted to user timezone
-    if preset not in ["Today", "Yesterday"] and timezone != 'UTC':
-        # Add one day to ensure we capture all orders in the last day
-        query_end_date = end_date_utc + timedelta(days=1)
-    else:
-        query_end_date = end_date_utc
+    query_end_date = end_date_utc + timedelta(days=1) if preset not in ["Today", "Yesterday"] and timezone != 'UTC' else end_date_utc
 
-    # Get all orders for the entire range
     match = {
         'order_status__in': ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped'],
         'order_date__gte': start_date_utc,
@@ -593,7 +573,6 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id not in [None, "", "all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
-    
     if manufacturer_name not in [None, "", []]:
         ids = getproductIdListBasedonManufacture(manufacturer_name, start_date_utc, end_date_utc)
         match["id__in"] = ids
@@ -606,19 +585,13 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         ids = getproductIdListBasedonbrand(brand_id, start_date_utc, end_date_utc)
         match["id__in"] = ids
 
-    # Get orders by bucket
     orders_by_bucket = {}
     for dt in time_buckets:
         bucket_start = dt
-        if preset in ["Today", "Yesterday"]:
-            bucket_end = dt + timedelta(hours=1)
-        else:
-            bucket_end = dt + timedelta(days=1)
-        
+        bucket_end = dt + timedelta(hours=1 if preset in ["Today", "Yesterday"] else 24)
         bucket_match = match.copy()
         bucket_match['order_date__gte'] = bucket_start
         bucket_match['order_date__lt'] = bucket_end
-        
         orders = DatabaseModel.list_documents(Order.objects, bucket_match)
         orders_by_bucket[dt.strftime(time_format)] = list(orders)
 
@@ -635,12 +608,8 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         vendor_funding = 0
 
         bucket_start = datetime.strptime(time_key, time_format).replace(tzinfo=pytz.UTC)
-        if preset in ["Today", "Yesterday"]:
-            bucket_end = bucket_start + timedelta(hours=1)
-        else:
-            bucket_end = bucket_start + timedelta(days=1)
+        bucket_end = bucket_start + timedelta(hours=1 if preset in ["Today", "Yesterday"] else 24)
 
-        # Calculate refunds
         refund_ins = refundOrder(bucket_start, bucket_end, marketplace_id, brand_id, product_id)
         if refund_ins:
             for ins in refund_ins:
@@ -648,10 +617,10 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                     refund_amount += ins['order_total']
                     refund_quantity += len(ins['order_items'])
 
-        # Process each order in the bucket
         for order in bucket_orders:
             gross_revenue += order.order_total
-            total_units += order.items_order_quantity if order.items_order_quantity else 0
+            total_units += order.items_order_quantity or 0
+
             for item in order.order_items:
                 pipeline = [
                     {"$match": {"_id": item.id}},
@@ -674,11 +643,22 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                 ]
                 result = list(OrderItems.objects.aggregate(*pipeline))
                 if result:
-                    temp_other_price += result[0]['price']
-                    total_cogs += result[0]['total_cogs'] if order.marketplace_id.name == "Amazon" else result[0]['w_total_cogs']
-                    vendor_funding += result[0]['vendor_funding']
+                    res = result[0]
 
-        # Calculate metrics
+                    # Defensive checks
+                    def extract_number(value):
+                        if isinstance(value, dict):
+                            return float(value.get("value", 0))
+                        try:
+                            return float(value)
+                        except:
+                            return 0.0
+
+                    temp_other_price += extract_number(res.get('price'))
+                    cogs_value = res.get('total_cogs') if order.marketplace_id.name == "Amazon" else res.get('w_total_cogs')
+                    total_cogs += extract_number(cogs_value)
+                    vendor_funding += extract_number(res.get("vendor_funding"))
+
         net_profit = (temp_other_price - total_cogs) + vendor_funding
         profit_margin = round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0
 
@@ -692,40 +672,28 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
             "refund_quantity": refund_quantity
         }
 
-    # Process time buckets with limited threading
-    from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {executor.submit(process_time_bucket, time_key): time_key for time_key in graph_data}
         for future in futures:
             future.result()
 
-    # Convert to final output with correct dates
     converted_graph_data = {}
-    
-    # Get the requested date range (just the dates)
     start_date_only = original_start_date.date()
     end_date_only = original_end_date.date()
-    
+
     if preset in ["Today", "Yesterday"]:
-        # For hourly data, convert normally
         for utc_time_key, data in graph_data.items():
             utc_dt = datetime.strptime(utc_time_key, time_format).replace(tzinfo=pytz.UTC)
             local_dt = utc_dt.astimezone(user_timezone)
             local_time_key = local_dt.strftime(time_format)
-            
+
             converted_graph_data[local_time_key] = data
             converted_graph_data[local_time_key]["current_date"] = local_time_key
     else:
-        # For daily data, use the pre-mapped local dates
         for utc_time_key, data in graph_data.items():
-            # Get the correct local date from our mapping
             local_time_key = bucket_to_local_date_map.get(utc_time_key)
-            
             if local_time_key:
-                # Parse the local date to check if it's in range
                 local_date = datetime.strptime(local_time_key, time_format).date()
-                
-                # Only include if the date is within the original requested range
                 if start_date_only <= local_date <= end_date_only:
                     converted_graph_data[local_time_key] = data
                     converted_graph_data[local_time_key]["current_date"] = local_time_key
