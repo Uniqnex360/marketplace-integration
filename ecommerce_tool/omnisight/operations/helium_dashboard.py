@@ -36,6 +36,23 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 
+def clean_float(val):
+    """Converts NaN, inf, or invalid float to 0.0"""
+    try:
+        if val is None or isinstance(val, str):
+            return 0.0
+        if math.isnan(val) or math.isinf(val):
+            return 0.0
+        return round(float(val), 2)
+    except:
+        return 0.0
+
+def clean_dict_floats(d):
+    """Cleans all float values in a dict"""
+    for key in d:
+        if isinstance(d[key], (float, int)):
+            d[key] = clean_float(d[key])
+    return d
 
 @csrf_exempt
 def get_metrics_by_date_range(request):
@@ -735,14 +752,14 @@ def updatedRevenueWidgetAPIView(request):
 
     if compare_startdate and compare_startdate != "":
         difference = {
-            "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
-            "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
-            "profit_margin": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0, 2),
-            "orders": round(((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0, 2),
-            "units_sold": round(((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0, 2),
-            "refund_amount": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0, 2),
-            "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
-        }
+    "gross_revenue": clean_float((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0,
+    "net_profit": clean_float((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0,
+    "profit_margin": clean_float((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0,
+    "orders": clean_float((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0,
+    "units_sold": clean_float((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0,
+    "refund_amount": clean_float((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0,
+    "refund_quantity": clean_float((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0,
+}
         data['compare_total'] = difference
 
     # Apply filters based on chooseMatrix
