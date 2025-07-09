@@ -40,6 +40,10 @@ from django.utils import timezone
 from concurrent.futures import ThreadPoolExecutor
 from rest_framework.parsers import JSONParser
 from datetime import datetime
+import pytz
+from datetime import datetime, timedelta
+from rest_framework.parsers import JSONParser
+from django.http import JsonResponse
 
 def sanitize_data(data):
     """Recursively sanitize data to ensure all float values are JSON compliant."""
@@ -2070,8 +2074,14 @@ def exportPeriodWiseCSV(request):
 
 @csrf_exempt
 def getPeriodWiseDataCustom(request):
+    import pytz
+    from datetime import datetime, timedelta
+    from rest_framework.parsers import JSONParser
+    from django.http import JsonResponse
+
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     json_request = JSONParser().parse(request)
 
     marketplace_id = json_request.get('marketplace_id', None)
@@ -2085,7 +2095,6 @@ def getPeriodWiseDataCustom(request):
     start_date = json_request.get("start_date")
     end_date = json_request.get("end_date")
 
-    
     if start_date:
         # Convert string dates to datetime in the specified timezone
         local_tz = pytz.timezone(timezone_str)
@@ -2105,38 +2114,39 @@ def getPeriodWiseDataCustom(request):
         # For end date, include the entire day (up to 23:59:59)
         to_date = to_date.replace(hour=23, minute=59, second=59)
     else:
-        from_date, to_date = get_date_range(preset,timezone_str)
-    
+        from_date, to_date = get_date_range(preset, timezone_str)
 
     # Compute previous period
     duration = to_date - from_date
     prev_from, prev_to = from_date - duration, to_date - duration
 
     # Get base periods
-    today_start, today_end = get_date_range("Today",timezone_str)
-    yesterday_start, yesterday_end = get_date_range("Yesterday",timezone_str)
-    last7_start, last7_end = get_date_range("Last 7 days",timezone_str)
+    today_start, today_end = get_date_range("Today", timezone_str)
+    yesterday_start, yesterday_end = get_date_range("Yesterday", timezone_str)
+    last7_start, last7_end = get_date_range("Last 7 days", timezone_str)
     last7_prev_start = today_start - timedelta(days=14)
     last7_prev_end = last7_start - timedelta(seconds=1)
 
     # Helper to generate period response
     def period_response(label, cur_from, cur_to, prev_from, prev_to):
         def format_metrics(metric):
+            current_value = sanitize_data(current[metric])
+            previous_value = sanitize_data(previous[metric])
+            delta = round(current_value - previous_value, 2)
             return {
-                "current": current[metric],
-                "previous": previous[metric],
-                "delta": round(current[metric] - previous[metric], 2)
+                "current": current_value,
+                "previous": previous_value,
+                "delta": delta
             }
 
-        current = calculate_metricss(cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str,False,use_threads=True)
-        previous = calculate_metricss(prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str,False,use_threads=True)
+        current = calculate_metricss(cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
+        previous = calculate_metricss(prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
 
         date_ranges = {
             "current": {"from": to_utc_format(cur_from)},
             "previous": {"from": to_utc_format(prev_from)}
         }
 
-        # if label not in ['Today', 'Yesterday']:
         date_ranges["current"]["to"] = to_utc_format(cur_to)
         date_ranges["previous"]["to"] = to_utc_format(prev_to)
 
@@ -2148,18 +2158,18 @@ def getPeriodWiseDataCustom(request):
 
         def net_profit_calc(metrics):
             return {
-                "gross": metrics["grossRevenue"],
-                "totalCosts": metrics["expenses"],
-                "productRefunds": metrics["refunds"],
-                "totalTax": metrics.get("tax_price", 0),
+                "gross": sanitize_data(metrics.get("grossRevenue", 0)),
+                "totalCosts": sanitize_data(metrics.get("expenses", 0)),
+                "productRefunds": sanitize_data(metrics.get("refunds", 0)),
+                "totalTax": sanitize_data(metrics.get("tax_price", 0)),
                 "totalTaxWithheld": 0,
                 "ppcProductCost": 0,
                 "ppcBrandsCost": 0,
                 "ppcDisplayCost": 0,
                 "ppcStCost": 0,
-                "cogs": metrics.get("total_cogs", 0),
-                "product_cost": metrics.get("product_cost", 0),
-                "shipping_cost": metrics.get("shipping_cost", 0),
+                "cogs": sanitize_data(metrics.get("total_cogs", 0)),
+                "product_cost": sanitize_data(metrics.get("product_cost", 0)),
+                "shipping_cost": sanitize_data(metrics.get("shipping_cost", 0)),
             }
 
         return {
