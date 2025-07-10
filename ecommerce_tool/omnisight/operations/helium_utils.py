@@ -640,106 +640,72 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     def process_time_bucket(time_key):
         nonlocal graph_data, orders_by_bucket
 
-    bucket_orders = orders_by_bucket.get(time_key, [])
-    gross_revenue = 0.0
-    total_cogs = 0.0
-    refund_amount = 0.0
-    refund_quantity = 0
-    total_units = 0
-    temp_other_price = 0.0
-    vendor_funding = 0.0
+        bucket_orders = orders_by_bucket.get(time_key, [])
+        gross_revenue = 0
+        total_cogs = 0
+        refund_amount = 0
+        refund_quantity = 0
+        total_units = 0
+        temp_other_price = 0
+        vendor_funding = 0
 
-    try:
         bucket_start = datetime.strptime(time_key, time_format).replace(tzinfo=pytz.UTC)
-        bucket_end = bucket_start + timedelta(hours=1 if preset in ["Today", "Yesterday"] else 24)
+        if preset in ["Today", "Yesterday"]:
+            bucket_end = bucket_start + timedelta(hours=1)
+        else:
+            bucket_end = bucket_start + timedelta(days=1)
 
-        # Handle refunds
+        # Calculate refunds
         refund_ins = refundOrder(bucket_start, bucket_end, marketplace_id, brand_id, product_id)
         if refund_ins:
             for ins in refund_ins:
                 if bucket_start <= ins['order_date'] < bucket_end:
-                    refund_amount += float(ins.get('order_total', 0))
-                    refund_quantity += len(ins.get('order_items', []))
+                    refund_amount += ins['order_total']
+                    refund_quantity += len(ins['order_items'])
 
-        # Process orders
+        # Process each order in the bucket
         for order in bucket_orders:
-            try:
-                gross_revenue += float(order.order_total or 0)
-                total_units += int(order.items_order_quantity or 0)
+            gross_revenue += order.order_total
+            total_units += order.items_order_quantity if order.items_order_quantity else 0
+            for item in order.order_items:
+                pipeline = [
+                    {"$match": {"_id": item.id}},
+                    {"$lookup": {
+                        "from": "product",
+                        "localField": "ProductDetails.product_id",
+                        "foreignField": "_id",
+                        "as": "product_ins"
+                    }},
+                    {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                    {"$project": {
+                        "_id": 0,
+                        "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                        "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+                        "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                        "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                        "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                    }}
+                ]
+                result = list(OrderItems.objects.aggregate(*pipeline))
+                if result:
+                    temp_other_price += result[0]['price']
+                    total_cogs += result[0]['total_cogs'] if order.marketplace_id.name == "Amazon" else result[0]['w_total_cogs']
+                    vendor_funding += result[0]['vendor_funding']
 
-                for item in order.order_items:
-                    try:
-                        pipeline = [
-                            {"$match": {"_id": item.id}},
-                            {"$lookup": {
-                                "from": "product",
-                                "localField": "ProductDetails.product_id",
-                                "foreignField": "_id",
-                                "as": "product_ins"
-                            }},
-                            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                            {"$project": {
-                                "_id": 0,
-                                "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                                "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
-                                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                                "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                            }}
-                        ]
-                        result = list(OrderItems.objects.aggregate(*pipeline))
-                        if result:
-                            res = result[0]
-
-                            # Enhanced number extraction with logging
-                            def safe_extract(value, field_name=""):
-                                try:
-                                    if isinstance(value, dict):
-                                        return float(value.get("value", 0))
-                                    return float(value)
-                                except (TypeError, ValueError) as e:
-                                    logger.warning(f"Failed to convert {field_name} value: {value} - {str(e)}")
-                                    return 0.0
-
-                            temp_other_price += safe_extract(res.get('price'), 'price')
-                            cogs_value = res.get('total_cogs') if order.marketplace_id.name == "Amazon" else res.get('w_total_cogs')
-                            total_cogs += safe_extract(cogs_value, 'cogs')
-                            vendor_funding += safe_extract(res.get("vendor_funding"), 'vendor_funding')
-
-                    except Exception as item_error:
-                        logger.error(f"Error processing order item {item.id}: {str(item_error)}")
-                        continue
-
-            except Exception as order_error:
-                logger.error(f"Error processing order {order.id}: {str(order_error)}")
-                continue
-
-        # Calculate metrics with safety checks
+        # Calculate metrics
         net_profit = (temp_other_price - total_cogs) + vendor_funding
-        
-        try:
-            profit_margin = round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0.0
-            # Handle potential NaN/Inf values
-            if not math.isfinite(profit_margin):
-                profit_margin = 0.0
-        except ZeroDivisionError:
-            profit_margin = 0.0
+        profit_margin = round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0
 
-        # Store results with additional validation
         graph_data[time_key] = {
-            "gross_revenue": round(float(gross_revenue), 2),
-            "net_profit": round(float(net_profit), 2),
-            "profit_margin": float(profit_margin),
-            "orders": int(len(bucket_orders)),
-            "units_sold": int(total_units),
-            "refund_amount": round(float(refund_amount), 2),
-            "refund_quantity": int(refund_quantity)
+            "gross_revenue": round(gross_revenue, 2),
+            "net_profit": round(net_profit, 2),
+            "profit_margin": profit_margin,
+            "orders": len(bucket_orders),
+            "units_sold": total_units,
+            "refund_amount": round(refund_amount, 2),
+            "refund_quantity": refund_quantity
         }
-
-    except Exception as bucket_error:
-        logger.error(f"Error processing time bucket {time_key}: {str(bucket_error)}")
-        graph_data[time_key] = create_empty_bucket_data(time_key)
 
     # Process time buckets with limited threading
     from concurrent.futures import ThreadPoolExecutor
