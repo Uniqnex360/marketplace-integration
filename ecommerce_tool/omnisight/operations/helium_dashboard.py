@@ -1753,60 +1753,54 @@ def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    try:
-        json_request = JSONParser().parse(request)
-    except Exception:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-    marketplace_id = json_request.get('marketplace_id')
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel')
+    fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = json_request.get('timezone', 'US/Pacific')
 
-
-    # 🔁 Optimized metric function (no threading inside)
-    # ⚡ Optimized synchronous metric call
-    def calculate_metrics_range(start_date, end_date):
+    # Modified to avoid nested threading
+    def calculate_metrics_sync(start_date, end_date):
+       
         return calculate_metricss(
-            start_date, end_date,
-            marketplace_id, brand_id,
-            product_id, manufacturer_name,
+            start_date, end_date, 
+            marketplace_id, brand_id, 
+            product_id, manufacturer_name, 
             fulfillment_channel,
-            timezone_str, False,
+            timezone_str,False,
             use_threads=False
         )
 
+    def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
+        current_metrics = calculate_metrics_sync(current_start, current_end)
+        # previous_metrics = calculate_metrics_sync(prev_start, prev_end)  # Uncomment if needed
 
-    # ✅ Format helper
-    def format_period_metrics(label, current_start, current_end, prev_start, prev_end, current_metrics):
+        period_format = {
+            "current": {"from": to_utc_format(current_start)},
+            "previous": {"from": to_utc_format(prev_start)}
+        }
+        
+        if label not in ['Today', 'Yesterday']:
+            period_format["current"]["to"] = to_utc_format(current_end)
+            period_format["previous"]["to"] = to_utc_format(prev_end)
+
         output = {
             "label": label,
-            "period": {
-                "current": {"from": to_utc_format(current_start)},
-                "previous": {"from": to_utc_format(prev_start)}
-            }
+            "period": period_format
         }
+
         for key in current_metrics:
             output[key] = {
                 "current": current_metrics[key],
+                # "previous": previous_metrics[key],  # Uncomment if needed
+                # "delta": round(current_metrics[key] - previous_metrics[key], 2)
             }
+
         return output
 
-    # Compute all date ranges first
-        return output
-
-    # ✅ Short cache key to avoid redundant execution
-    cache_key = f"period_metrics:{marketplace_id}:{timezone_str}"
-    cached = cache.get(cache_key)
-    if cached:
-        return JsonResponse(cached, safe=False)
-
-    start_time = time.time()
-
-    # 📆 Compute date ranges
-    # 🗓 Date ranges
+    # Get all date ranges first
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1815,95 +1809,36 @@ def getPeriodWiseData(request):
         "lastYear": get_date_range("Last Year", timezone_str)
     }
 
-    # Prepare arguments for parallel execution
-    period_params = [
-        (
+    # Process sequentially instead of using ThreadPoolExecutor
+    response_data = {
+        "yesterday": format_period_metrics(
             "Yesterday",
             date_ranges["yesterday"][0], date_ranges["yesterday"][1],
             date_ranges["yesterday"][0] - timedelta(days=1), 
             date_ranges["yesterday"][0] - timedelta(seconds=1)
         ),
-        (
+        "last7Days": format_period_metrics(
             "Last 7 Days",
             date_ranges["last7Days"][0], date_ranges["last7Days"][1],
             date_ranges["last7Days"][0] - timedelta(days=7), 
             date_ranges["last7Days"][0] - timedelta(seconds=1)
         ),
-        (
+        "last30Days": format_period_metrics(
             "Last 30 Days",
             date_ranges["last30Days"][0], date_ranges["last30Days"][1],
             date_ranges["last30Days"][0] - timedelta(days=30), 
             date_ranges["last30Days"][0] - timedelta(seconds=1)
         ),
-        (
+        "yearToDate": format_period_metrics(
             "Year to Date",
             date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
             date_ranges["lastYear"][0], date_ranges["lastYear"][1]
         )
-    ]
+    }
 
-    # Parallelize metrics calculation for each period
-    response_data = {}
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        # Submit all jobs at once
-        future_to_period = {
-            executor.submit(
-                calculate_metrics_range, 
-                params[1], params[2]
-            ): params for params in period_params
-        }
-        for future in as_completed(future_to_period):
-            label, current_start, current_end, prev_start, prev_end = future_to_period[future]
-            current_metrics = future.result()
-            response_data_key = label.lower().replace(" ", "")
-            response_data[response_data_key] = format_period_metrics(
-                label, current_start, current_end, prev_start, prev_end, current_metrics
-            )
-    period_params = [
-        ("Yesterday",
-         date_ranges["yesterday"][0], date_ranges["yesterday"][1],
-         date_ranges["yesterday"][0] - timedelta(days=1),
-         date_ranges["yesterday"][0] - timedelta(seconds=1)),
-        ("Last 7 Days",
-         date_ranges["last7Days"][0], date_ranges["last7Days"][1],
-         date_ranges["last7Days"][0] - timedelta(days=7),
-         date_ranges["last7Days"][0] - timedelta(seconds=1)),
-        ("Last 30 Days",
-         date_ranges["last30Days"][0], date_ranges["last30Days"][1],
-         date_ranges["last30Days"][0] - timedelta(days=30),
-         date_ranges["last30Days"][0] - timedelta(seconds=1)),
-        ("Year to Date",
-         date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
-         date_ranges["lastYear"][0], date_ranges["lastYear"][1]),
-    ]
-
-    # ⚡ Parallel processing using ThreadPoolExecutor
-    response_data = {}
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        future_to_label = {
-            executor.submit(calculate_metrics_range, cur_start, cur_end): (label, cur_start, cur_end, prev_start, prev_end)
-            for label, cur_start, cur_end, prev_start, prev_end in period_params
-        }
-
-        for future in as_completed(future_to_label):
-            label, cur_start, cur_end, prev_start, prev_end = future_to_label[future]
-            key = label.lower().replace(" ", "")
-            try:
-                current_metrics = future.result(timeout=60)
-                response_data[key] = format_period_metrics(label, cur_start, cur_end, prev_start, prev_end, current_metrics)
-            except Exception as e:
-                print(f"[ERROR] Failed to calculate {label}: {e}")
-                response_data[key] = {
-                    "label": label,
-                    "error": f"Failed to compute metrics for {label}"
-                }
-
-    cache.set(cache_key, response_data, timeout=300)
-
-    print(f"⏱️ getPeriodWiseData executed in {round(time.time() - start_time, 2)} seconds")
-
-    print(f"⏱️ getPeriodWiseData executed in {round(time.time() - start_time, 2)}s")
     return JsonResponse(response_data, safe=False)
+
+
 @csrf_exempt
 def getPeriodWiseDataXl(request):
     json_request = JSONParser().parse(request)

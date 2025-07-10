@@ -85,9 +85,11 @@ def get_amazon_orders_current_month():
     """
     # Calculate date range with 3 minute buffer for Amazon API
     today = datetime.utcnow() - timedelta(minutes=3)
-    first_of_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    first_of_year = today.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
     
-    created_after = first_of_month.strftime('%Y-%m-%dT%H:%M:%SZ')
+    created_after = first_of_year.strftime('%Y-%m-%dT%H:%M:%SZ')
     created_before = today.strftime('%Y-%m-%dT%H:%M:%SZ')
 
     print(f"📦 Fetching orders from {created_after} to {created_before}")
