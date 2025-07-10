@@ -5307,11 +5307,7 @@ def getproductIdlist(request):
 
     asin_list = list(Product.objects.aggregate(*pipeline))
 
-    # Print product names under the brand(s)
-    if brand_names:
-        print(f"Products under brand(s) {', '.join(brand_names)}:")
-    else:
-        print("Products (no brand filter):")
+
     for product in asin_list:
         print(f"  - {product.get('product_title', 'Unknown')}")
 
