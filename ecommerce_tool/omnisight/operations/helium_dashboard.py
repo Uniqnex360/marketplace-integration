@@ -643,6 +643,10 @@ def RevenueWidgetAPIView(request):
 
 @csrf_exempt
 def updatedRevenueWidgetAPIView(request):
+    from django.utils import timezone
+    import pytz
+    from concurrent.futures import ThreadPoolExecutor
+
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
     compare_startdate = json_request.get("compare_startdate")
@@ -656,30 +660,31 @@ def updatedRevenueWidgetAPIView(request):
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
 
-    if start_date is not None and start_date != "":
-        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
+    
+    if start_date != None and start_date != "":
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
-        start_date, end_date = get_date_range(preset, timezone_str)
+        start_date, end_date = get_date_range(preset,timezone_str)
 
     comapre_past = get_previous_periods(start_date, end_date)
 
     # Define all fetch functions first
     def fetch_total():
         return totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id, 
-                                       product_id, manufacturer_name, fulfillment_channel, timezone_str)
+                                    product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     def fetch_graph_data():
         return get_graph_data(start_date, end_date, preset, marketplace_id, brand_id, 
-                              product_id, manufacturer_name, fulfillment_channel, timezone_str)
+                           product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     def fetch_compare_total():
         return totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id, 
-                                       brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+                                    brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     def fetch_compare_graph_data():
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
         return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, 
-                              brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+                           brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     # Execute all futures within the same context manager
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -745,21 +750,20 @@ def updatedRevenueWidgetAPIView(request):
         "graph": updated_graph,
         "comapre_past": comapre_past
     }
+
     if compare_startdate and compare_startdate != "":
-        difference = {}
-        for key in ["gross_revenue", "net_profit", "profit_margin", "orders", "units_sold", "refund_amount", "refund_quantity"]:
-            try:
-                current_value = total[key]
-                compare_value = compare_total[key]
-                if not math.isnan(current_value) and not math.isnan(compare_value) and compare_value != 0:
-                    difference[key] = round(((current_value - compare_value) / compare_value * 100), 2)
-                else:
-                    difference[key] = 0
-            except (KeyError, ValueError):
-                difference[key] = 0  # Default to 0 if there's an error
+        difference = {
+            "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
+            "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
+            "profit_margin": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0, 2),
+            "orders": round(((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0, 2),
+            "units_sold": round(((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0, 2),
+            "refund_amount": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0, 2),
+            "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
+        }
         data['compare_total'] = difference
-    # Sanitize the data before returning
-    data = sanitize_data(data)
+
+    # Apply filters based on chooseMatrix
     name = "Revenue"
     item_pipeline = [{"$match": {"name": name}}]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
@@ -768,11 +772,11 @@ def updatedRevenueWidgetAPIView(request):
         item_result = item_result[0]
         if not item_result['select_all']:
             for field in ['gross_revenue', 'units_sold', 'refund_quantity', 
-                           'refund_amount', 'net_profit', 'profit_margin', 'orders']:
+                         'refund_amount', 'net_profit', 'profit_margin', 'orders']:
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
-                    print('updatedRevenueWidgetAPIView', data)
     return data
+
 # @csrf_exempt
 # def get_top_products(request):
 #     json_request = JSONParser().parse(request)
