@@ -77,100 +77,47 @@ def fetch_orders_from_amazon(created_after, created_before, marketplace_ids=[MAR
 
     return all_orders
 
-def get_amazon_orders_current_month():
+def get_amazon_orders_yesterday(output_file=None):
     """
-    Fetches Amazon orders from the 1st of current month until today.
-    Updates existing orders with new data if they already exist.
-    Returns DataFrame of processed orders.
+    Fetch Amazon orders from yesterday and export them to an Excel file.
+    No database operations are performed.
     """
-    # Calculate date range with 3 minute buffer for Amazon API
-    today = datetime.utcnow() - timedelta(minutes=3)
-    first_of_year = today.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    # Define time range for yesterday
+    yesterday = datetime.utcnow() - timedelta(days=1)
+    start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
 
+    created_after = start.strftime('%Y-%m-%dT%H:%M:%SZ')
+    created_before = end.strftime('%Y-%m-%dT%H:%M:%SZ')
 
-    
-    created_after = first_of_year.strftime('%Y-%m-%dT%H:%M:%SZ')
-    created_before = today.strftime('%Y-%m-%dT%H:%M:%SZ')
+    print(f"📦 Fetching Amazon orders from {created_after} to {created_before}")
 
-    print(f"📦 Fetching orders from {created_after} to {created_before}")
+    # Fetch orders via your API
     orders = fetch_orders_from_amazon(created_after, created_before)
-
-    if orders is None:
-        print("⚠️ No data returned due to fetch error.")
+    print(f"Total orders fetched from API: {len(orders)}")
+    if not orders:
+        print("⚠️ No Amazon orders returned for yesterday.")
         return pd.DataFrame()
 
+    # Convert to DataFrame
     df = pd.DataFrame(orders)
+    print(f"DataFrame shape before export: {df.shape}")  # Debugging line
     
-    # Get marketplace
-    marketplace = Marketplace.objects(name="Amazon").first()
-    if not marketplace:
-        print("❌ Amazon marketplace not found in database")
-        return df
-    
-    # Process each order with sanitization
-    for _, order_data in df.iterrows():
-        try:
-            # Helper function for date conversion with sanitization
-            def convert_date(date_str):
-                try:
-                    date_str = sanitize_value(date_str, value_type=str)
-                    return datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%SZ') if date_str else None
-                except (ValueError, TypeError):
-                    return None
+    # Optional: sanitize/clean data
+    # df['AmazonOrderId'] = df['AmazonOrderId'].apply(lambda x: sanitize_value(x, value_type=str))
 
-            # Process order total with sanitization
-            order_total_data = sanitize_value(order_data.get('OrderTotal'), default={}, value_type=dict)
-            order_total = sanitize_value(order_total_data.get('Amount'), default=0.0, value_type=float)
-            currency = sanitize_value(order_total_data.get('CurrencyCode'), default="USD", value_type=str)
-
-            # Check for existing order
-            order_id = sanitize_value(order_data['AmazonOrderId'], value_type=str)
-            existing_order = Order.objects(purchase_order_id=order_id).first()
-            
-            # Build order updates with sanitized values
-            order_updates = {
-                'order_date': convert_date(order_data.get('PurchaseDate')),
-                'earliest_ship_date': convert_date(order_data.get('EarliestShipDate')),
-                'latest_ship_date': convert_date(order_data.get('LatestShipDate')),
-                'last_update_date': convert_date(order_data.get('LastUpdateDate')),
-                'order_status': sanitize_value(order_data.get('OrderStatus'), default="", value_type=str),
-                'fulfillment_channel': sanitize_value(order_data.get('FulfillmentChannel'), default="", value_type=str),
-                'sales_channel': sanitize_value(order_data.get('SalesChannel'), default="", value_type=str),
-                'order_type': sanitize_value(order_data.get('OrderType'), default="", value_type=str),
-                'number_of_items_shipped': sanitize_value(order_data.get('NumberOfItemsShipped'), default=0, value_type=int),
-                'number_of_items_unshipped': sanitize_value(order_data.get('NumberOfItemsUnshipped'), default=0, value_type=int),
-                'payment_method': sanitize_value(order_data.get('PaymentMethod'), default="", value_type=str),
-                'payment_method_details': sanitize_value(order_data.get('PaymentMethodDetails', [''])[0], default="", value_type=str),
-                'is_prime': sanitize_value(order_data.get('IsPrime'), default=False, value_type=bool),
-                'is_business_order': sanitize_value(order_data.get('IsBusinessOrder'), default=False, value_type=bool),
-                'is_premium_order': sanitize_value(order_data.get('IsPremiumOrder'), default=False, value_type=bool),
-                'shipping_information': sanitize_value(order_data.get('ShippingAddress'), default={}, value_type=dict),
-                'order_total': order_total,
-                'currency': currency,
-            }
-
-            if existing_order:
-                # Update existing order
-                existing_order.update(**order_updates)
-                print(f"🔄 Updated order {order_id}")
-            else:
-                # Create new order with additional required fields
-                order_updates.update({
-                    'marketplace_id': marketplace.id,
-                    'purchase_order_id': order_id,
-                    'created_at': datetime.utcnow()
-                })
-                Order(**order_updates).save()
-                print(f"✅ Created new order {order_id}")
-
-        except Exception as e:
-            print(f"❌ Error processing order {order_data.get('AmazonOrderId')}: {str(e)}")
-            continue
+    # Export to Excel
+    if output_file is None:
+        output_file = f"amazon_orders_yesterday_{yesterday.strftime('%Y-%m-%d')}.xlsx"
+    try:
+        df.to_excel(output_file, index=False, sheet_name="Orders")
+        print(f"✅ Successfully exported orders to {output_file}")
+    except Exception as e:
+        print(f"❌ Failed to export to Excel: {e}")
 
     return df
-
 if __name__ == "__main__":
     # First sync current month's orders to database
-    get_amazon_orders_current_month()
+    get_amazon_orders_yesterday()
     
     # Then export last week's orders to Excel files
