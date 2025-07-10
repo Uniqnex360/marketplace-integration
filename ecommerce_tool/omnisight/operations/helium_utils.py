@@ -765,9 +765,18 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
 
     if refund_ins:
         for ins in refund_ins:
-            refund += ins['order_total']
-            refund_quantity_ins += len(ins['order_items'])
+            matched_items = []
+            for item_id in ins.get("order_items", []):
+                item_doc = OrderItems.objects.filter(_id=item_id).first()
+                if not item_doc:
+                    continue
+            prod_id = item_doc.get("ProductDetails", {}).get("product_id")
+            if product_id is None or str(prod_id) == str(product_id):
+                matched_items.append(item_id)
 
+        if matched_items:
+            refund += ins['order_total']  # Optional: consider prorating if partial refund
+            refund_quantity_ins += len(matched_items)
     total_orders = len(result)
 
     def process_order(order):
