@@ -1038,6 +1038,7 @@ def ordersCountForDashboard(request):
     match_conditions = {
     "order_date": {"$gte": start_date, "$lte": end_date},
     "order_status": {"$ne": "Cancelled"},
+    "order_total": {"$gt": 0}
 }
 
     if marketplace_id == "all":
