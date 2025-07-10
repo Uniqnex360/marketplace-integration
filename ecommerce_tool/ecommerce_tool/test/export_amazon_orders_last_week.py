@@ -45,7 +45,7 @@ def fetch_orders_from_amazon(created_after, created_before, marketplace_ids=[MAR
         "CreatedAfter": created_after,
         "CreatedBefore": created_before,
         "MarketplaceIds": marketplace_ids,
-        "OrderStatuses": ["Shipped", "Unshipped", "PartiallyShipped"],
+        "OrderStatuses": ["Shipped", "Unshipped", "PartiallyShipped",'Canceled'],
         "MaxResultsPerPage": 100
     }
 

@@ -4932,7 +4932,7 @@ def productsSalesOverview(request):
     # Preload last 15 days of data for stats
     stats_data_dict = getdaywiseproductssold_dict(
         datetime.combine(login_date - timedelta(days=15), datetime.min.time()),
-        datetime.combine(login_date - timedelta(days=1), datetime.max.time()),
+        datetime.combine(login_date , datetime.max.time()),
         product_id,
         is_hourly=False
     )
@@ -5000,12 +5000,18 @@ def productsSalesOverview(request):
     p_p_qty, p_p_price = get_val_from_dict(prev_prev_day, stats_data_dict)
     curr_qty, curr_price = sum_period_from_dict(last_7days_start, last_7days_end, stats_data_dict)
     prev_qty, prev_price = sum_period_from_dict(prev_7days_start, prev_7days_end, stats_data_dict)
+    today_qty,today_price=get_val_from_dict(today,stats_data_dict)
 
     units = {
         "yesterday": {
             "value": y_qty,
             "difference": calc_diff_trend(y_qty, p_qty)[0],
             "trend": calc_diff_trend(y_qty, p_qty)[1],
+        },
+        "today":{
+            "value":today_qty,
+            'difference':calc_diff_trend(today_qty,y_qty)[0],
+            "trend":calc_diff_trend(today_qty,y_qty)[1],
         },
         "previous_day": {
             "value": p_qty,
@@ -5024,6 +5030,11 @@ def productsSalesOverview(request):
             "value": y_price,
             "difference": calc_diff_trend(y_price, p_price)[0],
             "trend": calc_diff_trend(y_price, p_price)[1],
+        },
+        "today":{
+            "value":today_price,
+            "difference":calc_diff_trend(today_price,y_price)[0],
+            "trend":calc_diff_trend(today_price,y_price)[1]
         },
         "previous_day": {
             "value": p_price,
