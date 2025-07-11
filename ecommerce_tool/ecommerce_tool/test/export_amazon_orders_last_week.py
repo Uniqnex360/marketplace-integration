@@ -77,18 +77,18 @@ def fetch_orders_from_amazon(created_after, created_before, marketplace_ids=[MAR
 
     return all_orders
 
-def get_amazon_orders_yesterday(output_file=None):
+def get_amazon_orders_yesterday(start_date,end_date:datetime,utput_file=None):
     """
     Fetch Amazon orders from yesterday and export them to an Excel file.
     No database operations are performed.
     """
     # Define time range for yesterday
-    yesterday = datetime.utcnow() - timedelta(days=1)
-    start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+    # yesterday = datetime.utcnow() - timedelta(days=1)
+    # start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    # end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-    created_after = start.strftime('%Y-%m-%dT%H:%M:%SZ')
-    created_before = end.strftime('%Y-%m-%dT%H:%M:%SZ')
+    created_after = start_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+    created_before = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
 
     print(f"📦 Fetching Amazon orders from {created_after} to {created_before}")
 
@@ -108,7 +108,7 @@ def get_amazon_orders_yesterday(output_file=None):
 
     # Export to Excel
     if output_file is None:
-        output_file = f"amazon_orders_yesterday_{yesterday.strftime('%Y-%m-%d')}.xlsx"
+        output_file = f"amazon_orders_yesterday_{start_date.strftime('%Y-%m-%d')}.xlsx"
     try:
         df.to_excel(output_file, index=False, sheet_name="Orders")
         print(f"✅ Successfully exported orders to {output_file}")
@@ -117,7 +117,9 @@ def get_amazon_orders_yesterday(output_file=None):
 
     return df
 if __name__ == "__main__":
-    # First sync current month's orders to database
-    get_amazon_orders_yesterday()
+    start=datetime(2024,7,9)
+    end = datetime(2025, 7, 10, 23, 59, 59)
+
+    get_amazon_orders_yesterday(start,end)
     
     # Then export last week's orders to Excel files

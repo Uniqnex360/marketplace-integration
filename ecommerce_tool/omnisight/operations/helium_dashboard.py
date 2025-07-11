@@ -1555,10 +1555,16 @@ def get_individual_products_optimized(match, page, page_size, start_date, end_da
     if sort_by:
         # Map frontend sort fields to database fields or calculation methods
         db_sort_mapping = {
-            "price": "price",
-            "stock": "quantity",
-            "Amazon Fees": "totalchannelFees",  # This is calculated in projection
-            "COGS": "cogs"  # This is calculated in projection
+            "Sales Today": "Sales Today",
+            "Refunds (Units)": "Refunds (Units)",
+            "Refunds ($)": "Refunds ($)",
+            "Gross Revenue": "Gross Revenue",
+            "Net Profit": "Net Profit",
+            "Refund Rate": "Refund Rate",
+            "Units Sold": "Units Sold",
+            "Profit Margin": "Profit Margin",
+            "Amazon Fees": "Amazon Fees",
+            "COGS": "COGS"
         }
         
         db_sort_field = db_sort_mapping.get(sort_by)
