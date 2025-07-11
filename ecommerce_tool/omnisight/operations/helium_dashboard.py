@@ -1743,133 +1743,115 @@ def batch_get_sales_data(product_ids, start_date, end_date, today_start_date, to
     # Get comparison date range
     compare_start, compare_end = getPreviousDateRange(start_date, end_date)
     
-    # Use bulk operations instead of individual queries
-    from collections import defaultdict
-    
-    # Initialize result structure with defaultdict for thread safety
-    sales_data = defaultdict(lambda: {
-        "today": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0},
-        "period": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0},
-        "compare": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0}
-    })
+    # Initialize result structure
+    sales_data = {
+        pid: {
+            "today": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0},
+            "period": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0},
+            "compare": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0}
+        }
+        for pid in product_ids
+    }
 
     try:
-        # Bulk fetch all sales data at once for each time period
-        def bulk_fetch_sales(date_range, product_ids, is_refund=False):
-            """Helper function to fetch sales data in bulk"""
-            if not product_ids:
-                return []
-            start, end = date_range
-            return getdaywiseproductssold(start, end, product_ids, is_refund)
+        # First try bulk operations if getdaywiseproductssold supports list of IDs
+        try:
+            # Fetch all data in bulk
+            today_sales = getdaywiseproductssold(today_start_date, today_end_date, product_ids, False)
+            today_refunds = getdaywiseproductssold(today_start_date, today_end_date, product_ids, True)
+            period_sales = getdaywiseproductssold(start_date, end_date, product_ids, False)
+            period_refunds = getdaywiseproductssold(start_date, end_date, product_ids, True)
+            compare_sales = getdaywiseproductssold(compare_start, compare_end, product_ids, False)
+            compare_refunds = getdaywiseproductssold(compare_start, compare_end, product_ids, True)
 
-        # Fetch all data in parallel for better performance
-        from concurrent.futures import ThreadPoolExecutor
-        
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            # Submit all fetch operations
-            futures = {
-                'today_sales': executor.submit(bulk_fetch_sales, (today_start_date, today_end_date), product_ids),
-                'today_refunds': executor.submit(bulk_fetch_sales, (today_start_date, today_end_date), product_ids, True),
-                'period_sales': executor.submit(bulk_fetch_sales, (start_date, end_date), product_ids),
-                'period_refunds': executor.submit(bulk_fetch_sales, (start_date, end_date), product_ids, True),
-                'compare_sales': executor.submit(bulk_fetch_sales, (compare_start, compare_end), product_ids),
-                'compare_refunds': executor.submit(bulk_fetch_sales, (compare_start, compare_end), product_ids, True)
-            }
+            # Process bulk results
+            def process_results(results):
+                processed = defaultdict(lambda: {"total_price": 0, "total_quantity": 0})
+                for sale in results:
+                    pid = sale['product_id']
+                    processed[pid]['total_price'] += sale.get('total_price', 0)
+                    processed[pid]['total_quantity'] += sale.get('total_quantity', 0)
+                return processed
 
-            # Wait for all futures to complete
-            from concurrent.futures import wait
-            wait(futures.values())
+            # Update sales_data with bulk results
+            today_sales_processed = process_results(today_sales)
+            today_refunds_processed = process_results(today_refunds)
+            period_sales_processed = process_results(period_sales)
+            period_refunds_processed = process_results(period_refunds)
+            compare_sales_processed = process_results(compare_sales)
+            compare_refunds_processed = process_results(compare_refunds)
 
-            # Process results
-            today_sales = futures['today_sales'].result()
-            today_refunds = futures['today_refunds'].result()
-            period_sales = futures['period_sales'].result()
-            period_refunds = futures['period_refunds'].result()
-            compare_sales = futures['compare_sales'].result()
-            compare_refunds = futures['compare_refunds'].result()
+            for pid in product_ids:
+                sales_data[pid]['today']['revenue'] = today_sales_processed[pid]['total_price']
+                sales_data[pid]['today']['units'] = today_sales_processed[pid]['total_quantity']
+                sales_data[pid]['today']['refund_units'] = today_refunds_processed[pid]['total_quantity']
+                sales_data[pid]['today']['refund_amount'] = today_refunds_processed[pid]['total_price']
 
-        # Create lookup dictionaries for faster access
-        def create_lookup(sales_data):
-            lookup = defaultdict(lambda: {"total_price": 0, "total_quantity": 0})
-            for sale in sales_data:
-                lookup[sale['product_id']]['total_price'] += sale.get('total_price', 0)
-                lookup[sale['product_id']]['total_quantity'] += sale.get('total_quantity', 0)
-            return lookup
+                sales_data[pid]['period']['revenue'] = period_sales_processed[pid]['total_price']
+                sales_data[pid]['period']['units'] = period_sales_processed[pid]['total_quantity']
+                sales_data[pid]['period']['refund_units'] = period_refunds_processed[pid]['total_quantity']
+                sales_data[pid]['period']['refund_amount'] = period_refunds_processed[pid]['total_price']
 
-        today_sales_lookup = create_lookup(today_sales)
-        today_refunds_lookup = create_lookup(today_refunds)
-        period_sales_lookup = create_lookup(period_sales)
-        period_refunds_lookup = create_lookup(period_refunds)
-        compare_sales_lookup = create_lookup(compare_sales)
-        compare_refunds_lookup = create_lookup(compare_refunds)
+                sales_data[pid]['compare']['revenue'] = compare_sales_processed[pid]['total_price']
+                sales_data[pid]['compare']['units'] = compare_sales_processed[pid]['total_quantity']
+                sales_data[pid]['compare']['refund_units'] = compare_refunds_processed[pid]['total_quantity']
+                sales_data[pid]['compare']['refund_amount'] = compare_refunds_processed[pid]['total_price']
 
-        # Populate sales_data with all metrics
-        for pid in product_ids:
-            sales_data[pid]['today']['revenue'] = today_sales_lookup[pid]['total_price']
-            sales_data[pid]['today']['units'] = today_sales_lookup[pid]['total_quantity']
-            sales_data[pid]['today']['refund_units'] = today_refunds_lookup[pid]['total_quantity']
-            sales_data[pid]['today']['refund_amount'] = today_refunds_lookup[pid]['total_price']
+        except TypeError as e:
+            # Fall back to individual processing if bulk operations fail
+            print(f"Bulk operations not supported, falling back to individual processing: {e}")
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            
+            def get_product_sales(product_id):
+                try:
+                    today_sales = getdaywiseproductssold(today_start_date, today_end_date, product_id, False)
+                    today_refunds = getdaywiseproductssold(today_start_date, today_end_date, product_id, True)
+                    period_sales = getdaywiseproductssold(start_date, end_date, product_id, False)
+                    period_refunds = getdaywiseproductssold(start_date, end_date, product_id, True)
+                    compare_sales = getdaywiseproductssold(compare_start, compare_end, product_id, False)
+                    compare_refunds = getdaywiseproductssold(compare_start, compare_end, product_id, True)
 
-            sales_data[pid]['period']['revenue'] = period_sales_lookup[pid]['total_price']
-            sales_data[pid]['period']['units'] = period_sales_lookup[pid]['total_quantity']
-            sales_data[pid]['period']['refund_units'] = period_refunds_lookup[pid]['total_quantity']
-            sales_data[pid]['period']['refund_amount'] = period_refunds_lookup[pid]['total_price']
+                    return product_id, {
+                        "today": {
+                            "revenue": sum(sale.get("total_price", 0) for sale in today_sales),
+                            "units": sum(sale.get("total_quantity", 0) for sale in today_sales),
+                            "refund_units": sum(sale.get("total_quantity", 0) for sale in today_refunds),
+                            "refund_amount": sum(sale.get("total_price", 0) for sale in today_refunds)
+                        },
+                        "period": {
+                            "revenue": sum(sale.get("total_price", 0) for sale in period_sales),
+                            "units": sum(sale.get("total_quantity", 0) for sale in period_sales),
+                            "refund_units": sum(sale.get("total_quantity", 0) for sale in period_refunds),
+                            "refund_amount": sum(sale.get("total_price", 0) for sale in period_refunds)
+                        },
+                        "compare": {
+                            "revenue": sum(sale.get("total_price", 0) for sale in compare_sales),
+                            "units": sum(sale.get("total_quantity", 0) for sale in compare_sales),
+                            "refund_units": sum(sale.get("total_quantity", 0) for sale in compare_refunds),
+                            "refund_amount": sum(sale.get("total_price", 0) for sale in compare_refunds)
+                        }
+                    }
+                except Exception as e:
+                    print(f"Error processing product {product_id}: {e}")
+                    return product_id, {
+                        "today": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0},
+                        "period": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0},
+                        "compare": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0}
+                    }
 
-            sales_data[pid]['compare']['revenue'] = compare_sales_lookup[pid]['total_price']
-            sales_data[pid]['compare']['units'] = compare_sales_lookup[pid]['total_quantity']
-            sales_data[pid]['compare']['refund_units'] = compare_refunds_lookup[pid]['total_quantity']
-            sales_data[pid]['compare']['refund_amount'] = compare_refunds_lookup[pid]['total_price']
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                future_to_product = {executor.submit(get_product_sales, pid): pid for pid in product_ids}
+                
+                for future in as_completed(future_to_product):
+                    product_id, data = future.result()
+                    sales_data[product_id] = data
 
     except Exception as e:
-        print(f"Error in batch_get_sales_data: {e}")
-        # Fallback to individual processing if bulk operations fail
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        
-        def get_product_sales(product_id):
-            try:
-                today_sales = getdaywiseproductssold(today_start_date, today_end_date, product_id, False)
-                today_refunds = getdaywiseproductssold(today_start_date, today_end_date, product_id, True)
-                period_sales = getdaywiseproductssold(start_date, end_date, product_id, False)
-                period_refunds = getdaywiseproductssold(start_date, end_date, product_id, True)
-                compare_sales = getdaywiseproductssold(compare_start, compare_end, product_id, False)
-                compare_refunds = getdaywiseproductssold(compare_start, compare_end, product_id, True)
+        print(f"Unexpected error in batch_get_sales_data: {e}")
+        # Return whatever data we have
+        return sales_data
 
-                return product_id, {
-                    "today": {
-                        "revenue": sum(sale["total_price"] for sale in today_sales),
-                        "units": sum(sale["total_quantity"] for sale in today_sales),
-                        "refund_units": sum(sale["total_quantity"] for sale in today_refunds),
-                        "refund_amount": sum(sale["total_price"] for sale in today_refunds)
-                    },
-                    "period": {
-                        "revenue": sum(sale["total_price"] for sale in period_sales),
-                        "units": sum(sale["total_quantity"] for sale in period_sales),
-                        "refund_units": sum(sale["total_quantity"] for sale in period_refunds),
-                        "refund_amount": sum(sale["total_price"] for sale in period_refunds)
-                    },
-                    "compare": {
-                        "revenue": sum(sale["total_price"] for sale in compare_sales),
-                        "units": sum(sale["total_quantity"] for sale in compare_sales),
-                        "refund_units": sum(sale["total_quantity"] for sale in compare_refunds),
-                        "refund_amount": sum(sale["total_price"] for sale in compare_refunds)
-                    }
-                }
-            except Exception as e:
-                print(f"Error processing product {product_id}: {e}")
-                return product_id, {
-                    "today": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0},
-                    "period": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0},
-                    "compare": {"revenue": 0, "units": 0, "refund_units": 0, "refund_amount": 0}
-                }
-
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_product = {executor.submit(get_product_sales, pid): pid for pid in product_ids}
-            
-            for future in as_completed(future_to_product):
-                product_id, data = future.result()
-                sales_data[product_id] = data
-
-    return dict(sales_data)
+    return sales_data
 
 def clean_json_floats(obj):
     """Clean NaN and Inf values from JSON objects"""
