@@ -1267,22 +1267,20 @@ def get_products_with_pagination(request):
         ]
 
     if parent:
-        return get_parent_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date)
+        return get_parent_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date,sort_by, sort_by_value)
     else:
         return get_individual_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date, sort_by, sort_by_value)
 
 
-def get_parent_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date):
-    """Optimized parent products aggregation"""
-    
-    # Single pipeline to get parent SKUs with pagination and all product data
+def get_parent_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date, sort_by=None, sort_by_value=1):
+    """Optimized parent products aggregation with sorting support"""
+
     pipeline = []
-    
     if match:
         pipeline.append({"$match": match})
-    
+
+    # Group by parent_sku and collect product data
     pipeline.extend([
-        # Group by parent_sku and collect all product data
         {
             "$group": {
                 "_id": "$parent_sku",
@@ -1303,7 +1301,6 @@ def get_parent_products_optimized(match, page, page_size, start_date, end_date, 
                 }
             }
         },
-        # Lookup marketplace data for all products at once
         {
             "$lookup": {
                 "from": "marketplace",
@@ -1312,7 +1309,6 @@ def get_parent_products_optimized(match, page, page_size, start_date, end_date, 
                 "as": "marketplace_data"
             }
         },
-        # Add computed fields for aggregated data
         {
             "$addFields": {
                 "total_stock": {"$sum": "$products.quantity"},
@@ -1354,11 +1350,34 @@ def get_parent_products_optimized(match, page, page_size, start_date, end_date, 
                     }
                 }
             }
-        },
-        # Pagination
+        }
+    ])
+
+    # Sort by specified field (in MongoDB if supported)
+    mongo_sortable_fields = {
+        "sku_count": "sku_count",
+        "stock": "total_stock",
+        "price_start": "price_range.min",
+        "price_end": "price_range.max",
+        "cogs": "total_cogs"
+    }
+
+    if sort_by in mongo_sortable_fields:
+        try:
+            sort_order = int(sort_by_value)
+            if sort_order not in (1, -1):
+                sort_order = 1
+        except (ValueError, TypeError):
+            sort_order = 1
+
+        pipeline.append({"$sort": {mongo_sortable_fields[sort_by]: sort_order}})
+    else:
+        pipeline.append({"$sort": {"_id": 1}})
+
+    # Add pagination
+    pipeline.extend([
         {"$skip": (page - 1) * page_size},
         {"$limit": page_size},
-        # Final projection
         {
             "$project": {
                 "_id": 0,
@@ -1373,7 +1392,7 @@ def get_parent_products_optimized(match, page, page_size, start_date, end_date, 
         }
     ])
 
-    # Get total count pipeline
+    # Count pipeline for pagination
     count_pipeline = []
     if match:
         count_pipeline.append({"$match": match})
@@ -1382,72 +1401,54 @@ def get_parent_products_optimized(match, page, page_size, start_date, end_date, 
         {"$count": "total"}
     ])
 
-    # Execute both pipelines
     products_result = list(Product.objects.aggregate(*pipeline))
     count_result = list(Product.objects.aggregate(*count_pipeline))
     total_products = count_result[0]["total"] if count_result else 0
 
-    # Get all product IDs for sales data query
+    # Fetch sales data
     all_product_ids = []
     for group in products_result:
         all_product_ids.extend([p["id"] for p in group["products"]])
-
-    # Batch fetch sales data for all products
     sales_data = batch_get_sales_data(all_product_ids, start_date, end_date, today_start_date, today_end_date)
 
-    # Process results
+    # Process and enrich products
     processed_products = []
     for group in products_result:
         parent_sku = group["parent_sku"]
         products = group["products"]
         marketplace_data = {str(m["_id"]): m for m in group["marketplace_data"]}
-
-        # Get first product for basic info
         first_product = products[0]
-        
-        # Aggregate sales data for this parent SKU
-        total_sales_today = 0
-        total_units_today = 0
-        total_revenue = 0
-        total_net_profit = 0
-        total_units_period = 0
-        total_revenue_period = 0
-        total_net_profit_period = 0
+
+        total_sales_today = total_units_today = total_revenue = total_net_profit = 0
+        total_units_period = total_revenue_period = total_net_profit_period = 0
 
         for product in products:
             product_id = product["id"]
             marketplace_info = marketplace_data.get(str(product["marketplace_id"]), {})
-            
-            # Get sales data for this product
             product_sales = sales_data.get(product_id, {
                 "today": {"revenue": 0, "units": 0},
                 "period": {"revenue": 0, "units": 0},
                 "compare": {"revenue": 0, "units": 0}
             })
 
-            # Calculate COGS
             cogs = product["total_cogs"] if marketplace_info.get("name") == "Amazon" else product["w_total_cogs"]
-            
-            # Aggregate values
+
             total_sales_today += product_sales["today"]["revenue"]
             total_units_today += product_sales["period"]["units"]
             total_revenue += product_sales["period"]["revenue"]
-            
-            period_profit = (product_sales["period"]["revenue"] - (cogs * product_sales["period"]["units"]) + 
-                           (product["vendor_funding"] * product_sales["period"]["units"]))
+            period_profit = (product_sales["period"]["revenue"] - (cogs * product_sales["period"]["units"]) +
+                             (product["vendor_funding"] * product_sales["period"]["units"]))
             total_net_profit += period_profit
-            
-            # Compare period
+
             total_units_period += product_sales["compare"]["units"] - product_sales["period"]["units"]
             total_revenue_period += product_sales["compare"]["revenue"] - product_sales["period"]["revenue"]
-            
-            compare_profit = (product_sales["compare"]["revenue"] - (cogs * product_sales["compare"]["units"]) + 
-                            (product["vendor_funding"] * product_sales["compare"]["units"]))
+            compare_profit = (product_sales["compare"]["revenue"] - (cogs * product_sales["compare"]["units"]) +
+                              (product["vendor_funding"] * product_sales["compare"]["units"]))
             total_net_profit_period += compare_profit - period_profit
 
-        # Calculate margins
         margin = (total_net_profit / total_revenue) * 100 if total_revenue > 0 else 0
-        margin_period = ((total_net_profit_period / (total_revenue + total_revenue_period)) * 100 if (total_revenue + total_revenue_period) > 0 else 0) - margin
+        margin_period = ((total_net_profit_period / (total_revenue + total_revenue_period)) * 100
+                         if (total_revenue + total_revenue_period) > 0 else 0) - margin
 
         product_dict = {
             "id": first_product["id"],
@@ -1477,7 +1478,14 @@ def get_parent_products_optimized(match, page, page_size, start_date, end_date, 
             "marginforPeriod": round(margin_period, 2),
             "totalchannelFees": group["total_cogs"]
         }
+
         processed_products.append(product_dict)
+
+    # Fallback to Python sorting for computed fields
+    computed_sort_fields = {"netProfit", "grossRevenue", "margin"}
+    if sort_by in computed_sort_fields:
+        reverse = int(sort_by_value) == -1
+        processed_products.sort(key=lambda x: x.get(sort_by, 0), reverse=reverse)
 
     response_data = {
         "total_products": total_products,
