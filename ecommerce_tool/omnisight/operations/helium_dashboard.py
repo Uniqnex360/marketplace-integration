@@ -1276,15 +1276,15 @@ def get_products_with_pagination(request):
         ]
 
     if parent:
-        return get_parent_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date,sort_by,sort_by_value)
+        return get_parent_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date)
     else:
         return get_individual_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date, sort_by, sort_by_value)
 
 
-def get_parent_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date, sort_by=None, sort_by_value=1):
-    """Optimized parent products aggregation with sorting support"""
+def get_parent_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date):
+    """Optimized parent products aggregation"""
     
-    # Single pipeline to get parent SKUs with all product data
+    # Single pipeline to get parent SKUs with pagination and all product data
     pipeline = []
     
     if match:
@@ -1364,7 +1364,10 @@ def get_parent_products_optimized(match, page, page_size, start_date, end_date, 
                 }
             }
         },
-        # Project only needed fields
+        # Pagination
+        {"$skip": (page - 1) * page_size},
+        {"$limit": page_size},
+        # Final projection
         {
             "$project": {
                 "_id": 0,
@@ -1485,43 +1488,16 @@ def get_parent_products_optimized(match, page, page_size, start_date, end_date, 
         }
         processed_products.append(product_dict)
 
-    # Apply sorting if specified
-    if sort_by:
-        try:
-            reverse = sort_by_value == -1
-            # Handle None values by replacing them with appropriate defaults
-            if sort_by in ['salesForToday', 'grossRevenue', 'netProfit', 'margin']:
-                processed_products.sort(
-                    key=lambda x: x.get(sort_by, 0) if x.get(sort_by) is not None else 0, 
-                    reverse=reverse
-                )
-            elif sort_by in ['price_start', 'price_end']:
-                processed_products.sort(
-                    key=lambda x: x.get(sort_by, 0) if x.get(sort_by) is not None else 0, 
-                    reverse=reverse
-                )
-            else:
-                processed_products.sort(
-                    key=lambda x: x.get(sort_by, ""), 
-                    reverse=reverse
-                )
-        except Exception as e:
-            print(f"Error sorting products by {sort_by}: {e}")
-
-    # Apply pagination after sorting
-    start_index = (page - 1) * page_size
-    end_index = start_index + page_size
-    paginated_products = processed_products[start_index:end_index]
-
     response_data = {
         "total_products": total_products,
         "page": page,
         "page_size": page_size,
-        "products": clean_json_floats(paginated_products),
+        "products": clean_json_floats(processed_products),
         "tab_type": "parent"
     }
 
     return JsonResponse(response_data, safe=False)
+
 
 def get_individual_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date, sort_by, sort_by_value):
     """Optimized individual products aggregation"""
