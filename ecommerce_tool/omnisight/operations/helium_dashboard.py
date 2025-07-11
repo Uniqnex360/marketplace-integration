@@ -1207,16 +1207,7 @@ def getPreviousDateRange(start_date, end_date):
 
     return previous_start_date.strftime("%Y-%m-%d"), previous_end_date.strftime("%Y-%m-%d")
    
-ALLOWED_SORT_FIELDS = {
-    "cogs", "shipping_cost", "page_views", "refund", "sessions",
-    "listing_quality_score", "channel_fee", "fullfillment_by_channel_fee",
-    "vendor_funding", "vendor_discount", "product_cost", "referral_fee",
-    "a_shipping_cost", "total_cogs", "w_product_cost", "walmart_fee",
-    "w_shiping_cost", "w_total_cogs", "pack_size", "created_at", "updated_at",
-    "product_created_date", "producted_last_updated_date", "brand_name", "category", 
-    "manufacturer_name", "price_start", "price_end", "stock", "sku_count", 
-    "totalchannelFees", "netProfit", "grossRevenue", "unitsSoldForToday", "salesForToday"
-}
+
 @csrf_exempt
 def get_products_with_pagination(request):
     json_request = JSONParser().parse(request)
@@ -1507,9 +1498,28 @@ def get_individual_products_optimized(match, page, page_size, start_date, end_da
     if match:
         pipeline.append({"$match": match})
     
-    # Add sorting before pagination
-    if sort_by:
-        pipeline.append({"$sort": {sort_by: int(sort_by_value)}})
+    # Add sorting before pagination if sort params are provided
+    if sort_by and sort_by_value:
+        try:
+            # Validate sort order (-1 for desc, 1 for asc)
+            sort_order = int(sort_by_value)
+            if sort_order not in (1, -1):
+                sort_order = 1  # Default to ascending
+            
+            # Map sort_by parameter to actual database field if needed
+            sort_mapping = {
+                # Add any field mappings here if frontend uses different names
+                # Example: 'title': 'product_title'
+            }
+            sort_field = sort_mapping.get(sort_by, sort_by)
+            
+            pipeline.append({"$sort": {sort_field: sort_order}})
+        except (ValueError, TypeError):
+            # Fallback to default sorting if invalid sort parameters
+            pipeline.append({"$sort": {"_id": 1}})
+    else:
+        # Default sorting by _id if no sort parameters
+        pipeline.append({"$sort": {"_id": 1}})
     
     pipeline.extend([
         {
@@ -1637,7 +1647,6 @@ def get_individual_products_optimized(match, page, page_size, start_date, end_da
     }
 
     return JsonResponse(response_data, safe=False)
-
 
 def batch_get_sales_data(product_ids, start_date, end_date, today_start_date, today_end_date):
     """Batch fetch sales data for multiple products"""
