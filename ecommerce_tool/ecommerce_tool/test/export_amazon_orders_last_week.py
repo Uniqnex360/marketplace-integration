@@ -1,20 +1,20 @@
 import os
-import pandas as pd
+import json
+import time
 import requests
-import django
-from datetime import datetime, timedelta
-from ecommerce_tool.settings import AMAZON_API_KEY, AMAZON_SECRET_KEY, REFRESH_TOKEN, MARKETPLACE_ID
-from omnisight.models import Order, Marketplace  # Assuming these are your models
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "ecommerce_tool.settings")  # Update if settings module is 
-from ecommerce_tool.util.santize_input import sanitize_value
+import pandas as pd
+from datetime import datetime
 
-django.setup()
+from ecommerce_tool.settings import (
+    AMAZON_API_KEY,
+    AMAZON_SECRET_KEY,
+    REFRESH_TOKEN,
+    MARKETPLACE_ID
+)
 
-TOKEN_URL = "https://api.amazon.com/auth/o2/token"
-ORDERS_API_URL = "https://sellingpartnerapi-na.amazon.com/orders/v0/orders"
-
+# Step 1: Get access token
 def get_amazon_access_token():
-    """Retrieves a new Amazon SP-API access token using the refresh token."""
+    url = "https://api.amazon.com/auth/o2/token"
     payload = {
         "grant_type": "refresh_token",
         "refresh_token": REFRESH_TOKEN,
@@ -22,104 +22,102 @@ def get_amazon_access_token():
         "client_secret": AMAZON_SECRET_KEY,
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
     try:
-        response = requests.post(TOKEN_URL, data=payload, headers=headers)
+        response = requests.post(url, data=payload, headers=headers)
         response.raise_for_status()
         return response.json().get("access_token")
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         print(f"❌ Failed to get access token: {e}")
         return None
 
-def fetch_orders_from_amazon(created_after, created_before, marketplace_ids=[MARKETPLACE_ID]):
-    """Fetches orders from Amazon SP-API with pagination support."""
-    access_token = get_amazon_access_token()
-    if not access_token:
-        return None
-
+# Step 2: Request report generation
+def create_order_report(access_token, start_time, end_time):
+    url = "https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports"
     headers = {
         "x-amz-access-token": access_token,
         "Content-Type": "application/json"
     }
-
-    params = {
-        "CreatedAfter": created_after,
-        "CreatedBefore": created_before,
-        "MarketplaceIds": marketplace_ids,
-        "OrderStatuses": ["Shipped", "Unshipped", "PartiallyShipped",'Canceled'],
-        "MaxResultsPerPage": 100
+    body = {
+        "reportType": "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL",
+        "marketplaceIds": [MARKETPLACE_ID],
+        "dataStartTime": start_time,
+        "dataEndTime": end_time
     }
 
-    all_orders = []
-    next_token = None
+    response = requests.post(url, headers=headers, data=json.dumps(body))
+    response.raise_for_status()
+    return response.json().get("reportId")
+
+# Step 3: Poll until report is done
+def poll_report(access_token, report_id):
+    url = f"https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports/{report_id}"
+    headers = {"x-amz-access-token": access_token}
 
     while True:
-        current_params = params.copy()
-        if next_token:
-            current_params["NextToken"] = next_token
-
-        try:
-            response = requests.get(ORDERS_API_URL, headers=headers, params=current_params)
-            if response.status_code != 200:
-                print(f"❌ Error fetching orders: {response.status_code} - {response.text}")
-                return None
-
-            data = response.json()
-            orders = data.get("payload", {}).get("Orders", [])
-            all_orders.extend(orders)
-
-            next_token = data.get("payload", {}).get("NextToken")
-            if not next_token:
-                break
-
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Request failed: {e}")
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        status = response.json().get("processingStatus")
+        print(f"⏳ Report status: {status}")
+        if status == "DONE":
+            return response.json().get("reportDocumentId")
+        elif status in ["CANCELLED", "FATAL"]:
+            print(f"❌ Report generation failed with status: {status}")
             return None
+        time.sleep(30)
 
-    return all_orders
+# Step 4: Download the report file
+def download_report(access_token, document_id, output_filename):
+    url = f"https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/documents/{document_id}"
+    headers = {"x-amz-access-token": access_token}
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    doc_info = response.json()
 
-def get_amazon_orders_yesterday(start_date,end_date:datetime,utput_file=None):
-    """
-    Fetch Amazon orders from yesterday and export them to an Excel file.
-    No database operations are performed.
-    """
-    # Define time range for yesterday
-    # yesterday = datetime.utcnow() - timedelta(days=1)
-    # start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-    # end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+    download_url = doc_info["url"]
+    file_response = requests.get(download_url)
 
-    created_after = start_date.strftime('%Y-%m-%dT%H:%M:%SZ')
-    created_before = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+    with open(output_filename, "wb") as f:
+        f.write(file_response.content)
+    print(f"✅ Report downloaded to {output_filename}")
 
-    print(f"📦 Fetching Amazon orders from {created_after} to {created_before}")
+    return output_filename
 
-    # Fetch orders via your API
-    orders = fetch_orders_from_amazon(created_after, created_before)
-    print(f"Total orders fetched from API: {len(orders)}")
-    if not orders:
-        print("⚠️ No Amazon orders returned for yesterday.")
-        return pd.DataFrame()
+# Optional: Load to pandas DataFrame
+def load_report_to_dataframe(file_path):
+    df = pd.read_csv(file_path, sep="\t", dtype=str)
+    print(f"📄 Report loaded with {len(df)} rows")
+    return df
 
-    # Convert to DataFrame
-    df = pd.DataFrame(orders)
-    print(f"DataFrame shape before export: {df.shape}")  # Debugging line
-    
-    # Optional: sanitize/clean data
-    # df['AmazonOrderId'] = df['AmazonOrderId'].apply(lambda x: sanitize_value(x, value_type=str))
+# Main execution
+def get_amazon_orders_report(start_date: datetime, end_date: datetime):
+    access_token = get_amazon_access_token()
+    if not access_token:
+        return
 
-    # Export to Excel
-    if output_file is None:
-        output_file = f"amazon_orders_yesterday_{start_date.strftime('%Y-%m-%d')}.xlsx"
-    try:
-        df.to_excel(output_file, index=False, sheet_name="Orders")
-        print(f"✅ Successfully exported orders to {output_file}")
-    except Exception as e:
-        print(f"❌ Failed to export to Excel: {e}")
+    iso_start = start_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+    iso_end = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
 
+    print(f"📦 Requesting Amazon orders report from {iso_start} to {iso_end}")
+    report_id = create_order_report(access_token, iso_start, iso_end)
+    if not report_id:
+        return
+
+    document_id = poll_report(access_token, report_id)
+    if not document_id:
+        return
+
+    filename = f"amazon_orders_{start_date.strftime('%Y-%m-%d')}.tsv"
+    download_report(access_token, document_id, filename)
+
+    df = load_report_to_dataframe(filename)
+    # Optional: save as Excel
+    df.to_excel(filename.replace(".tsv", ".xlsx"), index=False)
+    print(f"📁 Excel saved: {filename.replace('.tsv', '.xlsx')}")
     return df
 if __name__ == "__main__":
-    start=datetime(2024,7,9)
-    end = datetime(2025, 7, 10, 23, 59, 59)
-
-    get_amazon_orders_yesterday(start,end)
-    
-    # Then export last week's orders to Excel files
+    # Example: Fetch for July 9 and 10, 2025
+    for date_str in ["2025-07-09", "2025-07-10"]:
+        start = datetime.strptime(date_str, "%Y-%m-%d")
+        end = start.replace(hour=23, minute=59, second=59)
+        get_amazon_orders_report(start, end)

@@ -16,14 +16,13 @@ def oauthFunction():
 
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
+         "Accept": "application/json",  
         "Authorization": f"Basic {encoded_credentials}",
         "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),
         "WM_SVC.NAME": "Walmart Marketplace"
     }
 
-    data = {
-        "grant_type": "client_credentials"
-    }
+    data = "grant_type=client_credentials"  # use urlencoded string instead of dict
 
     response = requests.post(AUTH_URL, headers=headers, data=data)
 
@@ -34,13 +33,14 @@ def oauthFunction():
             print("✅ Walmart API credentials are valid!")
         except Exception as e:
             print("❌ Error parsing Walmart API JSON response:", str(e))
+            print("Raw Response:", response.text)
     else:
         print("❌ Authentication failed.")
         print("Status Code:", response.status_code)
         print("Response Text:", response.text)
+        print("Authorization Header Used:", headers["Authorization"])
 
     return accesstoken
-
 
 def getAccesstoken(user_id):
     marketplace_id = DatabaseModel.get_document(
