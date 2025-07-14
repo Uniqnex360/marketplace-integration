@@ -1040,46 +1040,27 @@ def ordersCountForDashboard(request):
     if timezone_str != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
-    # Shared match
+    # Match conditions for normal orders
     match_conditions = {
         "order_date": {"$gte": start_date, "$lte": end_date},
         "order_status": {"$ne": "Cancelled"},
         "order_total": {"$gt": 0}
     }
 
-    # Aggregate Orders and Custom Orders - in parallel
-    order_count, custom_order_count = 0, 0
-    def count_orders(q):
-        pipeline = [
-            {"$match": match_conditions},
-            {"$group": {"_id": None, "count": {"$sum": 1}}}
-        ]
-        res = list(Order.objects.aggregate(*pipeline))
-        q.put(res[0].get("count", 0) if res else 0)
-
-    def count_custom_orders(q):
-        pipeline = [
-            {"$match": match_conditions},
-            {"$group": {"_id": None, "count": {"$sum": 1}}}
-        ]
-        res = list(custom_order.objects.aggregate(*pipeline))
-        q.put(res[0].get("count", 0) if res else 0)
-
-    q1, q2 = Queue(), Queue()
-    t1 = Thread(target=count_orders, args=(q1,))
-    t2 = Thread(target=count_custom_orders, args=(q2,))
-    t1.start(); t2.start()
-    t1.join(); t2.join()
-    order_count = q1.get()
-    custom_order_count = q2.get()
-    total_order_count = order_count + custom_order_count
+    # Aggregate Orders only
+    pipeline = [
+        {"$match": match_conditions},
+        {"$group": {"_id": None, "count": {"$sum": 1}}}
+    ]
+    res = list(Order.objects.aggregate(*pipeline))
+    order_count = res[0].get("count", 0) if res else 0
 
     data['total_order_count'] = {
-        "value": total_order_count,
+        "value": order_count,
         "percentage": "100.0%"
     }
 
-    # If 'all', gather data per marketplace
+    # Per marketplace data
     if marketplace_id == "all":
         marketplaces = list(Marketplace.objects.only('id', 'name'))
         results = {}
@@ -1099,7 +1080,7 @@ def ordersCountForDashboard(request):
             res = list(Order.objects.aggregate(*pipeline))
             count = res[0].get("count", 0) if res else 0
             order_value = round(res[0].get("order_value", 0), 2) if res else 0
-            percentage = round((count / total_order_count) * 100, 2) if total_order_count else 0
+            percentage = round((count / order_count) * 100, 2) if order_count else 0
             results[mp.name] = {
                 "count": count,
                 "percentage": f"{percentage}%",
@@ -1116,7 +1097,7 @@ def ordersCountForDashboard(request):
 
         data.update(results)
 
-    elif marketplace_id != "all" and marketplace_id != "custom":
+    elif marketplace_id != "all":
         # Single marketplace query
         mp_id = ObjectId(marketplace_id)
         pipeline = [
@@ -1135,30 +1116,6 @@ def ordersCountForDashboard(request):
         name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
 
         data[name] = {
-            "value": count,
-            "percentage": "100.0%",
-            "order_value": order_value
-        }
-        data['total_order_count'] = {
-            "value": count,
-            "percentage": "100.0%"
-        }
-
-    elif marketplace_id == "custom":
-        pipeline = [
-            {"$match": match_conditions},
-            {
-                "$group": {
-                    "_id": None,
-                    "count": {"$sum": 1},
-                    "order_value": {"$sum": "$total_price"}
-                }
-            }
-        ]
-        res = list(custom_order.objects.aggregate(*pipeline))
-        count = res[0].get("count", 0) if res else 0
-        order_value = round(res[0].get("order_value", 0), 2) if res else 0
-        data['custom'] = {
             "value": count,
             "percentage": "100.0%",
             "order_value": order_value
