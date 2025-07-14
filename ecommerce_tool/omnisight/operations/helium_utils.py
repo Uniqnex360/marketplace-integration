@@ -9,6 +9,8 @@ import logging
 logger = logging.getLogger(__name__)
 import pandas as pd
 from pytz import timezone
+from bson.errors import InvalidId
+
 
 def convertdateTotimezone(start_date,end_date,timezone_str):
     import pytz
@@ -419,23 +421,26 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
     """
     Fetch total quantity and price of a product sold between start_date and end_date,
     grouped by day or hour based on is_hourly flag.
- 
-    Args:
-        start_date (datetime): Start date/time for filtering orders.
-        end_date (datetime): End date/time for filtering orders.
-        product_id (str): The product ID to filter by.
-        is_hourly (bool): If True, group by hour; else group by day.
- 
-    Returns:
-        list: List of dicts with keys 'date', 'total_quantity', and 'total_price'.
     """
     date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
+
+    # Convert to ObjectId safely
+    try:
+        product_id_obj = ObjectId(product_id)
+    except (InvalidId, TypeError) as e:
+        print(f"Invalid ObjectId for product_id: {product_id} — Error: {e}")
+        return []  # No valid match possible
 
     pipeline = [
         {
             "$match": {
                 "order_date": {"$gte": start_date, "$lte": end_date},
-                "order_status": {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
+                "order_status": {
+                    "$in": [
+                        'Shipped', 'Delivered', 'Acknowledged',
+                        'Pending', 'Unshipped', 'PartiallyShipped'
+                    ]
+                }
             }
         },
         {
@@ -449,7 +454,7 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
         {"$unwind": "$order_items_ins"},
         {
             "$match": {
-                "order_items_ins.ProductDetails.product_id": ObjectId(product_id)
+                "order_items_ins.ProductDetails.product_id": product_id_obj
             }
         },
         {
@@ -460,8 +465,12 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
                         "date": "$order_date"
                     }
                 },
-                "total_quantity": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
-                "total_price": {"$sum": "$order_items_ins.Pricing.ItemPrice.Amount"}
+                "total_quantity": {
+                    "$sum": "$order_items_ins.ProductDetails.QuantityOrdered"
+                },
+                "total_price": {
+                    "$sum": "$order_items_ins.Pricing.ItemPrice.Amount"
+                }
             }
         },
         {
@@ -476,8 +485,11 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
     ]
 
     orders = list(Order.objects.aggregate(*pipeline))
-    return orders
 
+    if not orders:
+        print(f"No sales data found for product {product_id}")
+
+    return orders
 
 def pageViewsandSessionCount(start_date,end_date,product_id):
     """
