@@ -9,10 +9,6 @@ import logging
 logger = logging.getLogger(__name__)
 import pandas as pd
 from pytz import timezone
-from bson.errors import InvalidId
-import traceback
-
-
 
 def convertdateTotimezone(start_date,end_date,timezone_str):
     import pytz
@@ -421,28 +417,39 @@ def AnnualizedRevenueAPIView(target_date):
 
 def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
     """
-    Fetch total quantity and price of a product sold between start_date and end_date
-    directly from order_items collection.
+    Fetch total quantity and price of a product sold between start_date and end_date,
+    grouped by day or hour based on is_hourly flag.
+ 
+    Args:
+        start_date (datetime): Start date/time for filtering orders.
+        end_date (datetime): End date/time for filtering orders.
+        product_id (str): The product ID to filter by.
+        is_hourly (bool): If True, group by hour; else group by day.
+ 
+    Returns:
+        list: List of dicts with keys 'date', 'total_quantity', and 'total_price'.
     """
-    from bson.objectid import ObjectId
-    from bson.errors import InvalidId
-    from pymongo import MongoClient
-    import traceback
-
-    try:
-        product_obj_id = ObjectId(product_id)
-    except InvalidId:
-        print(f"Invalid ObjectId: {product_id}")
-        return []
-
     date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
 
     pipeline = [
         {
             "$match": {
-                "ProductDetails.product_id": product_obj_id,
-                "OrderStatus.Status": {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']},
-                "Fulfillment.ShipDateTime": {"$gte": start_date, "$lte": end_date}
+                "order_date": {"$gte": start_date, "$lte": end_date},
+                "order_status": {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
+            }
+        },
+        {
+            "$lookup": {
+                "from": "order_items",
+                "localField": "order_items",
+                "foreignField": "_id",
+                "as": "order_items_ins"
+            }
+        },
+        {"$unwind": "$order_items_ins"},
+        {
+            "$match": {
+                "order_items_ins.ProductDetails.product_id": ObjectId(product_id)
             }
         },
         {
@@ -450,11 +457,11 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
                 "_id": {
                     "$dateToString": {
                         "format": date_format,
-                        "date": "$Fulfillment.ShipDateTime"
+                        "date": "$order_date"
                     }
                 },
-                "total_quantity": {"$sum": "$ProductDetails.QuantityOrdered"},
-                "total_price": {"$sum": "$Pricing.ItemPrice.Amount"}
+                "total_quantity": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
+                "total_price": {"$sum": "$order_items_ins.Pricing.ItemPrice.Amount"}
             }
         },
         {
@@ -468,13 +475,10 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
         {"$sort": {"date": 1}}
     ]
 
-    try:
-        orders = list(OrderItems._get_collection().aggregate(pipeline))
-        return orders
-    except Exception as e:
-        print(f"Error in aggregation for product {product_id}: {e}")
-        traceback.print_exc()
-        return []
+    orders = list(Order.objects.aggregate(*pipeline))
+    return orders
+
+
 def pageViewsandSessionCount(start_date,end_date,product_id):
     """
     Fetches the list of orders based on the provided product ID using a pipeline aggregation.

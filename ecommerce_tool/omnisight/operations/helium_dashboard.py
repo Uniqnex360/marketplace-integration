@@ -1715,8 +1715,6 @@ def get_single_product_sales(product_id, today_start_date, today_end_date,
         period_sales = getdaywiseproductssold(start_date, end_date, product_id, False)
         compare_sales = getdaywiseproductssold(compare_start, compare_end, product_id, False)
 
-        if not today_sales and not period_sales and not compare_sales:
-            print(f"No sales data found for product {product_id}")
 
         return {
             "today": {
@@ -1734,7 +1732,6 @@ def get_single_product_sales(product_id, today_start_date, today_end_date,
         }
 
     except Exception as e:
-        print(f"Error getting sales for product {product_id}: {e}")
         traceback.print_exc()
         return {
             "today": {"revenue": 0, "units": 0},
