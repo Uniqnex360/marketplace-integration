@@ -1681,7 +1681,7 @@ def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_star
                             "compare": {"revenue": 0, "units": 0}
                         }
         except Exception as e:
-            print(f"Error processing chunk: {e}")
+            # print(f"Error processing chunk: {e}")
             # Fill chunk with default values
             for product_id in chunk:
                 chunk_sales[product_id] = {
@@ -1703,7 +1703,7 @@ def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_star
             except Exception as e:
                 print(f"Error processing chunk: {e}")
     
-    return sales_data
+        return sales_data
 
 
 def get_single_product_sales(product_id, today_start_date, today_end_date, 
