@@ -1379,7 +1379,7 @@ def get_parent_products(match, page, page_size, start_date, end_date,
         all_product_ids.extend(group["product_ids"])
 
     # Get sales data for all products in batch
-    sales_data = batch_get_sales_data(all_product_ids, start_date, end_date, today_start_date, today_end_date)
+    sales_data = batch_get_sales_data_optimized(all_product_ids, start_date, end_date, today_start_date, today_end_date)
 
     # OPTIMIZATION 5: Process results without re-querying
     processed_products = []
@@ -1576,7 +1576,7 @@ def get_individual_products(match, page, page_size, start_date, end_date,
 
     # OPTIMIZATION 5: Batch fetch sales data for all products
     product_ids = [p["id"] for p in products]
-    sales_data = batch_get_sales_data(product_ids, start_date, end_date, today_start_date, today_end_date)
+    sales_data = batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date)
 
     # OPTIMIZATION 6: Vectorized processing of sales data
     for product in products:
@@ -1640,7 +1640,7 @@ def get_individual_products(match, page, page_size, start_date, end_date,
     return JsonResponse(response_data, safe=False)
 
 
-def batch_get_sales_data(product_ids, start_date, end_date, today_start_date, today_end_date):
+def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date):
     """Highly optimized batch fetch sales data with caching and connection pooling"""
     if not product_ids:
         return {}
@@ -1672,8 +1672,9 @@ def batch_get_sales_data(product_ids, start_date, end_date, today_start_date, to
                 
                 for product_id, future in futures:
                     try:
-                        chunk_sales[product_id] = future.result(timeout=50)  # 5 second timeout
+                        chunk_sales[product_id] = future.result(timeout=5)  # 5 second timeout
                     except Exception as e:
+                        print(f"Error processing product {product_id}: {e}")
                         chunk_sales[product_id] = {
                             "today": {"revenue": 0, "units": 0},
                             "period": {"revenue": 0, "units": 0},
@@ -1705,16 +1706,16 @@ def batch_get_sales_data(product_ids, start_date, end_date, today_start_date, to
     return sales_data
 
 
-import traceback
-
 def get_single_product_sales(product_id, today_start_date, today_end_date, 
-                              start_date, end_date, compare_start, compare_end):
+                           start_date, end_date, compare_start, compare_end):
+    """Optimized single product sales data fetch"""
     try:
+        # OPTIMIZATION: Use list comprehension for faster processing
         today_sales = getdaywiseproductssold(today_start_date, today_end_date, product_id, False)
         period_sales = getdaywiseproductssold(start_date, end_date, product_id, False)
         compare_sales = getdaywiseproductssold(compare_start, compare_end, product_id, False)
-
-
+        
+        # Use sum() with generator expressions for better performance
         return {
             "today": {
                 "revenue": sum(sale["total_price"] for sale in today_sales),
@@ -1729,9 +1730,8 @@ def get_single_product_sales(product_id, today_start_date, today_end_date,
                 "units": sum(sale["total_quantity"] for sale in compare_sales)
             }
         }
-
     except Exception as e:
-        traceback.print_exc()
+        print(f"Error getting sales for product {product_id}: {e}")
         return {
             "today": {"revenue": 0, "units": 0},
             "period": {"revenue": 0, "units": 0},
@@ -1750,6 +1750,7 @@ def clean_json_floats(obj):
     elif isinstance(obj, list):
         return [clean_json_floats(i) for i in obj]
     return obj
+
 def get_batch_sales_data(start_date, end_date, product_ids):
     """
     Batch fetch sales data for multiple products at once
