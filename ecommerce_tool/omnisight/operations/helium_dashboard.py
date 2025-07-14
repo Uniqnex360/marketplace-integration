@@ -1714,20 +1714,23 @@ def get_single_product_sales(product_id, today_start_date, today_end_date,
         today_sales = getdaywiseproductssold(today_start_date, today_end_date, product_id, False)
         period_sales = getdaywiseproductssold(start_date, end_date, product_id, False)
         compare_sales = getdaywiseproductssold(compare_start, compare_end, product_id, False)
+        if not today_sales and not period_sales and not compare_sales:
+            print(f"No sales data found for product {product_id}")
+
         
         # Use sum() with generator expressions for better performance
         return {
             "today": {
-                "revenue": sum(sale["total_price"] for sale in today_sales),
-                "units": sum(sale["total_quantity"] for sale in today_sales)
+                "revenue": round(sum(sale.get("total_price", 0) for sale in today_sales), 2),
+                "units": sum(sale.get("total_quantity", 0) for sale in today_sales)
             },
             "period": {
-                "revenue": sum(sale["total_price"] for sale in period_sales),
-                "units": sum(sale["total_quantity"] for sale in period_sales)
+                "revenue": round(sum(sale.get("total_price", 0) for sale in period_sales), 2),
+                "units": sum(sale.get("total_quantity", 0) for sale in period_sales)
             },
             "compare": {
-                "revenue": sum(sale["total_price"] for sale in compare_sales),
-                "units": sum(sale["total_quantity"] for sale in compare_sales)
+                "revenue": round(sum(sale.get("total_price", 0) for sale in compare_sales), 2),
+                "units": sum(sale.get("total_quantity", 0) for sale in compare_sales)
             }
         }
     except Exception as e:
