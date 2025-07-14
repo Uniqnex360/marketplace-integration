@@ -469,7 +469,7 @@ def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
     ]
 
     try:
-        orders = list(OrderItems.aggregate(pipeline))  # replace with your MongoDB collection
+        orders = list(OrderItems._get_collection().aggregate(pipeline))
         return orders
     except Exception as e:
         print(f"Error in aggregation for product {product_id}: {e}")
