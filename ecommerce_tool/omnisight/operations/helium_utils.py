@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 import pandas as pd
 from pytz import timezone
 from bson.errors import InvalidId
+import traceback
+
 
 
 def convertdateTotimezone(start_date,end_date,timezone_str):
@@ -418,78 +420,67 @@ def AnnualizedRevenueAPIView(target_date):
 
 
 def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
-    """
-    Fetch total quantity and price of a product sold between start_date and end_date,
-    grouped by day or hour based on is_hourly flag.
-    """
-    date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
-
-    # Convert to ObjectId safely
     try:
-        product_id_obj = ObjectId(product_id)
-    except (InvalidId, TypeError) as e:
-        print(f"Invalid ObjectId for product_id: {product_id} — Error: {e}")
-        return []  # No valid match possible
+        date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
 
-    pipeline = [
-        {
-            "$match": {
-                "order_date": {"$gte": start_date, "$lte": end_date},
-                "order_status": {
-                    "$in": [
-                        'Shipped', 'Delivered', 'Acknowledged',
-                        'Pending', 'Unshipped', 'PartiallyShipped'
-                    ]
-                }
-            }
-        },
-        {
-            "$lookup": {
-                "from": "order_items",
-                "localField": "order_items",
-                "foreignField": "_id",
-                "as": "order_items_ins"
-            }
-        },
-        {"$unwind": "$order_items_ins"},
-        {
-            "$match": {
-                "order_items_ins.ProductDetails.product_id": product_id_obj
-            }
-        },
-        {
-            "$group": {
-                "_id": {
-                    "$dateToString": {
-                        "format": date_format,
-                        "date": "$order_date"
+        pipeline = [
+            {
+                "$match": {
+                    "order_date": {"$gte": start_date, "$lte": end_date},
+                    "order_status": {
+                        "$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']
                     }
-                },
-                "total_quantity": {
-                    "$sum": "$order_items_ins.ProductDetails.QuantityOrdered"
-                },
-                "total_price": {
-                    "$sum": "$order_items_ins.Pricing.ItemPrice.Amount"
                 }
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "date": "$_id",
-                "total_quantity": 1,
-                "total_price": {"$round": ["$total_price", 2]}
-            }
-        },
-        {"$sort": {"date": 1}}
-    ]
+            },
+            {
+                "$lookup": {
+                    "from": "order_items",
+                    "localField": "order_items",
+                    "foreignField": "_id",
+                    "as": "order_items_ins"
+                }
+            },
+            {
+                "$unwind": {
+                    "path": "$order_items_ins",
+                    "preserveNullAndEmptyArrays": False
+                }
+            },
+            {
+                "$match": {
+                    "order_items_ins.ProductDetails.product_id": ObjectId(product_id)
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "$dateToString": {
+                            "format": date_format,
+                            "date": "$order_date"
+                        }
+                    },
+                    "total_quantity": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
+                    "total_price": {"$sum": "$order_items_ins.Pricing.ItemPrice.Amount"}
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "date": "$_id",
+                    "total_quantity": 1,
+                    "total_price": {"$round": ["$total_price", 2]}
+                }
+            },
+            {"$sort": {"date": 1}}
+        ]
 
-    orders = list(Order.objects.aggregate(*pipeline))
+        results = list(Order.objects.aggregate(*pipeline))
+        return results
 
-    if not orders:
-        print(f"No sales data found for product {product_id}")
-
-    return orders
+    except Exception as e:
+        print(f"Aggregation failed for product {product_id}: {e}")
+        traceback.print_exc()
+        return []
 
 def pageViewsandSessionCount(start_date,end_date,product_id):
     """
