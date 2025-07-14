@@ -1672,9 +1672,8 @@ def batch_get_sales_data(product_ids, start_date, end_date, today_start_date, to
                 
                 for product_id, future in futures:
                     try:
-                        chunk_sales[product_id] = future.result(timeout=5)  # 5 second timeout
+                        chunk_sales[product_id] = future.result(timeout=50)  # 5 second timeout
                     except Exception as e:
-                        print(f"Error processing product {product_id}: {e}")
                         chunk_sales[product_id] = {
                             "today": {"revenue": 0, "units": 0},
                             "period": {"revenue": 0, "units": 0},
