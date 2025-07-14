@@ -416,19 +416,7 @@ def AnnualizedRevenueAPIView(target_date):
 
 
 def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
-    """
-    Fetch total quantity and price of a product sold between start_date and end_date,
-    grouped by day or hour based on is_hourly flag.
- 
-    Args:
-        start_date (datetime): Start date/time for filtering orders.
-        end_date (datetime): End date/time for filtering orders.
-        product_id (str): The product ID to filter by.
-        is_hourly (bool): If True, group by hour; else group by day.
- 
-    Returns:
-        list: List of dicts with keys 'date', 'total_quantity', and 'total_price'.
-    """
+   
     date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
 
     pipeline = [
