@@ -1159,7 +1159,7 @@ def ordersCountForDashboard(request):
         count = res[0].get("count", 0) if res else 0
         order_value = round(res[0].get("order_value", 0), 2) if res else 0
         data['custom'] = {
-            "value": count,
+                "value": count,
             "percentage": "100.0%",
             "order_value": order_value
         }

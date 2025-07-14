@@ -142,7 +142,11 @@ def get_metrics_by_date_range(request):
         temp_other_price = 0
         vendor_funding = 0
 
-        result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        raw_result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        result=[
+            r for r in raw_result
+            if r.get('order_status')!='Cancelled' and r.get('order_total')>0
+        ]
         refund_ins = refundOrder(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
         if refund_ins != []:
             for ins in refund_ins:
@@ -153,7 +157,7 @@ def get_metrics_by_date_range(request):
                 tax_price = 0
                 gross_revenue += ins['order_total']
                 total_units += ins['items_order_quantity']
-                for j in ins['order_items']:                  
+                for j in ins['order_items']:                    
                     pipeline = [
                         {
                             "$match": {
@@ -186,16 +190,17 @@ def get_metrics_by_date_range(request):
                             }
                         }
                     ]
-                    result = list(OrderItems.objects.aggregate(*pipeline))
-                    if result != []:
-                        tax_price += result[0]['tax_price']
-                        temp_other_price += result[0]['price']
+                
+                    item_result = list(OrderItems.objects.aggregate(*pipeline))
+                    if item_result != []:
+                        tax_price += item_result[0]['tax_price']
+                        temp_other_price += item_result[0]['price']
                         if ins['marketplace_name'] == "Amazon":
-                            total_cogs += result[0]['total_cogs']
+                            total_cogs += item_result[0]['total_cogs']
                         else:
-                            total_cogs += result[0]['w_total_cogs']
+                            total_cogs += item_result[0]['w_total_cogs']
                         
-                        vendor_funding += result[0]['vendor_funding']
+                        vendor_funding += item_result[0]['vendor_funding']
             net_profit = (temp_other_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue) * 100 if gross_revenue != 0 else 0
         metrics[key] = {
@@ -1499,18 +1504,23 @@ def get_parent_products_optimized(match, page, page_size, start_date, end_date, 
     return JsonResponse(response_data, safe=False)
 
 
-def get_individual_products_optimized(match, page, page_size, start_date, end_date, today_start_date, today_end_date, sort_by, sort_by_value):
+def get_individual_products_optimized(
+    match, page, page_size, start_date, end_date,
+    today_start_date, today_end_date, sort_by, sort_by_value
+):
     """Optimized individual products aggregation"""
-    
+
     pipeline = []
-    
+
     if match:
         pipeline.append({"$match": match})
-    
-    # Add sorting before pagination
-    if sort_by:
+
+    # Sorting only for Mongo fields
+    if sort_by and sort_by not in [
+        "grossRevenue", "netProfit", "margin", "salesForToday", "unitsSoldForToday"
+    ]:
         pipeline.append({"$sort": {sort_by: int(sort_by_value)}})
-    
+
     pipeline.extend([
         {
             "$facet": {
@@ -1579,16 +1589,15 @@ def get_individual_products_optimized(match, page, page_size, start_date, end_da
         }
     ])
 
-    # Execute pipeline
+    # Execute aggregation pipeline
     result = list(Product.objects.aggregate(*pipeline))
     total_products = result[0]["total_count"][0]["count"] if result[0]["total_count"] else 0
     products = result[0]["products"]
 
-    # Get all product IDs for batch sales data fetch
+    # Fetch and merge sales data
     product_ids = [p["id"] for p in products]
     sales_data = batch_get_sales_data(product_ids, start_date, end_date, today_start_date, today_end_date)
 
-    # Process products with sales data
     for product in products:
         product_id = product["id"]
         product_sales = sales_data.get(product_id, {
@@ -1597,22 +1606,25 @@ def get_individual_products_optimized(match, page, page_size, start_date, end_da
             "compare": {"revenue": 0, "units": 0}
         })
 
-        # Set sales data
         product["salesForToday"] = round(product_sales["today"]["revenue"], 2)
         product["unitsSoldForToday"] = product_sales["period"]["units"]
         product["grossRevenue"] = round(product_sales["period"]["revenue"], 2)
-        
-        # Calculate net profit and margin
-        net_profit = ((product["grossRevenue"] - (product["cogs"] * product["unitsSoldForToday"])) + 
-                     (product["vendor_funding"] * product["unitsSoldForToday"]))
+
+        net_profit = (
+            product["grossRevenue"] -
+            (product["cogs"] * product["unitsSoldForToday"]) +
+            (product["vendor_funding"] * product["unitsSoldForToday"])
+        )
         product["netProfit"] = round(net_profit, 2)
         product["margin"] = round((net_profit / product["grossRevenue"]) * 100 if product["grossRevenue"] > 0 else 0, 2)
 
-        # Compare period calculations
         compare_revenue = product_sales["compare"]["revenue"]
         compare_units = product_sales["compare"]["units"]
-        compare_profit = ((compare_revenue - (product["cogs"] * compare_units)) + 
-                         (product["vendor_funding"] * compare_units))
+        compare_profit = (
+            compare_revenue -
+            (product["cogs"] * compare_units) +
+            (product["vendor_funding"] * compare_units)
+        )
         compare_margin = (compare_profit / compare_revenue) * 100 if compare_revenue > 0 else 0
 
         product["unitsSoldForPeriod"] = compare_units - product["unitsSoldForToday"]
@@ -1620,13 +1632,17 @@ def get_individual_products_optimized(match, page, page_size, start_date, end_da
         product["netProfitforPeriod"] = round(compare_profit - product["netProfit"], 2)
         product["marginforPeriod"] = round(compare_margin - product["margin"], 2)
 
-        # Set default values for missing fields
         product.update({
             "refunds": 0,
             "refundsforPeriod": 0,
             "refundsAmount": 0,
             "refundsAmountforPeriod": 0,
         })
+
+    # 🔽 Python-side sorting for computed fields
+    if sort_by in ["grossRevenue", "netProfit", "margin", "salesForToday", "unitsSoldForToday"]:
+        reverse = str(sort_by_value).lower() in ["-1", "desc"]
+        products.sort(key=lambda x: x.get(sort_by, 0), reverse=reverse)
 
     response_data = {
         "total_products": total_products,
@@ -1637,7 +1653,6 @@ def get_individual_products_optimized(match, page, page_size, start_date, end_da
     }
 
     return JsonResponse(response_data, safe=False)
-
 
 def batch_get_sales_data(product_ids, start_date, end_date, today_start_date, today_end_date):
     """Batch fetch sales data for multiple products"""

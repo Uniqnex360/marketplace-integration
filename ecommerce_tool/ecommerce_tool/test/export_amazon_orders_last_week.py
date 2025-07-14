@@ -39,7 +39,7 @@ def create_order_report(access_token, start_time, end_time):
         "Content-Type": "application/json"
     }
     body = {
-        "reportType": "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_LAST_UPDATE_GENERAL",
+        "reportType": "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",  # Changed this line
         "marketplaceIds": [MARKETPLACE_ID],
         "dataStartTime": start_time,
         "dataEndTime": end_time
@@ -66,6 +66,21 @@ def poll_report(access_token, report_id):
             return None
         time.sleep(30)
 
+def load_report_to_dataframe(file_path, start_date=None, end_date=None):
+    df = pd.read_csv(file_path, sep="\t", dtype=str)
+
+    if "purchase-date" in df.columns and start_date and end_date:
+        df["purchase-date"] = pd.to_datetime(df["purchase-date"], errors="coerce")
+        df = df[
+            (df["purchase-date"] >= start_date) &
+            (df["purchase-date"] <= end_date)
+        ]
+        print(f"📄 Filtered report has {len(df)} orders by purchase-date")
+    else:
+        print(f"📄 Full report loaded with {len(df)} rows")
+
+    return df
+
 # Step 4: Download the report file
 def download_report(access_token, document_id, output_filename):
     url = f"https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/documents/{document_id}"
@@ -82,12 +97,6 @@ def download_report(access_token, document_id, output_filename):
     print(f"✅ Report downloaded to {output_filename}")
 
     return output_filename
-
-# Optional: Load to pandas DataFrame
-def load_report_to_dataframe(file_path):
-    df = pd.read_csv(file_path, sep="\t", dtype=str)
-    print(f"📄 Report loaded with {len(df)} rows")
-    return df
 
 # Main execution
 def get_amazon_orders_report(start_date: datetime, end_date: datetime):
@@ -110,14 +119,15 @@ def get_amazon_orders_report(start_date: datetime, end_date: datetime):
     filename = f"amazon_orders_{start_date.strftime('%Y-%m-%d')}.tsv"
     download_report(access_token, document_id, filename)
 
-    df = load_report_to_dataframe(filename)
+    df = load_report_to_dataframe(filename, start_date, end_date)
+
     # Optional: save as Excel
     df.to_excel(filename.replace(".tsv", ".xlsx"), index=False)
     print(f"📁 Excel saved: {filename.replace('.tsv', '.xlsx')}")
     return df
+
 if __name__ == "__main__":
-    # Example: Fetch for July 9 and 10, 2025
-    for date_str in ["2025-07-09", "2025-07-10"]:
+    for date_str in ["2025-07-10", "2025-07-11"]:
         start = datetime.strptime(date_str, "%Y-%m-%d")
         end = start.replace(hour=23, minute=59, second=59)
         get_amazon_orders_report(start, end)
