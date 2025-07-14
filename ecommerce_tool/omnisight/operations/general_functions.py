@@ -1521,51 +1521,32 @@ def change_sign(value):
 def getSalesTrendPercentage(request):
     import pytz
     from pytz import timezone
+    from datetime import datetime, timedelta
+    from bson import ObjectId
+    from rest_framework.parsers import JSONParser
 
     data = dict()
     json_request = JSONParser().parse(request)
-    range_type = json_request.get('range_type', 'month')  # 'day', 'week', 'month', 'year'
-    marketplace_id = json_request.get('marketplace_id')  # Marketplace filter (e.g., 'amazon', 'walmart')
+    range_type = json_request.get('range_type', 'month')
+    marketplace_id = json_request.get('marketplace_id')
     timezone_str = json_request.get('timezone', 'US/Pacific')
-    
-    # Get current time and convert to local time based on timezone_str
+
     local_tz = timezone(timezone_str)
     now = datetime.now(local_tz)
-    
-    local_tz = pytz.timezone(timezone_str)
-        
-    # If dates are naive (no timezone), localize them
+
     if now.tzinfo is None:
         now = local_tz.localize(now)
-    # Convert to UTC
     now = now.astimezone(pytz.UTC)
     now = now.replace(tzinfo=None)
-    
 
-    # Determine date ranges based on range_type
-    if range_type == 'day':
-        current_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        previous_start = current_start - timedelta(days=1)
-        previous_end = current_start
-    elif range_type == 'week':
-        current_start = now - timedelta(days=now.weekday())
-        current_start = current_start.replace(hour=0, minute=0, second=0, microsecond=0)
-        previous_start = current_start - timedelta(weeks=1)
-        previous_end = current_start
-    elif range_type == 'month':
-        current_start = datetime(now.year, now.month, 1)
-        previous_month_end = current_start - timedelta(days=1)
-        previous_start = datetime(previous_month_end.year, previous_month_end.month, 1)
-        previous_end = current_start
-    elif range_type == 'year':
+    if range_type == 'year':
         current_start = datetime(now.year, 1, 1)
         previous_start = datetime(now.year - 1, 1, 1)
         previous_end = current_start
     else:
-        data['error'] = "Invalid range_type provided."
+        data['error'] = "Only 'year' range_type is supported for this view."
         return data
 
-    # Match pipeline for current and previous ranges
     match_pipeline = [
         {
             "$facet": {
@@ -1576,7 +1557,7 @@ def getSalesTrendPercentage(request):
                                 "$gte": current_start,
                                 "$lt": now
                             },
-                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id and marketplace_id != "custom" and marketplace_id != "all" else {})
+                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id and marketplace_id not in ["custom", "all"] else {})
                         }
                     },
                     {
@@ -1593,7 +1574,7 @@ def getSalesTrendPercentage(request):
                                 "$gte": previous_start,
                                 "$lt": previous_end
                             },
-                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id and marketplace_id != "custom" and marketplace_id != "all" else {})
+                            **({"marketplace_id": ObjectId(marketplace_id)} if marketplace_id and marketplace_id not in ["custom", "all"] else {})
                         }
                     },
                     {
@@ -1648,65 +1629,44 @@ def getSalesTrendPercentage(request):
 
     if marketplace_id == "custom":
         trend_data = list(custom_order.objects.aggregate(*custom_match_pipeline))
+        current_total = trend_data[0]["current_range"][0]["sales_value"] if trend_data[0]["current_range"] else 0
+        previous_total = trend_data[0]["previous_range"][0]["sales_value"] if trend_data[0]["previous_range"] else 0
+
+        data['trend_percentage'] = [
+            {"year": now.year, "sales": current_total, "id": "Custom Orders"},
+            {"year": now.year - 1, "sales": previous_total, "id": "Custom Orders"}
+        ]
+
     else:
         trend_data = list(Order.objects.aggregate(*match_pipeline))
         custom_trend_data = list(custom_order.objects.aggregate(*custom_match_pipeline))
 
-        # Combine custom_order data with Order data
         if custom_trend_data:
             for key in ["current_range", "previous_range"]:
                 for item in custom_trend_data[0][key]:
                     trend_data[0][key].append({"_id": "custom", "sales_value": item["sales_value"]})
 
-    if trend_data:
         current_range_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["current_range"]}
         previous_range_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["previous_range"]}
 
-        if marketplace_id == "all":  # Combine all marketplaces
+        if marketplace_id == "all":
             current_total = sum(current_range_data.values())
             previous_total = sum(previous_range_data.values())
-            percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
-            current_percentage = (current_total / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
-            data['trend_percentage'] = [{
-                "id": "All Channels",
-                "current_range_sales": current_total,
-                "previous_range_sales": previous_total,
-                "trend_percentage": round(percentage_change, 2),
-                "current_percentage" : round(current_percentage,2)
-            }]
-        elif marketplace_id == "custom":  # Only custom_order data
-            current_total = current_range_data.get(None, 0)
-            previous_total = previous_range_data.get(None, 0)
-            percentage_change = ((current_total - previous_total) / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
-            current_percentage = (current_total / previous_total * 100) if previous_total != 0 else (100 if current_total > 0 else 0)
-            data['trend_percentage'] = [{
-                "id": "Custom Orders",
-                "current_range_sales": current_total,
-                "previous_range_sales": previous_total,
-                "trend_percentage": (round(percentage_change, 2)),
-                "current_percentage" : round(current_percentage,2)
-            }]
-        else:  # Specific marketplace
+            data['trend_percentage'] = [
+                {"year": now.year, "sales": current_total, "id": "All Channels"},
+                {"year": now.year - 1, "sales": previous_total, "id": "All Channels"}
+            ]
+        else:
             trend_percentage = []
-            marketplace_name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
+            marketplace_name = "Custom" if marketplace_id == "custom" else DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
             for key in set(current_range_data.keys()).union(previous_range_data.keys()):
                 current_value = current_range_data.get(key, 0)
                 previous_value = previous_range_data.get(key, 0)
-                percentage_change = ((current_value - previous_value) / previous_value * 100) if previous_value != 0 else (100 if current_value > 0 else 0)
-                current_percentage = (current_value / previous_value * 100) if previous_value != 0 else (100 if current_value > 0 else 0)
-                trend_percentage.append({
-                    "id": str(marketplace_name),
-                    "current_range_sales": current_value,
-                    "previous_range_sales": previous_value,
-                    "trend_percentage": (round(percentage_change, 2)),
-                    "current_percentage" : round(current_percentage,2)
-                })
+                trend_percentage.append({"year": now.year, "sales": current_value, "id": str(marketplace_name)})
+                trend_percentage.append({"year": now.year - 1, "sales": previous_value, "id": str(marketplace_name)})
             data['trend_percentage'] = trend_percentage
-    else:
-        data['trend_percentage'] = []
 
     return data
-
 @csrf_exempt
 def fetchSalesSummary(request):
     data = {}
