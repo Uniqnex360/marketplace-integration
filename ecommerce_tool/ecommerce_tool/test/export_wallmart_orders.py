@@ -110,110 +110,45 @@ def saveOrdersAsJSON(orders, filename):
 
 def saveOrdersAsExcel(orders, filename):
     """
-    Saves orders data as an Excel file with flattened structure.
+    Saves orders data as an Excel file with one row per order (not per order line).
     """
     try:
-        # Create downloads directory if it doesn't exist
         os.makedirs("downloads", exist_ok=True)
         filepath = os.path.join("downloads", filename)
         
-        flattened_orders = []
-        
+        order_rows = []
         for order in orders:
-            # Extract basic order info
-            base_order = {
+            # Gather all SKUs and product names in this order
+            order_lines = order.get('orderLines', {}).get('orderLine', [])
+            skus = [line.get('item', {}).get('sku', '') for line in order_lines]
+            product_names = [line.get('item', {}).get('productName', '') for line in order_lines]
+            total_quantity = sum(int(line.get('orderLineQuantity', {}).get('amount', 0)) for line in order_lines)
+            
+            row = {
                 'purchase_order_id': order.get('purchaseOrderId', ''),
                 'customer_order_id': order.get('customerOrderId', ''),
                 'customer_email_id': order.get('customerEmailId', ''),
                 'order_date': datetime.fromtimestamp(int(order.get('orderDate', 0)) / 1000).strftime('%Y-%m-%d %H:%M:%S') if order.get('orderDate') else '',
                 'ship_node_type': order.get('shipNode', {}).get('type', ''),
                 'ship_node_id': order.get('shipNode', {}).get('shipNodeId', ''),
+                'shipping_phone': order.get('shippingInfo', {}).get('phone', ''),
+                'shipping_estimated_delivery': order.get('shippingInfo', {}).get('estimatedDeliveryDate', ''),
+                'shipping_method': order.get('shippingInfo', {}).get('methodCode', ''),
+                'shipping_postal_address': str(order.get('shippingInfo', {}).get('postalAddress', {})),
+                'all_skus': ', '.join(skus),
+                'all_product_names': ', '.join(product_names),
+                'total_quantity': total_quantity,
+                'number_of_items': len(order_lines),
             }
-            
-            # Extract shipping info
-            shipping_info = order.get('shippingInfo', {})
-            base_order.update({
-                'shipping_phone': shipping_info.get('phone', ''),
-                'shipping_estimated_delivery': shipping_info.get('estimatedDeliveryDate', ''),
-                'shipping_method': shipping_info.get('methodCode', ''),
-                'shipping_postal_address': str(shipping_info.get('postalAddress', {})),
-            })
-            
-            # Extract order line items
-            order_lines = order.get('orderLines', {}).get('orderLine', [])
-            
-            for idx, line in enumerate(order_lines):
-                order_line = base_order.copy()
-                order_line.update({
-                    'line_number': idx + 1,
-                    'line_number_id': line.get('lineNumber', ''),
-                    'item_sku': line.get('item', {}).get('sku', ''),
-                    'item_product_name': line.get('item', {}).get('productName', ''),
-                    'item_condition': line.get('item', {}).get('condition', ''),
-                    'order_line_quantity': line.get('orderLineQuantity', {}).get('amount', 0),
-                    'order_line_unit': line.get('orderLineQuantity', {}).get('unit', ''),
-                    'status_date': datetime.fromtimestamp(int(line.get('statusDate', 0)) / 1000).strftime('%Y-%m-%d %H:%M:%S') if line.get('statusDate') else '',
-                })
-                
-                # Extract charges
-                charges = line.get('charges', {}).get('charge', [])
-                total_charge = 0
-                total_tax = 0
-                currency = 'USD'
-                
-                for charge in charges:
-                    charge_amount = float(charge.get('chargeAmount', {}).get('amount', 0))
-                    total_charge += charge_amount
-                    currency = charge.get('chargeAmount', {}).get('currency', currency)
-                    
-                    tax_info = charge.get('tax', {})
-                    if tax_info:
-                        tax_amount = float(tax_info.get('taxAmount', {}).get('amount', 0))
-                        total_tax += tax_amount
-                
-                order_line.update({
-                    'total_charge_amount': total_charge,
-                    'total_tax_amount': total_tax,
-                    'currency': currency,
-                    'total_amount': total_charge + total_tax,
-                })
-                
-                # Extract status info
-                statuses = line.get('orderLineStatuses', {}).get('orderLineStatus', [])
-                if statuses:
-                    latest_status = statuses[0]
-                    order_line.update({
-                        'order_status': latest_status.get('status', ''),
-                        'status_quantity': latest_status.get('statusQuantity', {}).get('amount', 0),
-                        'tracking_number': latest_status.get('trackingInfo', {}).get('trackingNumber', ''),
-                        'tracking_url': latest_status.get('trackingInfo', {}).get('trackingURL', ''),
-                        'carrier': latest_status.get('trackingInfo', {}).get('carrierName', {}).get('carrier', ''),
-                        'method_code': latest_status.get('trackingInfo', {}).get('methodCode', ''),
-                        'ship_date_time': datetime.fromtimestamp(int(latest_status.get('trackingInfo', {}).get('shipDateTime', 0)) / 1000).strftime('%Y-%m-%d %H:%M:%S') if latest_status.get('trackingInfo', {}).get('shipDateTime') else '',
-                    })
-                
-                # Extract fulfillment info
-                fulfillment = line.get('fulfillment', {})
-                order_line.update({
-                    'fulfillment_option': fulfillment.get('fulfillmentOption', ''),
-                    'ship_method': fulfillment.get('shipMethod', ''),
-                    'store_id': fulfillment.get('storeId', ''),
-                    'pickup_date_time': fulfillment.get('pickUpDateTime', ''),
-                })
-                
-                flattened_orders.append(order_line)
+            order_rows.append(row)
         
-        # Create DataFrame and save to Excel
-        df = pd.DataFrame(flattened_orders)
+        df = pd.DataFrame(order_rows)
         df.to_excel(filepath, index=False, engine='openpyxl')
-        
         print(f"📊 Excel file saved: {filepath}")
-        print(f"📈 Total order lines: {len(flattened_orders)}")
+        print(f"📈 Total orders: {len(order_rows)}")
         
     except Exception as e:
         print(f"❌ Error saving Excel file: {e}")
-
-
 def downloadYesterdayOrdersReport():
     """
     Main function to download yesterday's Walmart orders report.
@@ -316,7 +251,8 @@ def fetchWalmartOrdersByDateRange(start_date, end_date):
 # Example usage:
 if __name__ == "__main__":
     # Download yesterday's orders
-    downloadYesterdayOrdersReport()
+    # downloadYesterdayOrdersReport()
     
     # Or download orders for a specific date range
-    # fetchWalmartOrdersByDateRange("2024-01-01", "2024-01-31")
+    fetchWalmartOrdersByDateRange("2025-07-13", "2025-07-13")
+

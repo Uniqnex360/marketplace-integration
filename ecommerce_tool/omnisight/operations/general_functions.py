@@ -1071,8 +1071,8 @@ def ordersCountForDashboard(request):
     t1.start(); t2.start()
     t1.join(); t2.join()
     order_count = q1.get()
-    custom_order_count = q2.get()
-    total_order_count = order_count + custom_order_count
+    # custom_order_count = q2.get()
+    total_order_count = order_count 
 
     data['total_order_count'] = {
         "value": total_order_count,

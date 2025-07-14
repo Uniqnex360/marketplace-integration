@@ -127,7 +127,7 @@ def get_amazon_orders_report(start_date: datetime, end_date: datetime):
     return df
 
 if __name__ == "__main__":
-    for date_str in ["2025-07-10", "2025-07-11"]:
+    for date_str in ["2025-07-13"]:
         start = datetime.strptime(date_str, "%Y-%m-%d")
         end = start.replace(hour=23, minute=59, second=59)
         get_amazon_orders_report(start, end)
