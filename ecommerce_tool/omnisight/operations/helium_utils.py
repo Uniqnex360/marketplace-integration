@@ -420,68 +420,61 @@ def AnnualizedRevenueAPIView(target_date):
 
 
 def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
+    """
+    Fetch total quantity and price of a product sold between start_date and end_date
+    directly from order_items collection.
+    """
+    from bson.objectid import ObjectId
+    from bson.errors import InvalidId
+    from pymongo import MongoClient
+    import traceback
+
     try:
-        date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
-
-        pipeline = [
-            {
-                "$match": {
-                    "order_date": {"$gte": start_date, "$lte": end_date},
-                    "order_status": {
-                        "$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']
-                    }
-                }
-            },
-            {
-                "$lookup": {
-                    "from": "order_items",
-                    "localField": "order_items",
-                    "foreignField": "_id",
-                    "as": "order_items_ins"
-                }
-            },
-            {
-                "$unwind": {
-                    "path": "$order_items_ins",
-                    "preserveNullAndEmptyArrays": False
-                }
-            },
-            {
-                "$match": {
-                    "order_items_ins.ProductDetails.product_id": ObjectId(product_id)
-                }
-            },
-            {
-                "$group": {
-                    "_id": {
-                        "$dateToString": {
-                            "format": date_format,
-                            "date": "$order_date"
-                        }
-                    },
-                    "total_quantity": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
-                    "total_price": {"$sum": "$order_items_ins.Pricing.ItemPrice.Amount"}
-                }
-            },
-            {
-                "$project": {
-                    "_id": 0,
-                    "date": "$_id",
-                    "total_quantity": 1,
-                    "total_price": {"$round": ["$total_price", 2]}
-                }
-            },
-            {"$sort": {"date": 1}}
-        ]
-
-        results = list(Order.objects.aggregate(*pipeline))
-        return results
-
-    except Exception as e:
-        print(f"Aggregation failed for product {product_id}: {e}")
-        traceback.print_exc()
+        product_obj_id = ObjectId(product_id)
+    except InvalidId:
+        print(f"Invalid ObjectId: {product_id}")
         return []
 
+    date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
+
+    pipeline = [
+        {
+            "$match": {
+                "ProductDetails.product_id": product_obj_id,
+                "OrderStatus.Status": {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']},
+                "Fulfillment.ShipDateTime": {"$gte": start_date, "$lte": end_date}
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "$dateToString": {
+                        "format": date_format,
+                        "date": "$Fulfillment.ShipDateTime"
+                    }
+                },
+                "total_quantity": {"$sum": "$ProductDetails.QuantityOrdered"},
+                "total_price": {"$sum": "$Pricing.ItemPrice.Amount"}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "date": "$_id",
+                "total_quantity": 1,
+                "total_price": {"$round": ["$total_price", 2]}
+            }
+        },
+        {"$sort": {"date": 1}}
+    ]
+
+    try:
+        orders = list(OrderItems.aggregate(pipeline))  # replace with your MongoDB collection
+        return orders
+    except Exception as e:
+        print(f"Error in aggregation for product {product_id}: {e}")
+        traceback.print_exc()
+        return []
 def pageViewsandSessionCount(start_date,end_date,product_id):
     """
     Fetches the list of orders based on the provided product ID using a pipeline aggregation.
