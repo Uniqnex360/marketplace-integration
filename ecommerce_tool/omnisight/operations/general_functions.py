@@ -1043,8 +1043,8 @@ def ordersCountForDashboard(request):
     # Shared match
     match_conditions = {
         "order_date": {"$gte": start_date, "$lte": end_date},
-        # "order_status": {"$ne": "Cancelled"},
-        # "order_total": {"$gt": 0}
+        "order_status": {"$ne": "Cancelled"},
+        "order_total": {"$gt": 0}
     }
 
     # Aggregate Orders and Custom Orders - in parallel
