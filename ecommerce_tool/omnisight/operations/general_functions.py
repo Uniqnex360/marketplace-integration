@@ -1159,7 +1159,7 @@ def ordersCountForDashboard(request):
         count = res[0].get("count", 0) if res else 0
         order_value = round(res[0].get("order_value", 0), 2) if res else 0
         data['custom'] = {
-                "value": count,
+            "value": count,
             "percentage": "100.0%",
             "order_value": order_value
         }
@@ -1521,9 +1521,6 @@ def change_sign(value):
 def getSalesTrendPercentage(request):
     import pytz
     from pytz import timezone
-    from datetime import datetime, timedelta
-    from rest_framework.parsers import JSONParser
-    from bson import ObjectId
 
     data = dict()
     json_request = JSONParser().parse(request)
@@ -1535,12 +1532,15 @@ def getSalesTrendPercentage(request):
     local_tz = timezone(timezone_str)
     now = datetime.now(local_tz)
     
+    local_tz = pytz.timezone(timezone_str)
+        
     # If dates are naive (no timezone), localize them
     if now.tzinfo is None:
         now = local_tz.localize(now)
     # Convert to UTC
     now = now.astimezone(pytz.UTC)
     now = now.replace(tzinfo=None)
+    
 
     # Determine date ranges based on range_type
     if range_type == 'day':
@@ -1659,8 +1659,8 @@ def getSalesTrendPercentage(request):
                     trend_data[0][key].append({"_id": "custom", "sales_value": item["sales_value"]})
 
     if trend_data:
-        current_range_data = {item["_id"]: sanitize_data(item["sales_value"]) for item in trend_data[0]["current_range"]}
-        previous_range_data = {item["_id"]: sanitize_data(item["sales_value"]) for item in trend_data[0]["previous_range"]}
+        current_range_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["current_range"]}
+        previous_range_data = {item["_id"]: item["sales_value"] for item in trend_data[0]["previous_range"]}
 
         if marketplace_id == "all":  # Combine all marketplaces
             current_total = sum(current_range_data.values())
@@ -1672,7 +1672,7 @@ def getSalesTrendPercentage(request):
                 "current_range_sales": current_total,
                 "previous_range_sales": previous_total,
                 "trend_percentage": round(percentage_change, 2),
-                "current_percentage": round(current_percentage, 2)
+                "current_percentage" : round(current_percentage,2)
             }]
         elif marketplace_id == "custom":  # Only custom_order data
             current_total = current_range_data.get(None, 0)
@@ -1683,8 +1683,8 @@ def getSalesTrendPercentage(request):
                 "id": "Custom Orders",
                 "current_range_sales": current_total,
                 "previous_range_sales": previous_total,
-                "trend_percentage": round(percentage_change, 2),
-                "current_percentage": round(current_percentage, 2)
+                "trend_percentage": (round(percentage_change, 2)),
+                "current_percentage" : round(current_percentage,2)
             }]
         else:  # Specific marketplace
             trend_percentage = []
@@ -1698,15 +1698,14 @@ def getSalesTrendPercentage(request):
                     "id": str(marketplace_name),
                     "current_range_sales": current_value,
                     "previous_range_sales": previous_value,
-                    "trend_percentage": round(percentage_change, 2),
-                    "current_percentage": round(current_percentage, 2)
+                    "trend_percentage": (round(percentage_change, 2)),
+                    "current_percentage" : round(current_percentage,2)
                 })
             data['trend_percentage'] = trend_percentage
     else:
         data['trend_percentage'] = []
 
     return data
-
 
 @csrf_exempt
 def fetchSalesSummary(request):

@@ -1674,7 +1674,7 @@ def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_star
                     try:
                         chunk_sales[product_id] = future.result(timeout=5)  # 5 second timeout
                     except Exception as e:
-                        print(f"Error processing product {product_id}: {e}")
+                        # print(f"Error processing product {product_id}: {e}")
                         chunk_sales[product_id] = {
                             "today": {"revenue": 0, "units": 0},
                             "period": {"revenue": 0, "units": 0},
