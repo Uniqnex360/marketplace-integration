@@ -16,7 +16,6 @@ from datetime import datetime
 import math
 import pytz
 import threading
-from ecommerce_tool.util.order_count import get_order_count
 import re
 from bson import ObjectId
 from django.http import JsonResponse
@@ -68,14 +67,17 @@ def get_metrics_by_date_range(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = json_request.get('timezone', 'US/Pacific')
-
+    
     # Parse target_date_str to extract the date
     target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
+
     # Get current time and combine it with the target_date
     local_tz = pytz.timezone(timezone_str)
     current_time = datetime.now(local_tz).replace(year=target_date.year, month=target_date.month, day=target_date.day)
+
     # Parse target date and convert to local time
     target_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+
     # Calculate previous_date and eight_days_ago
     previous_date = target_date - timedelta(days=1)
     eight_days_ago = target_date - timedelta(days=8)
@@ -108,7 +110,7 @@ def get_metrics_by_date_range(request):
     def process_date_range(key, date_range, results):
         gross_revenue = 0
         result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        if result:
+        if result != []:
             for ins in result:
                 gross_revenue += ins['order_total']
         results[key] = {
@@ -128,7 +130,6 @@ def get_metrics_by_date_range(request):
     # Ensure the results are in the same order as the keys in last_8_days_filter
     graph_data = {key: results[key] for key in last_8_days_filter.keys()}
     metrics["graph_data"] = graph_data
-
     for key, date_range in date_filters.items():
         gross_revenue = 0
         total_cogs = 0
@@ -136,31 +137,33 @@ def get_metrics_by_date_range(request):
         margin = 0
         net_profit = 0
         total_units = 0
+        total_orders = 0
         tax_price = 0
         temp_other_price = 0
         vendor_funding = 0
 
         raw_result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        result = [
+        result=[
             r for r in raw_result
-            if r.get('order_status') != 'Cancelled' and r.get('order_total') > 0
+            if r.get('order_status')!='Cancelled' and r.get('order_total')>0
         ]
-
         refund_ins = refundOrder(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
-        if refund_ins:
+        if refund_ins != []:
             for ins in refund_ins:
                 refund += len(ins['order_items'])
-
-        total_orders = get_order_count(date_range["start"], date_range["end"], marketplace_id, timezone_str)
-
-        if result:
+        total_orders = len(result)
+        if result != []:
             for ins in result:
                 tax_price = 0
                 gross_revenue += ins['order_total']
                 total_units += ins['items_order_quantity']
-                for j in ins['order_items']:
+                for j in ins['order_items']:                    
                     pipeline = [
-                        {"$match": {"_id": j}},
+                        {
+                            "$match": {
+                                "_id": j
+                            }
+                        },
                         {
                             "$lookup": {
                                 "from": "product",
@@ -169,7 +172,12 @@ def get_metrics_by_date_range(request):
                                 "as": "product_ins"
                             }
                         },
-                        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                        {
+                        "$unwind": {
+                            "path": "$product_ins",
+                            "preserveNullAndEmptyArrays": True
+                        }
+                        },
                         {
                             "$project": {
                                 "_id": 0,
@@ -182,21 +190,19 @@ def get_metrics_by_date_range(request):
                             }
                         }
                     ]
-
+                
                     item_result = list(OrderItems.objects.aggregate(*pipeline))
-                    if item_result:
+                    if item_result != []:
                         tax_price += item_result[0]['tax_price']
                         temp_other_price += item_result[0]['price']
                         if ins['marketplace_name'] == "Amazon":
                             total_cogs += item_result[0]['total_cogs']
                         else:
                             total_cogs += item_result[0]['w_total_cogs']
-
+                        
                         vendor_funding += item_result[0]['vendor_funding']
-
             net_profit = (temp_other_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue) * 100 if gross_revenue != 0 else 0
-
         metrics[key] = {
             "gross_revenue": round(gross_revenue, 2),
             "total_cogs": round(total_cogs, 2),
@@ -218,31 +224,40 @@ def get_metrics_by_date_range(request):
     }
 
     name = "Today Snapshot"
-    item_pipeline = [{"$match": {"name": name}}]
+    item_pipeline = [
+        {"$match": {"name": name}}
+    ]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
-
     if item_result:
         item_result = item_result[0]
-        if not item_result['select_all']:
-            for field in ['gross_revenue', 'units_sold', 'refund_quantity', 'refund_amount', 'net_profit', 'profit_margin', 'orders']:
-                if not item_result.get(field, True):
-                    if field == 'units_sold':
-                        metrics['targeted'].pop('total_units', None)
-                        metrics['previous'].pop('total_units', None)
-                    elif field == 'refund_quantity':
-                        metrics['targeted'].pop('refund', None)
-                        metrics['previous'].pop('refund', None)
-                    elif field == 'orders':
-                        metrics['targeted'].pop('total_orders', None)
-                        metrics['previous'].pop('total_orders', None)
-                    else:
-                        metrics['targeted'].pop(field, None)
-                        metrics['previous'].pop(field, None)
+        if item_result['select_all']:
+            pass
+        if item_result['gross_revenue'] == False:
+            del metrics['targeted']["gross_revenue"]
+            del metrics['previous']["gross_revenue"]
+        if item_result['units_sold'] == False:
+            del metrics['targeted']["total_units"]
+            del metrics['previous']["total_units"]
+        if item_result['total_cogs'] == False:
+            del metrics['targeted']["total_cogs"]
+            del metrics['previous']["total_cogs"]
+        if item_result['orders'] == False:
+            del metrics['targeted']["total_orders"]
+            del metrics['previous']["total_orders"]
+        if item_result['refund_quantity'] == False:
+            del metrics['targeted']["refund"]
+            del metrics['previous']["refund"]
+        if item_result['profit_margin'] == False:
+            del metrics['targeted']["margin"]
+            del metrics['previous']["margin"]
 
     metrics["difference"] = difference
+
     # Sanitize the metrics before returning
     metrics = sanitize_data(metrics)
+
     return metrics
+
 
 # @csrf_exempt
 # def LatestOrdersTodayAPIView(request):
@@ -650,44 +665,47 @@ def updatedRevenueWidgetAPIView(request):
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
 
-    if start_date is not None and start_date != "":
-        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
+    
+    if start_date != None and start_date != "":
+        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
-        start_date, end_date = get_date_range(preset, timezone_str)
+        start_date, end_date = get_date_range(preset,timezone_str)
 
-    compare_past = get_previous_periods(start_date, end_date)
+    comapre_past = get_previous_periods(start_date, end_date)
 
     # Define all fetch functions first
     def fetch_total():
-        return totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id,
-                                       product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        return totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id, 
+                                    product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     def fetch_graph_data():
-        return get_graph_data(start_date, end_date, preset, marketplace_id, brand_id,
-                               product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        return get_graph_data(start_date, end_date, preset, marketplace_id, brand_id, 
+                           product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     def fetch_compare_total():
-        return totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id,
-                                       brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        return totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id, 
+                                    brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     def fetch_compare_graph_data():
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
-        return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id,
-                               brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, 
+                           brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
     # Execute all futures within the same context manager
     with ThreadPoolExecutor(max_workers=4) as executor:
         future_total = executor.submit(fetch_total)
         future_graph_data = executor.submit(fetch_graph_data)
+
         compare_total = None
         compare_graph = None
-
+        
         if compare_startdate and compare_startdate != "":
             compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
             compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
-
+            
             future_compare_total = executor.submit(fetch_compare_total)
             future_compare_graph_data = executor.submit(fetch_compare_graph_data)
+
             # Get comparison results
             compare_total = future_compare_total.result()
             compare_graph = future_compare_graph_data.result()
@@ -735,7 +753,7 @@ def updatedRevenueWidgetAPIView(request):
     data = {
         "total": total,
         "graph": updated_graph,
-        "compare_past": compare_past
+        "comapre_past": comapre_past
     }
 
     if compare_startdate and compare_startdate != "":
@@ -754,17 +772,15 @@ def updatedRevenueWidgetAPIView(request):
     name = "Revenue"
     item_pipeline = [{"$match": {"name": name}}]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
-
+    
     if item_result:
         item_result = item_result[0]
         if not item_result['select_all']:
-            for field in ['gross_revenue', 'units_sold', 'refund_quantity',
-                          'refund_amount', 'net_profit', 'profit_margin', 'orders']:
+            for field in ['gross_revenue', 'units_sold', 'refund_quantity', 
+                         'refund_amount', 'net_profit', 'profit_margin', 'orders']:
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
-
     return data
-
 
 # @csrf_exempt
 # def get_top_products(request):
@@ -2052,12 +2068,14 @@ def getPeriodWiseDataCustom(request):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     json_request = JSONParser().parse(request)
+
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = json_request.get('timezone', 'US/Pacific')
+
     preset = json_request.get("preset")
     start_date = json_request.get("start_date")
     end_date = json_request.get("end_date")
@@ -2065,19 +2083,19 @@ def getPeriodWiseDataCustom(request):
     if start_date:
         # Convert string dates to datetime in the specified timezone
         local_tz = pytz.timezone(timezone_str)
-
+        
         # Create naive datetime objects
         naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
         naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-
+        
         # Localize to the specified timezone
         localized_from_date = local_tz.localize(naive_from_date)
         localized_to_date = local_tz.localize(naive_to_date)
-
+        
         # Convert to UTC
         from_date = localized_from_date.astimezone(pytz.UTC)
         to_date = localized_to_date.astimezone(pytz.UTC)
-
+        
         # For end date, include the entire day (up to 23:59:59)
         to_date = to_date.replace(hour=23, minute=59, second=59)
     else:
@@ -2113,6 +2131,7 @@ def getPeriodWiseDataCustom(request):
             "current": {"from": to_utc_format(cur_from)},
             "previous": {"from": to_utc_format(prev_from)}
         }
+
         date_ranges["current"]["to"] = to_utc_format(cur_to)
         date_ranges["previous"]["to"] = to_utc_format(prev_to)
 
@@ -2155,6 +2174,7 @@ def getPeriodWiseDataCustom(request):
     }
 
     return JsonResponse(response_data, safe=False)
+
 
 @csrf_exempt
 def allMarketplaceData(request):
