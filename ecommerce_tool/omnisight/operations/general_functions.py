@@ -413,7 +413,7 @@ def fetchAllorders(request):
     search_query = json_request.get('search_query')
 
     # Get current time in Pacific Time Zone
-    pacific_tz = pytz.timezone('America/Los_Angeles')
+    pacific_tz = pytz.timezone("US/Pacific")
     current_time_pacific = datetime.now(pacific_tz)
 
     if market_place_id != None and market_place_id != "" and market_place_id != "all" and market_place_id == "custom":
