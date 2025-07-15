@@ -68,15 +68,6 @@ def get_metrics_by_date_range(request):
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = 'US/Pacific' 
     
-    # DEBUG: Print input parameters
-    print(f"DEBUG - Input parameters:")
-    print(f"  marketplace_id: {marketplace_id}")
-    print(f"  target_date_str: {target_date_str}")
-    print(f"  brand_id: {brand_id}")
-    print(f"  product_id: {product_id}")
-    print(f"  manufacturer_name: {manufacturer_name}")
-    print(f"  fulfillment_channel: {fulfillment_channel}")
-    
     # Parse target_date_str to extract the date
     target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
 
@@ -91,12 +82,6 @@ def get_metrics_by_date_range(request):
     previous_date = target_date - timedelta(days=1)
     eight_days_ago = target_date - timedelta(days=8)
 
-    # DEBUG: Print date ranges
-    print(f"DEBUG - Date calculations:")
-    print(f"  target_date: {target_date}")
-    print(f"  previous_date: {previous_date}")
-    print(f"  eight_days_ago: {eight_days_ago}")
-
     # Define the date filters
     date_filters = {
         "targeted": {
@@ -108,11 +93,6 @@ def get_metrics_by_date_range(request):
             "end": datetime(previous_date.year, previous_date.month, previous_date.day, 23, 59, 59)
         }
     }
-
-    # DEBUG: Print date filters
-    print(f"DEBUG - Date filters:")
-    for key, date_range in date_filters.items():
-        print(f"  {key}: {date_range['start']} to {date_range['end']}")
 
     # Define the last 8 days filter as a dictionary with each day's range
     last_8_days_filter = {}
@@ -129,16 +109,13 @@ def get_metrics_by_date_range(request):
 
     def process_date_range(key, date_range, results):
         gross_revenue = 0
-        print(f"DEBUG - Processing graph data for {key}: {date_range['start']} to {date_range['end']}")
         result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        print(f"DEBUG - grossRevenue result for {key}: {len(result) if result else 0} records")
         if result != []:
             for ins in result:
                 gross_revenue += ins['order_total']
         results[key] = {
             "gross_revenue": round(gross_revenue, 2),
         }
-        print(f"DEBUG - Final gross_revenue for {key}: {gross_revenue}")
 
     results = {}
     threads = []
@@ -163,36 +140,30 @@ def get_metrics_by_date_range(request):
         net_profit = 0
         total_units = 0
         total_orders = 0
-        tax_price = 0
-        temp_other_price = 0
+        temp_other_price = 0  # This will track item prices (excluding tax)
         vendor_funding = 0
 
         raw_result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        print(f"DEBUG - Raw grossRevenue result for {key}: {len(raw_result) if raw_result else 0} records")
         
         result=[
             r for r in raw_result
             if r.get('order_status')!='Cancelled' and r.get('order_total')>0
         ]
-        print(f"DEBUG - Filtered result for {key}: {len(result)} records after filtering")
         
         refund_ins = refundOrder(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
-        print(f"DEBUG - Refund result for {key}: {len(refund_ins) if refund_ins else 0} records")
-        
         if refund_ins != []:
             for ins in refund_ins:
                 refund += len(ins['order_items'])
         
         total_orders = len(result)
-        print(f"DEBUG - Total orders for {key}: {total_orders}")
         
         if result != []:
             for ins in result:
-                tax_price = 0
+                # Use order_total for gross_revenue (this includes tax)
                 gross_revenue += ins['order_total']
                 total_units += ins['items_order_quantity']
-                print(f"DEBUG - Processing order with {len(ins['order_items'])} items")
                 
+                # Process each item in the order
                 for j in ins['order_items']:                    
                     pipeline = [
                         {
@@ -228,29 +199,37 @@ def get_metrics_by_date_range(request):
                     ]
                 
                     item_result = list(OrderItems.objects.aggregate(*pipeline))
-                    print(f"DEBUG - Order item aggregation result: {len(item_result)} items")
                     if item_result != []:
                         item_data = item_result[0]
-                        print(f"DEBUG - Item data: {item_data}")
-                        tax_price += item_data['tax_price']
+                        
+                        # Accumulate item price (excluding tax for net profit calculation)
                         temp_other_price += item_data['price']
+                        
+                        # Choose the right COGS based on marketplace
                         if ins['marketplace_name'] == "Amazon":
                             total_cogs += item_data['total_cogs']
                         else:
                             total_cogs += item_data['w_total_cogs']
                         
+                        # Add vendor funding
                         vendor_funding += item_data['vendor_funding']
             
+            # Calculate net profit: (Item prices - COGS) + Vendor funding
             net_profit = (temp_other_price - total_cogs) + vendor_funding
+            
+            # Calculate margin: (Net profit / Gross revenue) * 100
             margin = (net_profit / gross_revenue) * 100 if gross_revenue != 0 else 0
             
             print(f"DEBUG - Final calculations for {key}:")
             print(f"  gross_revenue: {gross_revenue}")
-            print(f"  temp_other_price: {temp_other_price}")
+            print(f"  temp_other_price (item prices): {temp_other_price}")
             print(f"  total_cogs: {total_cogs}")
             print(f"  vendor_funding: {vendor_funding}")
             print(f"  net_profit: {net_profit}")
-            print(f"  margin: {margin}")
+            print(f"  margin: {margin}%")
+            print(f"  total_orders: {total_orders}")
+            print(f"  total_units: {total_units}")
+            print(f"  refund: {refund}")
         
         metrics[key] = {
             "gross_revenue": round(gross_revenue, 2),
@@ -262,6 +241,7 @@ def get_metrics_by_date_range(request):
             "total_units": round(total_units, 2)
         }
 
+    # Calculate differences
     difference = {
         "gross_revenue": round(metrics["targeted"]["gross_revenue"] - metrics["previous"]["gross_revenue"], 2),
         "total_cogs": round(metrics["targeted"]["total_cogs"] - metrics["previous"]["total_cogs"], 2),
@@ -272,6 +252,7 @@ def get_metrics_by_date_range(request):
         "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"], 2),
     }
 
+    # Apply matrix filters
     name = "Today Snapshot"
     item_pipeline = [
         {"$match": {"name": name}}
@@ -279,26 +260,31 @@ def get_metrics_by_date_range(request):
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
     if item_result:
         item_result = item_result[0]
-        if item_result['select_all']:
-            pass
-        if item_result['gross_revenue'] == False:
-            del metrics['targeted']["gross_revenue"]
-            del metrics['previous']["gross_revenue"]
-        if item_result['units_sold'] == False:
-            del metrics['targeted']["total_units"]
-            del metrics['previous']["total_units"]
-        if item_result['total_cogs'] == False:
-            del metrics['targeted']["total_cogs"]
-            del metrics['previous']["total_cogs"]
-        if item_result['orders'] == False:
-            del metrics['targeted']["total_orders"]
-            del metrics['previous']["total_orders"]
-        if item_result['refund_quantity'] == False:
-            del metrics['targeted']["refund"]
-            del metrics['previous']["refund"]
-        if item_result['profit_margin'] == False:
-            del metrics['targeted']["margin"]
-            del metrics['previous']["margin"]
+        if not item_result.get('select_all', True):  # Only filter if select_all is False
+            if item_result.get('gross_revenue') == False:
+                metrics['targeted'].pop("gross_revenue", None)
+                metrics['previous'].pop("gross_revenue", None)
+                difference.pop("gross_revenue", None)
+            if item_result.get('units_sold') == False:
+                metrics['targeted'].pop("total_units", None)
+                metrics['previous'].pop("total_units", None)
+                difference.pop("total_units", None)
+            if item_result.get('total_cogs') == False:
+                metrics['targeted'].pop("total_cogs", None)
+                metrics['previous'].pop("total_cogs", None)
+                difference.pop("total_cogs", None)
+            if item_result.get('orders') == False:
+                metrics['targeted'].pop("total_orders", None)
+                metrics['previous'].pop("total_orders", None)
+                difference.pop("total_orders", None)
+            if item_result.get('refund_quantity') == False:
+                metrics['targeted'].pop("refund", None)
+                metrics['previous'].pop("refund", None)
+                difference.pop("refund", None)
+            if item_result.get('profit_margin') == False:
+                metrics['targeted'].pop("margin", None)
+                metrics['previous'].pop("margin", None)
+                difference.pop("margin", None)
 
     metrics["difference"] = difference
 
