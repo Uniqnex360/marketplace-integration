@@ -371,70 +371,88 @@ def LatestOrdersTodayAPIView(request):
     product_id = json_request.get('product_id', [])
     brand_id = json_request.get('brand_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel',None)
+    fulfillment_channel = json_request.get('fulfillment_channel', None)
+    
     pacific = pytz.timezone("US/Pacific")
+    utc = pytz.UTC
+    
+    # Get current time in Pacific
+    now_pacific = datetime.now(pacific)
+    
+    # Get start and end of day in Pacific, then convert to UTC for database query
+    start_of_day_pacific = now_pacific.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_day_pacific = now_pacific.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    # Convert to UTC for database query (assuming your DB stores dates in UTC)
+    start_of_day_utc = start_of_day_pacific.astimezone(utc)
+    end_of_day_utc = end_of_day_pacific.astimezone(utc)
 
-    now = datetime.now(pacific)
-    # For a 24-hour period ending now
-    start_of_day = now.replace(hour=0,minute=0,second=0,microsecond=0)
-    end_of_day = now
-
-    # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
+    # Build match criteria
     match = dict()
-    match['order_date'] = {"$gte": start_of_day, "$lte": end_of_day}
+    match['order_date'] = {"$gte": start_of_day_utc, "$lte": end_of_day_utc}
     match['order_status'] = {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
+    
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
         match['marketplace_id'] = ObjectId(marketplace_id)
 
     if manufacturer_name != None and manufacturer_name != "" and manufacturer_name != []:
-        ids = getproductIdListBasedonManufacture(manufacturer_name,start_of_day, end_of_day)
+        ids = getproductIdListBasedonManufacture(manufacturer_name, start_of_day_utc, end_of_day_utc)
         match["_id"] = {"$in": ids}
     
     elif product_id != None and product_id != "" and product_id != []:
         product_id = [ObjectId(pid) for pid in product_id]
-        ids = getOrdersListBasedonProductId(product_id,start_of_day, end_of_day)
+        ids = getOrdersListBasedonProductId(product_id, start_of_day_utc, end_of_day_utc)
         match["_id"] = {"$in": ids}
 
     elif brand_id != None and brand_id != "" and brand_id != []:
         brand_id = [ObjectId(bid) for bid in brand_id]
-        ids = getproductIdListBasedonbrand(brand_id,start_of_day, end_of_day)
+        ids = getproductIdListBasedonbrand(brand_id, start_of_day_utc, end_of_day_utc)
         match["_id"] = {"$in": ids}
 
     pipeline = [
-            {
-                "$match": match
-            },
-            {
-                "$project": {
-                    "_id" : 1,
-                    "order_date": 1,
-                    "order_items": 1
-                }
+        {
+            "$match": match
+        },
+        {
+            "$sort": {"order_date": -1}  # Sort by newest first
+        },
+        {
+            "$project": {
+                "_id" : 1,
+                "order_date": 1,
+                "order_items": 1
             }
-        ]
+        }
+    ]
     qs = list(Order.objects.aggregate(*pipeline))
 
-
-    # 3️⃣ Pre-fill a 24-slot OrderedDict for every hour in the time range
+    # Pre-fill a 24-slot OrderedDict for every hour in Pacific time
     chart = OrderedDict()
     
-    bucket = start_of_day.replace(minute=0, second=0, microsecond=0)
-    for _ in range(25):  # 25 to include the current hour
+    bucket = start_of_day_pacific.replace(minute=0, second=0, microsecond=0)
+    for _ in range(24):  # 24 hours in a day
         key = bucket.strftime("%Y-%m-%d %H:00:00")
         chart[key] = {"ordersCount": 0, "unitsCount": 0}
         bucket += timedelta(hours=1)
 
-    # 4️⃣ Build the detail array + populate chart
+    # Build the detail array + populate chart
     orders_out = []
     for order in qs:
-        # Convert order_date to user's timezone for consistent bucketing
-        order_local_time = order.get('order_date')  # Ensure 'order_date' is accessed correctly
+        # Convert order_date from UTC to Pacific for display and bucketing
+        order_utc_time = order.get('order_date')
         
-        # hour bucket for this order
-        if isinstance(order_local_time, datetime):  # Check if it's a valid datetime object
-            bk = order_local_time.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:00:00")
+        if isinstance(order_utc_time, datetime):
+            # Ensure the datetime is timezone-aware
+            if order_utc_time.tzinfo is None:
+                order_utc_time = utc.localize(order_utc_time)
+            
+            # Convert to Pacific time for display
+            order_pacific_time = order_utc_time.astimezone(pacific)
+            
+            # Create hour bucket key in Pacific time
+            bk = order_pacific_time.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:00:00")
         else:
             raise TypeError("'order_date' must be a datetime object")
         
@@ -443,7 +461,6 @@ def LatestOrdersTodayAPIView(request):
             chart[bk]["ordersCount"] += 1
             try:
                 # iterate each OrderItems instance referenced on this order
-                
                 item_pipeline = [
                     {"$match": {"_id": {"$in": order['order_items']}}},
                     {
@@ -463,21 +480,11 @@ def LatestOrdersTodayAPIView(request):
                                 "asin": {"$ifNull": ["$product_ins.product_id", ""]},
                                 "title": "$product_ins.product_title",
                                 "imageUrl": "$product_ins.image_url",
-                                "purchaseDate": {
-                                    "$dateToString": {
-                                        "format": "%Y-%m-%d %H:%M:%S",
-                                        "date": order_local_time
-                                    }
-                                }
+                                "purchaseDate": order_pacific_time  # Use Pacific time datetime object
                             },
                             "quantityOrdered": {"$sum": "$ProductDetails.QuantityOrdered"},
                             "unitPrice": {"$first": "$Pricing.ItemPrice.Amount"},
                             "Platform" : {"$first": "$Platform"},
-                            # "totalPrice": {
-                            #     "$sum": {
-                            #         "$multiply": ["$Pricing.ItemPrice.Amount", "$ProductDetails.QuantityOrdered"]
-                            #     }
-                            # }
                         }
                     },
                     {
@@ -491,7 +498,6 @@ def LatestOrdersTodayAPIView(request):
                             "quantityOrdered": "$quantityOrdered",
                             "unitPrice": "$unitPrice",
                             "Platform" : "$Platform",
-                            # "totalPrice": {"$round": ["$totalPrice", 2]},
                             "purchaseDate": "$_id.purchaseDate"
                         }
                     }
@@ -504,6 +510,8 @@ def LatestOrdersTodayAPIView(request):
                             price = item["unitPrice"] * item['quantityOrdered']
                         elif item["Platform"] == "Amazon":
                             price = item["unitPrice"]
+                        else:
+                            price = item["unitPrice"]
                     except:
                         price = 0
                             
@@ -515,17 +523,24 @@ def LatestOrdersTodayAPIView(request):
                         "quantityOrdered": item["quantityOrdered"],
                         "imageUrl": item["imageUrl"],
                         "price": price,
-                        "purchaseDate": item["purchaseDate"]
+                        "purchaseDate": order_pacific_time.strftime("%Y-%m-%d %H:%M:%S"),  # Format as string in Pacific time
+                        "purchaseDatetime": order_pacific_time  # Keep datetime object for sorting
                     })
 
                     # add to units count
                     chart[bk]["unitsCount"] += item["quantityOrdered"]
 
-            except:
-                pass
+            except Exception as e:
+                # Better error handling - log the error but continue processing
+                print(f"Error processing order {order.get('_id')}: {str(e)}")
+                continue
 
-    # 5️⃣ sort orders by most recent purchaseDate
-    orders_out.sort(key=lambda o: o["purchaseDate"], reverse=True)
+    # Sort orders by most recent purchaseDate (using datetime object)
+    orders_out.sort(key=lambda o: o["purchaseDatetime"], reverse=True)
+    
+    # Remove the datetime object before returning (keep only the string)
+    for order in orders_out:
+        order.pop("purchaseDatetime", None)
     
     # Convert chart to list format for easier frontend consumption
     chart_list = [{"hour": hour, **data} for hour, data in chart.items()]
