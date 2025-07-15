@@ -66,7 +66,7 @@ def get_metrics_by_date_range(request):
     product_id = json_request.get('product_id', None)
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str="US/Pacific"
     
     # Parse target_date_str to extract the date
     target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
@@ -661,7 +661,7 @@ def updatedRevenueWidgetAPIView(request):
     brand_id = json_request.get("brand_id", None)
     manufacturer_name = json_request.get("manufacturer_name", None)
     fulfillment_channel = json_request.get("fulfillment_channel", None)
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str="US/Pacific"
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
 
@@ -2058,7 +2058,7 @@ def exportPeriodWiseCSV(request):
 
 
 @csrf_exempt
-def getPeriodWiseDataCustom(request):
+def  getPeriodWiseDataCustom(request):
     import pytz
     from datetime import datetime, timedelta
     from rest_framework.parsers import JSONParser
@@ -2074,7 +2074,8 @@ def getPeriodWiseDataCustom(request):
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str="US/Pacific"
+
 
     preset = json_request.get("preset")
     start_date = json_request.get("start_date")
