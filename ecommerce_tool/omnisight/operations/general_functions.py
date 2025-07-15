@@ -531,6 +531,7 @@ def fetchAllorders(request):
         ])
         
         orders = list(Order.objects.aggregate(*(pipeline)))
+        print('orders',orders)
         count_pipeline.extend([
             {
                 "$count": "total_count"
