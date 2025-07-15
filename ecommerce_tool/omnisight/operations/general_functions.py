@@ -407,51 +407,13 @@ def fetchAllorders(request):
     sort_by = json_request.get('sort_by')
     sort_by_value = json_request.get('sort_by_value')
     search_query = json_request.get('search_query')
-    
-    # Get current time in US Pacific timezone
-    pacific = pytz.timezone('US/Pacific')
-    current_pacific_time = datetime.now(pacific)
-    
-    # Since your order_date appears to be stored as strings without timezone info,
-    # we need to determine what timezone those strings represent
-    # Based on your data, it seems like they're stored in UTC
-    # So we convert Pacific time to UTC for comparison
-    current_utc_time = current_pacific_time.astimezone(pytz.UTC)
-    
-    # Add time filter to match documents with order_date <= current Pacific time
-    # Using $dateFromString to convert string dates to proper date objects for comparison
-    time_filter = {
-        "$match": {
-            "$expr": {
-                "$lte": [
-                    {"$dateFromString": {"dateString": "$order_date"}},
-                    current_utc_time
-                ]
-            }
-        }
-    }
         
     if market_place_id != None and market_place_id != "" and market_place_id != "all" and market_place_id == "custom":
         search_query = re.escape(search_query.strip()) 
         match = { "$match" : 
                     {"order_id": {"$regex": search_query, "$options": "i"}}}
         pipeline.append(match)
-        
-        # Add time filter for custom orders
-        custom_time_filter = {
-            "$match": {
-                "$expr": {
-                    "$lte": [
-                        {"$dateFromString": {"dateString": "$purchase_order_date"}},
-                        current_utc_time
-                    ]
-                }
-            }
-        }
-        pipeline.append(custom_time_filter)
-        count_pipeline.append(custom_time_filter)
-        
-        pipeline.extend([
+        pipeline = [
         {
             "$project": {
                 "_id": 0,
@@ -468,8 +430,7 @@ def fetchAllorders(request):
                 "currency" : {"$ifNull" : ["$currency","USD"]}
             }
         }
-        ])
-        
+        ]
         if sort_by != None and sort_by != "":
             sort = {
                 "$sort" : {
@@ -493,11 +454,11 @@ def fetchAllorders(request):
         ])
 
         manual_orders = list(custom_order.objects.aggregate(*pipeline))
-        count_pipeline.extend([
+        count_pipeline = [
             {
                 "$count": "total_count"
             }
-        ])
+        ]
         total_count_result = list(custom_order.objects.aggregate(*(count_pipeline)))
         total_count = total_count_result[0]['total_count'] if total_count_result else 0
         data['total_count'] = total_count
@@ -512,11 +473,6 @@ def fetchAllorders(request):
         }
         pipeline.append(match)
         count_pipeline.append(match)
-    
-    # Add time filter for regular orders
-    pipeline.append(time_filter)
-    count_pipeline.append(time_filter)
-    
     if search_query != None and search_query != "":
         search_query = re.escape(search_query.strip())
         match = { "$match" : 
@@ -524,7 +480,6 @@ def fetchAllorders(request):
             # {"sku": {"$regex": search_query, "$options": "i"}},
         pipeline.append(match)
         count_pipeline.append(match)
-        
     if market_place_id != "custom":
         if sort_by != None and sort_by != "":
             sort = {
@@ -600,6 +555,8 @@ def fetchAllorders(request):
         ]
     data['marketplace_list'] = list(Marketplace.objects.aggregate(*(pipeline)))
     return data
+
+
 
 def fetchOrderDetails(request):
     data = {}
