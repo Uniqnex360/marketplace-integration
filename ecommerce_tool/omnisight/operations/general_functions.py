@@ -412,10 +412,11 @@ def fetchAllorders(request):
     pacific = pytz.timezone('US/Pacific')
     current_pacific_time = datetime.now(pacific)
     
-    # If your stored dates are in IST (Indian Standard Time), convert Pacific time to IST
-    # If they're in UTC, change 'Asia/Kolkata' to 'UTC'
-    ist = pytz.timezone('Asia/Kolkata')  # Change this to 'UTC' if dates are stored in UTC
-    current_ist_time = current_pacific_time.astimezone(ist)
+    # Since your order_date appears to be stored as strings without timezone info,
+    # we need to determine what timezone those strings represent
+    # Based on your data, it seems like they're stored in UTC
+    # So we convert Pacific time to UTC for comparison
+    current_utc_time = current_pacific_time.astimezone(pytz.UTC)
     
     # Add time filter to match documents with order_date <= current Pacific time
     # Using $dateFromString to convert string dates to proper date objects for comparison
@@ -424,7 +425,7 @@ def fetchAllorders(request):
             "$expr": {
                 "$lte": [
                     {"$dateFromString": {"dateString": "$order_date"}},
-                    current_ist_time  # Use current_ist_time if dates are in IST
+                    current_utc_time
                 ]
             }
         }
@@ -442,7 +443,7 @@ def fetchAllorders(request):
                 "$expr": {
                     "$lte": [
                         {"$dateFromString": {"dateString": "$purchase_order_date"}},
-                        current_ist_time  # Use current_ist_time if dates are in IST
+                        current_utc_time
                     ]
                 }
             }
@@ -599,7 +600,6 @@ def fetchAllorders(request):
         ]
     data['marketplace_list'] = list(Marketplace.objects.aggregate(*(pipeline)))
     return data
-
 
 def fetchOrderDetails(request):
     data = {}
