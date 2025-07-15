@@ -14,6 +14,9 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 from datetime import datetime
 import pytz
+from django.utils import timezone as django_timezone
+import pytz
+from datetime import datetime
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 from pytz import timezone as pytz_timezone
@@ -401,8 +404,8 @@ def fetchAllorders(request):
     all_orders = []
     
     # Get current time in US Pacific timezone
-    pacific_tz = pytz_timezone('US/Pacific')
-    current_time_pacific = timezone.now().astimezone(pacific_tz)
+    pacific_tz = pytz.timezone('US/Pacific')
+    current_time_pacific = django_timezone.localtime(django_timezone.now(), timezone=pacific_tz)
 
     json_request = JSONParser().parse(request)
     user_id = json_request.get('user_id')
