@@ -782,6 +782,7 @@ def updatedRevenueWidgetAPIView(request):
                     data['total'].pop(field, None)
     return data
 
+
 # @csrf_exempt
 # def get_top_products(request):
 #     json_request = JSONParser().parse(request)
