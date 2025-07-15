@@ -516,7 +516,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     import pytz
     
     # Store the original timezone for later conversion
-    user_timezone = pytz.timezone(timezone) if timezone != 'UTC' else pytz.UTC
+    user_timezone = pytz.timezone("US/Pacific")
     
     # Store original dates in user timezone
     original_start_date = start_date
