@@ -372,7 +372,8 @@ def LatestOrdersTodayAPIView(request):
     brand_id = json_request.get('brand_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
-    pacific=timezone("US/Pacific")
+    pacific = pytz.timezone("US/Pacific")
+
     now = datetime.now(pacific)
     # For a 24-hour period ending now
     start_of_day = now.replace(hour=0,minute=0,second=0,microsecond=0)
