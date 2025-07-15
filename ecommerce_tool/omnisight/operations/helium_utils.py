@@ -243,7 +243,8 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     
     match = dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
+    match['order_status'] = {"$ne": "Cancelled"}
+    match['order_total'] = {"$gt": 0}
     
     # Rest of your existing code...
     if fulfillment_channel:
