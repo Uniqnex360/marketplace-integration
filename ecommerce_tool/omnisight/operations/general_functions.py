@@ -539,6 +539,11 @@ def fetchAllorders(request):
         
         orders = list(Order.objects.aggregate(*(pipeline)))
 
+        # Ensure order_date is timezone-aware
+        for order in orders:
+            if order['order_date'] is not None and order['order_date'].tzinfo is None:
+                order['order_date'] = order['order_date'].replace(tzinfo=pacific_tz)
+
         # Filter orders to only include those up to the current time in Pacific Time
         orders = [order for order in orders if order['order_date'] <= current_time_pacific]
 
