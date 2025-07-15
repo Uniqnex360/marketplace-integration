@@ -412,8 +412,13 @@ def fetchAllorders(request):
     limit = int(json_request.get('limit', 100))  # Default limit = 100 if not provided
     skip = int(json_request.get('skip', 0))  # Default skip = 0 if not provided
     market_place_id = json_request.get('marketplace_id')
-    sort_by = json_request.get('sort_by', 'purchase_order_date')
-    sort_by_value = json_request.get('sort_by_value', -1)
+    
+    # Ensure sort_by has a valid value
+    sort_by = json_request.get('sort_by', 'order_date')
+    if not sort_by:
+        sort_by = 'order_date'
+    
+    sort_by_value = int(json_request.get('sort_by_value', -1))
     search_query = json_request.get('search_query', '')
 
     # Prepare base pipelines for both custom and marketplace orders
@@ -452,7 +457,7 @@ def fetchAllorders(request):
         # Sorting
         sort = {
             "$sort": {
-                sort_by: int(sort_by_value)
+                sort_by: sort_by_value
             }
         }
         pipeline.append(sort)
@@ -481,7 +486,7 @@ def fetchAllorders(request):
                 "total_price": {"$ifNull": [{"$round": ["$total_price", 2]}, 0.0]},
                 "purchase_order_date": {"$ifNull": ["$purchase_order_date", None]},
                 "expected_delivery_date": {"$ifNull": ["$expected_delivery_date", None]},
-                "order_status": "$order_status",
+                "order_status": {"$ifNull": ["$order_status", ""]},
                 "currency": {"$ifNull": ["$currency", "USD"]},
                 "order_type": {"$literal": "custom"}
             }
@@ -522,19 +527,19 @@ def fetchAllorders(request):
                 }
             },
             {
-                "$unwind": "$marketplace_ins"
+                "$unwind": {"path": "$marketplace_ins", "preserveNullAndEmptyArrays": True}
             },
             {
                 "$project": {
                     "_id": 0,
                     "id": {"$toString": "$_id"},
-                    "purchase_order_id": "$purchase_order_id",
-                    "order_date": "$order_date",
-                    "order_status": "$order_status",
-                    "order_total": "$order_total",
-                    "currency": "$currency",
-                    "marketplace_name": "$marketplace_ins.name",
-                    "items_order_quantity": "$items_order_quantity",
+                    "purchase_order_id": {"$ifNull": ["$purchase_order_id", ""]},
+                    "order_date": {"$ifNull": ["$order_date", None]},
+                    "order_status": {"$ifNull": ["$order_status", ""]},
+                    "order_total": {"$ifNull": ["$order_total", 0.0]},
+                    "currency": {"$ifNull": ["$currency", "USD"]},
+                    "marketplace_name": {"$ifNull": ["$marketplace_ins.name", ""]},
+                    "items_order_quantity": {"$ifNull": ["$items_order_quantity", 0]},
                     "order_type": {"$literal": "marketplace"}
                 }
             }
