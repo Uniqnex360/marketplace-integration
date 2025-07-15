@@ -410,14 +410,25 @@ def fetchAllorders(request):
     
     # Get current time in US/Pacific timezone
     pacific_tz = pytz.timezone('US/Pacific')
+    utc_tz = pytz.timezone('UTC')
     now_pacific = datetime.now(pacific_tz)
     
-    # Convert to UTC for MongoDB query (assuming your dates are stored in UTC)
-    now_utc = now_pacific.astimezone(pytz.UTC)
+    # Convert to UTC for MongoDB query
+    now_utc = now_pacific.astimezone(utc_tz)
+    
+    # Since your dates seem to be stored as strings without timezone info,
+    # we need to create a filter that works with ISO format strings
+    # Convert to ISO format string for MongoDB comparison
+    cutoff_time_str = now_utc.strftime('%Y-%m-%dT%H:%M:%S')
+    
+    # Alternative: Get end of day in Pacific timezone if you want all orders for today
+    # end_of_day_pacific = now_pacific.replace(hour=23, minute=59, second=59, microsecond=999999)
+    # end_of_day_utc = end_of_day_pacific.astimezone(utc_tz)
+    # cutoff_time_str = end_of_day_utc.strftime('%Y-%m-%dT%H:%M:%S')
     
     # Add date filter to match conditions
     date_filter = {
-        "$lte": now_utc
+        "$lte": cutoff_time_str
     }
         
     if market_place_id != None and market_place_id != "" and market_place_id != "all" and market_place_id == "custom":
