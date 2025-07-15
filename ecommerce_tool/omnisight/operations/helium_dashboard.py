@@ -661,7 +661,7 @@ def updatedRevenueWidgetAPIView(request):
     brand_id = json_request.get("brand_id", None)
     manufacturer_name = json_request.get("manufacturer_name", None)
     fulfillment_channel = json_request.get("fulfillment_channel", None)
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str = 'US/Pacific' 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
 
