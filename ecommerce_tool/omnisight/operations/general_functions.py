@@ -393,6 +393,7 @@ def getOrdersBasedOnProduct(request):
 
 
 @csrf_exempt
+
 def fetchAllorders(request):
     data = dict()
     orders = []
