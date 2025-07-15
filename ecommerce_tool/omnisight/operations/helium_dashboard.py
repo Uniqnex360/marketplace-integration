@@ -3590,7 +3590,7 @@ def getProfitAndLossDetails(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
-    timezone = json_request.get('timezone', 'US/Pacific')
+    timezone = 'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
     if start_date != None and start_date != "":
@@ -3872,7 +3872,7 @@ def profit_loss_chart(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
-    timezone = json_request.get('timezone', 'US/Pacific')
+    timezone = 'US/Pacific'
 
 
     start_date = json_request.get("start_date", None)
@@ -4058,7 +4058,7 @@ def profitLossExportXl(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset', "Last 30 days")
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str = 'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
     if start_date and start_date != "":
@@ -4263,7 +4263,7 @@ def profitLossChartCsv(request):
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset',"Last 7 days")
 
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str =  'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
     if start_date and start_date != "":
