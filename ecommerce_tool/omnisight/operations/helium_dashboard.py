@@ -1809,7 +1809,7 @@ def getPeriodWiseData(request):
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str = 'US/Pacific'
 
     # Modified to avoid nested threading
     def calculate_metrics_sync(start_date, end_date):
