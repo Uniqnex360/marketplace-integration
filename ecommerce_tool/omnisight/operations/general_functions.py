@@ -1205,7 +1205,7 @@ def salesAnalytics(request):
         date_range = json_request.get('date_range', 'all')  
         start_date = json_request.get('start_date')  
         end_date = json_request.get('end_date')  
-        timezone_str = json_request.get('timezone', 'US/Pacific')
+        timezone_str = 'US/Pacific'
         preset = json_request.get("preset", "Today")        
 
         # Date logic

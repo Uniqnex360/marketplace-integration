@@ -372,10 +372,10 @@ def LatestOrdersTodayAPIView(request):
     brand_id = json_request.get('brand_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
-
-    now = datetime.now()
+    pacific=timezone("US/Pacific")
+    now = datetime.now(pacific)
     # For a 24-hour period ending now
-    start_of_day = now - timedelta(hours=24)
+    start_of_day = now.replace(hour=0,minute=0,second=0,microsecond=0)
     end_of_day = now
 
     # 2️⃣ Fetch all Shipped/Delivered orders for the 24-hour period
@@ -418,6 +418,7 @@ def LatestOrdersTodayAPIView(request):
 
     # 3️⃣ Pre-fill a 24-slot OrderedDict for every hour in the time range
     chart = OrderedDict()
+    
     bucket = start_of_day.replace(minute=0, second=0, microsecond=0)
     for _ in range(25):  # 25 to include the current hour
         key = bucket.strftime("%Y-%m-%d %H:00:00")
@@ -959,7 +960,7 @@ def get_top_products(request):
     start_date_str = json_request.get("start_date", None)
     end_date_str = json_request.get("end_date", None)
 
-    timezone_str = json_request.get('timezone', 'US/Pacific')  # Default to US/Pacific if no timezone is provided
+    timezone_str = 'US/Pacific'
 
     # Determine start and end dates
     if start_date_str and end_date_str:
