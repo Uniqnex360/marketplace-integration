@@ -1242,7 +1242,7 @@ def get_products_with_pagination(request):
     parent_search = json_request.get('parent_search')
     sku_search = json_request.get('sku_search')
     search_query = json_request.get('search_query')
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str = 'US/Pacific'
 
     # Date handling
     if start_date and start_date != "":
@@ -2186,7 +2186,7 @@ def allMarketplaceData(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str = 'US/Pacific'
 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
@@ -2454,7 +2454,7 @@ def allMarketplaceDataxl(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str = 'US/Pacific'
 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
@@ -2613,7 +2613,7 @@ def downloadMarketplaceDataCSV(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str = 'US/Pacific'
 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
@@ -2856,7 +2856,7 @@ def getProductPerformanceSummary(request):
     product_id = json_request.get('product_id',[])
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str =  'US/Pacific'
     local_tz = pytz.timezone(timezone_str)
     today = datetime.now(local_tz)
     yesterday_start_date = today - timedelta(days=1)
@@ -2896,7 +2896,7 @@ def downloadProductPerformanceSummary(request):
     product_id = json_request.get('product_id',[])
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str = 'timezone', 'US/Pacific'
     local_tz = timezone(timezone_str)
     today = datetime.now(local_tz)
     yesterday_start_date = today - timedelta(days=1)
@@ -2990,7 +2990,7 @@ def downloadProductPerformanceCSV(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str =  'US/Pacific'
     local_tz = timezone(timezone_str)
     today = datetime.now(local_tz)
     yesterday_start_date = today - timedelta(days=1)
