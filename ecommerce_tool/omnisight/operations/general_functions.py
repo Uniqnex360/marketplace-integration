@@ -401,7 +401,7 @@ def fetchAllorders(request):
     pipeline = []
     count_pipeline = []
 
-    json_request = JSONParser().parse(request)
+    json_request = request.data
     user_id = json_request.get('user_id')
     limit = int(json_request.get('limit', 100))  # Default limit = 100 if not provided
     skip = int(json_request.get('skip', 0))  # Default skip = 0 if not provided
@@ -547,7 +547,6 @@ def fetchAllorders(request):
         # Filter orders to only include those up to the current time in Pacific Time
         orders = [order for order in orders if order['order_date'] <= current_time_pacific]
 
-        print('orders', orders)
         count_pipeline.extend([
             {
                 "$count": "total_count"
