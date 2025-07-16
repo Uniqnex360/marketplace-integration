@@ -420,7 +420,7 @@ def fetchAllorders(request):
     if market_place_id != None and market_place_id != "" and market_place_id != "all" and market_place_id == "custom":
         search_query = re.escape(search_query.strip()) 
         match = { "$match" : 
-                    {"order_id": {"$regex": search_query, "$options": "i"}}}
+                    {"order_id": {"$regex": search_query, "$options": "i"},"order_status":{"$ne":"Cancelled"}}}
         pipeline.append(match)
         pipeline = [
         {
@@ -476,7 +476,8 @@ def fetchAllorders(request):
     elif market_place_id != None and market_place_id != "" and market_place_id != "all" and market_place_id != "custom":
         match = {
             "$match": {
-                "marketplace_id": ObjectId(market_place_id)
+                "marketplace_id": ObjectId(market_place_id),
+                "order_status":{"$ne":"Cancelled"}
             }
         }
         pipeline.append(match)
