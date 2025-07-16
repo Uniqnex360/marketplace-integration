@@ -21,6 +21,8 @@ from omnisight.operations.helium_utils import get_date_range, convertLocalTimeTo
 import pytz
 from pytz import timezone
 import logging
+from rest_framework.decorators import api_view
+from rest_framework.response import Response    
 import math
 from django.http import JsonResponse
 from rest_framework.parsers import JSONParser
@@ -395,6 +397,7 @@ def getOrdersBasedOnProduct(request):
 
 
 @csrf_exempt
+@api_view(["POST"])
 def fetchAllorders(request):
     data = dict()
     orders = []
@@ -570,7 +573,7 @@ def fetchAllorders(request):
             }
         ]
     data['marketplace_list'] = list(Marketplace.objects.aggregate(*(pipeline)))
-    return data
+    return Response(data)
 
 
 def fetchOrderDetails(request):
