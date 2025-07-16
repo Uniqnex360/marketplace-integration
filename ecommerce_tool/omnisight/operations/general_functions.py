@@ -451,7 +451,7 @@ def fetchAllorders(request):
 
         sort = {
             "$sort": {
-                sort_by if sort_by else "id": int(sort_by_value) if sort_by_value else -1
+                sort_by if sort_by else "id": int(sort_by_value) if sort_by_value else 1
             }
         }
         pipeline.append(sort)
@@ -501,7 +501,7 @@ def fetchAllorders(request):
 
         sort = {
             "$sort": {
-                sort_by if sort_by else "order_date": int(sort_by_value) if sort_by_value else -1
+                sort_by if sort_by else "order_date": int(sort_by_value) if sort_by_value else 1
             }
         }
         pipeline.append(sort)
