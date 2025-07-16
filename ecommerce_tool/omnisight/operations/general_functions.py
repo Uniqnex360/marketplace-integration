@@ -400,31 +400,30 @@ def getOrdersBasedOnProduct(request):
 @api_view(["POST"])
 def fetchAllorders(request):
     data = dict()
-    orders = []
     pipeline = []
     count_pipeline = []
 
     json_request = request.data
     user_id = json_request.get('user_id')
-    limit = int(json_request.get('limit', 100))  # Default limit = 100 if not provided
-    skip = int(json_request.get('skip', 0))  # Default skip = 0 if not provided
+    limit = int(json_request.get('limit', 100))
+    skip = int(json_request.get('skip', 0))
     market_place_id = json_request.get('marketplace_id')
     sort_by = json_request.get('sort_by')
     sort_by_value = json_request.get('sort_by_value')
     search_query = json_request.get('search_query')
 
-    # Get current time in Pacific Time Zone
-    pacific_tz = pytz.timezone("US/Pacific")
-    current_time_pacific = datetime.now(pacific_tz)
-
-    if market_place_id != None and market_place_id != "" and market_place_id != "all" and market_place_id == "custom":
-        search_query = re.escape(search_query.strip()) 
-        match = { "$match" : 
-                    {"order_id": {"$regex": search_query, "$options": "i"},"order_status":{"$ne":"Cancelled"}}}
-        pipeline.append(match)
+    # Base match for non-cancelled orders
+    base_match = {"order_status": {"$ne": "Cancelled"}}
+    
+    # Custom orders handling
+    if market_place_id == "custom":
+        if search_query:
+            search_query = re.escape(search_query.strip())
+            base_match["order_id"] = {"$regex": search_query, "$options": "i"}
+        
         pipeline = [
-        {
-            "$project": {
+            {"$match": base_match},
+            {"$project": {
                 "_id": 0,
                 "id": {"$toString": "$_id"},
                 "order_id": {"$ifNull": ["$order_id", ""]},
@@ -434,98 +433,45 @@ def fetchAllorders(request):
                 "total_price": {"$ifNull": [{"$round": ["$total_price", 2]}, 0.0]},
                 "purchase_order_date": {"$ifNull": ["$purchase_order_date", None]},
                 "expected_delivery_date": {"$ifNull": ["$expected_delivery_date", None]},
-                "order_status" : "$order_status",
-                "currency" : {"$ifNull" : ["$currency","USD"]}
-            }
-        }
+                "order_status": "$order_status",
+                "currency": {"$ifNull": ["$currency", "USD"]}
+            }},
+            {"$sort": {sort_by: int(sort_by_value)} if sort_by else {"id": -1}},
+            {"$skip": skip},
+            {"$limit": limit}
         ]
-        if sort_by != None and sort_by != "":
-            sort = {
-                "$sort" : {
-                    sort_by : int(sort_by_value)
-                }
-            }
-        else:
-            sort = {
-                "$sort" : {
-                    "id" : -1
-                }
-            }
-        pipeline.append(sort)
-        pipeline.extend([
-            {
-            "$skip": skip
-        },
-        {
-            "$limit": limit
-        }
-        ])
 
         manual_orders = list(custom_order.objects.aggregate(*pipeline))
-        count_pipeline = [
-            {
-                "$count": "total_count"
-            }
-        ]
-        total_count_result = list(custom_order.objects.aggregate(*(count_pipeline)))
-        total_count = total_count_result[0]['total_count'] if total_count_result else 0
-        data['total_count'] = total_count
-        data['manual_orders'] = manual_orders
-        data['status'] = "custom"
+        total_count = custom_order.objects.count_documents(base_match)
+        
+        data.update({
+            'total_count': total_count,
+            'manual_orders': manual_orders,
+            'status': "custom"
+        })
 
-    elif market_place_id != None and market_place_id != "" and market_place_id != "all" and market_place_id != "custom":
-        match = {
-            "$match": {
-                "marketplace_id": ObjectId(market_place_id),
-                "order_status":{"$ne":"Cancelled"}
-            }
-        }
-        pipeline.append(match)
-        count_pipeline.append(match)
-    
-    if search_query != None and search_query != "":
-        search_query = re.escape(search_query.strip())
-        match = { "$match" : 
-                    {"purchase_order_id": {"$regex": search_query, "$options": "i"}}}
-        pipeline.append(match)
-        count_pipeline.append(match)
-
-    if market_place_id != "custom":
-        if sort_by != None and sort_by != "":
-            sort = {
-                "$sort" : {
-                    sort_by : int(sort_by_value)
-                }
-            }
-        else:
-            sort =  {
-                "$sort" : {
-                    "order_date" : -1
-                }
-            }
-        pipeline.append(sort)
-        pipeline.extend([
-            {
-            "$skip": skip
-        },
-        {
-            "$limit": limit
-        }
-        ])
-        pipeline.extend([
-            {
-            "$lookup": {
+    # Non-custom orders handling
+    else:
+        if market_place_id and market_place_id != "all":
+            base_match["marketplace_id"] = ObjectId(market_place_id)
+        
+        if search_query:
+            search_query = re.escape(search_query.strip())
+            base_match["purchase_order_id"] = {"$regex": search_query, "$options": "i"}
+        
+        pipeline = [
+            {"$match": base_match},
+            {"$sort": {sort_by: int(sort_by_value)} if sort_by else {"order_date": -1}},
+            {"$skip": skip},
+            {"$limit": limit},
+            {"$lookup": {
                 "from": "marketplace",
                 "localField": "marketplace_id",
                 "foreignField": "_id",
                 "as": "marketplace_ins"
-            }
-            },
-            {
-            "$unwind": "$marketplace_ins"
-            },
-            {
-            "$project": {
+            }},
+            {"$unwind": "$marketplace_ins"},
+            {"$project": {
                 "_id": 0,
                 "id": {"$toString": "$_id"},
                 "purchase_order_id": "$purchase_order_id",
@@ -535,47 +481,40 @@ def fetchAllorders(request):
                 "currency": "$currency",
                 "marketplace_name": "$marketplace_ins.name",
                 "items_order_quantity": "$items_order_quantity"
-            }
-            }
-        ])
-        
-        orders = list(Order.objects.aggregate(*(pipeline)))
-
-        # Convert order_date from UTC to Pacific Time and filter
-        for order in orders:
-            if order['order_date'] is not None:
-                # Convert order_date to timezone-aware
-                order_date_utc = order['order_date'].astimezone(pytz.utc)  # Ensure it's in UTC
-                order['order_date'] = order_date_utc.astimezone(pacific_tz)  # Convert to Pacific Time
-
-        # Filter orders to only include those up to the current time in Pacific Time
-        orders = [order for order in orders if order['order_date'] <= current_time_pacific]
-
-        count_pipeline.extend([
-            {
-                "$count": "total_count"
-            }
-        ])
-        total_count_result = list(Order.objects.aggregate(*(count_pipeline)))
-        total_count = total_count_result[0]['total_count'] if total_count_result else 0
-        
-        data['orders'] = orders
-        data['total_count'] = total_count
-        data['status'] = ""
-
-    pipeline = [
-            {
-                "$project" : {
-                    "_id" : 0,
-                    "id" : {"$toString" : "$_id"},
-                    "name" : 1,
-                    "image_url" : 1,
-                }
-            }
+            }}
         ]
-    data['marketplace_list'] = list(Marketplace.objects.aggregate(*(pipeline)))
-    return Response(data)
 
+        # Get timezone-aware current time
+        pacific_tz = pytz.timezone("US/Pacific")
+        current_time_pacific = datetime.now(pacific_tz)
+        
+        # Execute query and filter by timezone
+        orders = list(Order.objects.aggregate(*pipeline))
+        orders = [
+            order for order in orders 
+            if order.get('order_date') and 
+            order['order_date'].astimezone(pacific_tz) <= current_time_pacific
+        ]
+        
+        total_count = Order.objects.count_documents(base_match)
+        
+        data.update({
+            'orders': orders,
+            'total_count': total_count,
+            'status': ""
+        })
+
+    # Get marketplace list
+    data['marketplace_list'] = list(Marketplace.objects.aggregate([
+        {"$project": {
+            "_id": 0,
+            "id": {"$toString": "$_id"},
+            "name": 1,
+            "image_url": 1
+        }}
+    ]))
+
+    return Response(data)
 
 def fetchOrderDetails(request):
     data = {}
