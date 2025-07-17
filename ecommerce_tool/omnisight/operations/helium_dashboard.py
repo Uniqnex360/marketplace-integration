@@ -2969,8 +2969,6 @@ def downloadProductPerformanceSummary(request):
 @csrf_exempt
 def downloadProductPerformanceCSV(request):
     try:
-        
-
         json_request = JSONParser().parse(request)
         action = json_request.get("action", "").lower()
         marketplace_id = json_request.get('marketplace_id', None)
@@ -2979,7 +2977,7 @@ def downloadProductPerformanceCSV(request):
         manufacturer_name = json_request.get('manufacturer_name', [])
         fulfillment_channel = json_request.get('fulfillment_channel', None)
         preset = json_request.get('preset')
-        timezone_str = 'US/Pacific'
+        timezone_str = json_request.get('timezone', 'US/Pacific')
         local_tz = pytz.timezone(timezone_str)
         today = datetime.now(local_tz)
         
