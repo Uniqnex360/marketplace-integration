@@ -616,7 +616,7 @@ def syncRecentWalmartOrders():
             )
             order.save()
         except Exception as e:
-            print(f"⚠️ Error processing order {row.get('purchaseOrderId', '')}: {e}")
+            print(f"⚠️ Error processing order {row.get('purchaseOrderId', '')}: {e}")   
 
     # Use ThreadPoolExecutor for parallel processing
     with ThreadPoolExecutor(max_workers=10) as executor:
