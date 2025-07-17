@@ -975,7 +975,8 @@ def get_top_products(request):
     start_date_str = json_request.get("start_date", None)
     end_date_str = json_request.get("end_date", None)
 
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str = 'US/Pacific'
+
 
 
     # Determine start and end dates
