@@ -1204,43 +1204,17 @@ def get_top_products(request):
     result = list(Order.objects.aggregate(pipeline))
     formatted_results = []
     for item in result:
-        product_info = item.get("product") or {}
-        chart = item.get("chart", {})
-        chart = {str(k): float(v) for k, v in chart.items() if k and v is not None}
-
-    # Build the dictionary only with non-empty values
-    product_dict = {}
-
-    # Always include id
-    _id = item.get("_id")
-    if _id:
-        product_dict["id"] = str(_id)
-
-    # Only add if value is not empty or None
-    if product_info.get("title"):
-        product_dict["product"] = product_info["title"]
-    if product_info.get("asin"):
-        product_dict["asin"] = product_info["asin"]
-    if product_info.get("sellerSku"):
-        product_dict["sku"] = product_info["sellerSku"]
-    if product_info.get("imageUrl"):
-        product_dict["product_image"] = product_info["imageUrl"]
-
-    # Only add if value is not zero or None
-    if item.get("total_units") is not None:
-        product_dict["total_units"] = item["total_units"]
-    if item.get("total_price"):
-        product_dict["total_price"] = item["total_price"]
-    if item.get("refund_qty"):
-        product_dict["refund_qty"] = item["refund_qty"]
-
-    # Only add chart if not empty
-    if chart:
-        product_dict["chart"] = chart
-
-    # Only add to results if at least one field (besides id) is present
-    if len(product_dict) > 1:
-        formatted_results.append(product_dict)
+        formatted_results.append({
+            "id" : str(item["_id"]),
+            "product": item["product"]["title"],
+            "asin": item["product"]["asin"],
+            "sku": item["product"]["sellerSku"],
+            "product_image": item["product"]["imageUrl"],
+            "total_units": item["total_units"],
+            "total_price": item["total_price"],
+            "refund_qty" : item["refund_qty"],
+            "chart": item["chart"]
+        })
 
     data = {"results": {"items": formatted_results}}
     return data
