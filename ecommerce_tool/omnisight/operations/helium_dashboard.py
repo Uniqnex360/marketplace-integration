@@ -14,7 +14,6 @@ import openpyxl
 import csv
 from datetime import datetime
 import math
-import pytz 
 import threading
 import re
 from bson import ObjectId
@@ -2973,7 +2972,7 @@ def downloadProductPerformanceCSV(request):
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
     timezone_str = json_request.get('timezone', 'US/Pacific')
-    local_tz = timezone(timezone_str)
+    local_tz = pytz.timezone(timezone_str)
     today = datetime.now(local_tz)
     yesterday_start_date = today - timedelta(days=1)
     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
