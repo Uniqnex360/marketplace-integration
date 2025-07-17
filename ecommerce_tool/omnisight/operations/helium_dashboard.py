@@ -1182,7 +1182,7 @@ def get_top_products(request):
         if chart:
             product_dict["chart"] = chart
 
-        if len(product_dict) > 1:
+        if product_dict.get('product') or product_dict.get('name') or product_dict.get('title'):
             formatted_results.append(product_dict)
 
     data = {"results": {"items": formatted_results}}
