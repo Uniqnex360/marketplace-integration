@@ -2939,7 +2939,7 @@ def downloadProductPerformanceSummary(request):
             data["product_name"],
             data["asin"],
             data["sku"],
-            data["fulfillment_channel"],
+            data["fulfillmentChannel"],
             data["m_name"],
             yesterday_start_date.date(),
             yesterday_end_date.date(),
