@@ -1114,6 +1114,7 @@ def get_top_movers(yesterday_data, previous_day_data):
             "netProfit" : item['netProfit'],
             "totalCogs" : round(item['totalCogs'],2),
             "netProfit" : item['netProfit'],
+            "m_name": item.get("m_name", ""),
             'yesterday_units': yesterday_units,
             'previous_units': prev_units,
             'change_in_units': change,
