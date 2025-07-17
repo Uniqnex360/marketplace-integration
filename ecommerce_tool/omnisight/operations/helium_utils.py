@@ -1132,6 +1132,6 @@ def get_top_movers(yesterday_data, previous_day_data):
     )[:3]
     
     return {
-    'top_increasing': top_increasing,
-    'top_decreasing': top_decreasing
-}
+        'top_3_products': top_increasing,
+        'least_3_products': top_decreasing
+    }

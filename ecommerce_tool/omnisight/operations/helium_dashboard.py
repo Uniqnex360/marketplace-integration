@@ -2913,9 +2913,9 @@ def downloadProductPerformanceSummary(request):
     data = get_top_movers(yes_data, prev_data)
  
     if action == "top":
-        final_summary = data['top_increasing']
+        final_summary = data.get('top_3_products', []) if data else []
     elif action == "least":
-        final_summary = data['top_decreasing']
+        final_summary = data.get('least_3_products', []) if data else []
     # else:
     #     final_summary = sorted_summary  # all products
  
@@ -2977,7 +2977,7 @@ def downloadProductPerformanceCSV(request):
         manufacturer_name = json_request.get('manufacturer_name', [])
         fulfillment_channel = json_request.get('fulfillment_channel', None)
         preset = json_request.get('preset')
-        timezone_str = json_request.get('timezone', 'US/Pacific')
+        timezone_str = 'US/Pacific'
         local_tz = pytz.timezone(timezone_str)
         today = datetime.now(local_tz)
         
@@ -3032,18 +3032,16 @@ def downloadProductPerformanceCSV(request):
         data = get_top_movers(yes_data, prev_data)
         logger.info(f"Top movers result: {data}")
         
-        if data:
-            logger.info(f"Top increasing: {len(data.get('top_increasing', []))}")
-            logger.info(f"Top decreasing: {len(data.get('top_decreasing', []))}")
-        else:
-            logger.warning("No data returned from get_top_movers")
-
+        if action == "top":
+            limited_summary = data.get('top_3_products', []) if data else []
+        elif action == "least":
+            limited_summary = data.get('least_3_products', []) if data else []
         # Filter data based on action
         limited_summary = []
         if action == "top":
-            limited_summary = data.get('top_increasing', []) if data else []
+            limited_summary = data.get('top_3_products', []) if data else []
         elif action == "least":
-            limited_summary = data.get('top_decreasing', []) if data else []
+            limited_summary = data.get('least_3_products', []) if data else []
         else:
             logger.warning(f"Invalid action parameter: {action}. Expected 'top' or 'least'")
             limited_summary = []
