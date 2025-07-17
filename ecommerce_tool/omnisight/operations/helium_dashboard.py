@@ -969,15 +969,13 @@ def get_top_products(request):
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', None)
     product_id = json_request.get('product_id', None)
-    metric = json_request.get("sortBy", "units_sold")  # 'price', 'refund', etc.
-    preset = json_request.get("preset", "Today")  # today, yesterday, last_7_days
+    metric = json_request.get("sortBy", "units_sold")
+    preset = json_request.get("preset", "Today")
 
     start_date_str = json_request.get("start_date", None)
     end_date_str = json_request.get("end_date", None)
-
     timezone_str = 'US/Pacific'
 
-    # Determine start and end dates
     if start_date_str and end_date_str:
         local_tz = pytz.timezone(timezone_str)
         naive_from_date = datetime.strptime(start_date_str, '%Y-%m-%d')
@@ -985,8 +983,7 @@ def get_top_products(request):
         localized_from_date = local_tz.localize(naive_from_date)
         localized_to_date = local_tz.localize(naive_to_date)
         start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_to_date.astimezone(pytz.UTC)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+        end_date = localized_to_date.astimezone(pytz.UTC).replace(hour=23, minute=59, second=59)
     else:
         start_date, end_date = get_date_range(preset, timezone_str)
 
@@ -994,11 +991,7 @@ def get_top_products(request):
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
     duration_hours = (end_date - start_date).total_seconds() / 3600
-
-    if duration_hours <= 24:
-        chart_date_format = "%Y-%m-%d %H:00:00+00:00"
-    else:
-        chart_date_format = "%Y-%m-%d 00:00:00+00:00"
+    chart_date_format = "%Y-%m-%d %H:00:00+00:00" if duration_hours <= 24 else "%Y-%m-%d 00:00:00+00:00"
 
     sort_field = {
         "units_sold": "total_units",
@@ -1017,40 +1010,32 @@ def get_top_products(request):
         "refund": "$order_items_ins.ProductDetails.QuantityShipped"
     }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
 
-    match = dict()
-    match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
+    match = {
+        'order_date': {"$gte": start_date, "$lte": end_date},
+        'order_status': {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
+    }
 
-    if marketplace_id and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
     if metric == "refund":
         match['order_status'] = "Refunded"
 
-    product_ids_for_match = []
+    if marketplace_id and marketplace_id not in ["all", "custom"]:
+        match['marketplace_id'] = ObjectId(marketplace_id)
+
     if product_id:
-        if isinstance(product_id, str):
-            product_ids_for_match = [ObjectId(product_id)]
-        elif isinstance(product_id, list):
-            product_ids_for_match = [ObjectId(pid) for pid in product_id]
-        ids_from_products = getOrdersListBasedonProductId(product_ids_for_match, start_date, end_date)
-        if ids_from_products:
-            match["_id"] = {"$in": ids_from_products}
-        else:
+        product_ids = [ObjectId(product_id)] if isinstance(product_id, str) else [ObjectId(pid) for pid in product_id]
+        order_ids = getOrdersListBasedonProductId(product_ids, start_date, end_date)
+        if not order_ids:
             return {"results": {"items": []}}
+        match["_id"] = {"$in": order_ids}
     elif brand_id:
-        if isinstance(brand_id, str):
-            brand_ids_for_match = [ObjectId(brand_id)]
-        elif isinstance(brand_id, list):
-            brand_ids_for_match = [ObjectId(bid) for bid in brand_id]
-        product_ids_from_brands = getproductIdListBasedonbrand(brand_ids_for_match, start_date, end_date)
-        if product_ids_from_brands:
-            ids_from_brands = getOrdersListBasedonProductId(product_ids_from_brands, start_date, end_date)
-            if ids_from_brands:
-                match["_id"] = {"$in": ids_from_brands}
-            else:
-                return {"results": {"items": []}}
-        else:
+        brand_ids = [ObjectId(brand_id)] if isinstance(brand_id, str) else [ObjectId(bid) for bid in brand_id]
+        product_ids = getproductIdListBasedonbrand(brand_ids, start_date, end_date)
+        if not product_ids:
             return {"results": {"items": []}}
+        order_ids = getOrdersListBasedonProductId(product_ids, start_date, end_date)
+        if not order_ids:
+            return {"results": {"items": []}}
+        match["_id"] = {"$in": order_ids}
 
     pipeline = [
         {"$match": match},
@@ -1073,6 +1058,10 @@ def get_top_products(request):
         {"$unwind": {
             "path": "$product_ins",
             "preserveNullAndEmptyArrays": True
+        }},
+        # ✅ Filter out products with no title (null or empty)
+        {"$match": {
+            "product_ins.product_title": {"$ne": None, "$ne": ""}
         }},
         {"$addFields": {
             "chart_key_raw": "$order_date",
@@ -1152,41 +1141,29 @@ def get_top_products(request):
 
     result = list(Order.objects.aggregate(pipeline))
     formatted_results = []
+
     for item in result:
         product_info = item.get("product") or {}
         chart = item.get("chart", {})
         chart = {str(k): float(v) for k, v in chart.items() if k and v is not None}
 
-        product_dict = {}
-
-        _id = item.get("_id")
-        if _id:
-            product_dict["id"] = str(_id)
-
-        if product_info.get("title"):
-            product_dict["product"] = product_info["title"]
-        if product_info.get("asin"):
-            product_dict["asin"] = product_info["asin"]
-        if product_info.get("sellerSku"):
-            product_dict["sku"] = product_info["sellerSku"]
-        if product_info.get("imageUrl"):
-            product_dict["product_image"] = product_info["imageUrl"]
-
-        if item.get("total_units") is not None:
-            product_dict["total_units"] = item["total_units"]
-        if item.get("total_price"):
-            product_dict["total_price"] = item["total_price"]
-        if item.get("refund_qty"):
-            product_dict["refund_qty"] = item["refund_qty"]
+        product_dict = {
+            "id": str(item.get("_id")),
+            "product": product_info.get("title"),
+            "asin": product_info.get("asin"),
+            "sku": product_info.get("sellerSku"),
+            "product_image": product_info.get("imageUrl"),
+            "total_units": item.get("total_units"),
+            "total_price": item.get("total_price"),
+            "refund_qty": item.get("refund_qty"),
+        }
 
         if chart:
             product_dict["chart"] = chart
 
-        if product_dict.get('product') or product_dict.get('name') or product_dict.get('title'):
-            formatted_results.append(product_dict)
+        formatted_results.append(product_dict)
 
-    data = {"results": {"items": formatted_results}}
-    return data
+    return {"results": {"items": formatted_results}}
 
 def getPreviousDateRange(start_date, end_date):
 
