@@ -1156,7 +1156,7 @@ def get_top_products(request):
     formatted_results = []
     for item in result:
         product_info = item.get("product") or {}
-        pacific_tz = timezone('US/Pacific')
+        pacific_tz = pytz.timezone('US/Pacific')
         chart = item.get("chart", {})
         converted_chart = {}
 
