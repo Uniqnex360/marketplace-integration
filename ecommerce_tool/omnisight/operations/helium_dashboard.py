@@ -14,6 +14,7 @@ import openpyxl
 import csv
 from datetime import datetime
 import math
+import pytz 
 import threading
 import re
 from bson import ObjectId
@@ -2878,8 +2879,8 @@ def downloadProductPerformanceSummary(request):
     product_id = json_request.get('product_id',[])
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
-    timezone_str = json_request.get('timezone', 'US/Pacific')
-    local_tz = timezone(timezone_str)
+    timezone_str = 'US/Pacific'
+    local_tz = pytz.timezone(timezone_str)
     today = datetime.now(local_tz)
     yesterday_start_date = today - timedelta(days=1)
     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -2961,6 +2962,7 @@ def downloadProductPerformanceSummary(request):
  
     return response
  
+ 
 @csrf_exempt
 def downloadProductPerformanceCSV(request):
     action = request.GET.get("action", "").lower()
@@ -2971,9 +2973,10 @@ def downloadProductPerformanceCSV(request):
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
-    timezone_str = json_request.get('timezone', 'US/Pacific')
+    timezone_str =  'US/Pacific'
     local_tz = pytz.timezone(timezone_str)
     today = datetime.now(local_tz)
+    limited_summary = []  
     yesterday_start_date = today - timedelta(days=1)
     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
@@ -3002,9 +3005,11 @@ def downloadProductPerformanceCSV(request):
     data = get_top_movers(yes_data, prev_data)
 
     if action == "top":
-        limited_summary = data['top_increasing']
+        limited_summary = data.get('top_increasing',[])
     elif action == "least":
-        limited_summary = data['top_decreasing']
+        limited_summary = data.get('top_decreasing',[])
+    else:
+        limited_summary=[]
  
     # Create CSV response
     response = HttpResponse(content_type='text/csv')
@@ -3036,61 +3041,6 @@ def downloadProductPerformanceCSV(request):
  
     return response
  
-
-
-
-
-@csrf_exempt
-def CityCSVUploadView(request):
-    if request.method != 'POST':
-        return JsonResponse({"error": "Only POST method allowed"}, status=405)
-
-    file = request.FILES.get('file')
-    if not file:
-        return JsonResponse({"error": "No file uploaded"}, status=400)
-
-    try:
-        try:
-            decoded_file = file.read().decode('utf-8')
-        except UnicodeDecodeError:
-            decoded_file = file.read().decode('latin1')
-    except Exception as e:
-        return JsonResponse({"error": f"File decoding failed: {str(e)}"}, status=400)
-
-    io_string = io.StringIO(decoded_file)
-    reader = csv.DictReader(io_string)
-    city_objects = []
-
-    for row in reader:
-        try:
-            city_obj = CityDetails(
-                city=row['city'],
-                city_ascii=row['city_ascii'],
-                state_id=row['state_id'],
-                state_name=row['state_name'],
-                county_fips=row['county_fips'],
-                county_name=row['county_name'],
-                lat=float(row['lat']),
-                lng=float(row['lng']),
-                population=int(row['population']),
-                density=float(row['density']),
-                source=row['source'],
-                military=row['military'].strip().upper() == 'TRUE',
-                incorporated=row['incorporated'].strip().upper() == 'TRUE',
-                timezone=row['timezone'],
-                ranking=int(row['ranking']),
-                zips=row['zips'],
-                uid=int(row['id'])
-            )
-            city_objects.append(city_obj)
-        except Exception as e:
-            return JsonResponse({"error": f"Error parsing row: {str(e)}"}, status=400)
-
-    try:
-        CityDetails.objects.insert(city_objects, load_bulk=False)
-        return JsonResponse({"message": "CSV data uploaded successfully."})
-    except Exception as e:
-        return JsonResponse({"error": f"Bulk insert failed: {str(e)}"}, status=500)
 
 
 
