@@ -43,9 +43,6 @@ from datetime import datetime
 from datetime import datetime, timedelta
 from rest_framework.parsers import JSONParser
 from django.http import JsonResponse
-import logging
-logger = logging.getLogger(__name__)
-
 
 def sanitize_data(data):
     """Recursively sanitize data to ensure all float values are JSON compliant."""
@@ -2967,157 +2964,85 @@ def downloadProductPerformanceSummary(request):
  
  
 @csrf_exempt
-
 def downloadProductPerformanceCSV(request):
-    try:
-        action = request.GET.get("action", "").lower()
-        json_request = JSONParser().parse(request)
-        marketplace_id = json_request.get('marketplace_id', None)
-        brand_id = json_request.get('brand_id', [])
-        product_id = json_request.get('product_id', [])
-        manufacturer_name = json_request.get('manufacturer_name', [])
-        fulfillment_channel = json_request.get('fulfillment_channel', None)
-        preset = json_request.get('preset')
-        timezone_str = 'US/Pacific'
-        local_tz = pytz.timezone(timezone_str)
-        today = datetime.now(local_tz)
-        
-        # Debug: Print request parameters
-        logger.info(f"Action: {action}")
-        logger.info(f"Marketplace ID: {marketplace_id}")
-        logger.info(f"Brand ID: {brand_id}")
-        logger.info(f"Product ID: {product_id}")
-        
-        # Calculate date ranges
-        yesterday_start_date = today - timedelta(days=1)
-        yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
+    action = request.GET.get("action", "").lower()
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id', None)
+    brand_id = json_request.get('brand_id', [])
+    product_id = json_request.get('product_id',[])
+    manufacturer_name = json_request.get('manufacturer_name',[])
+    fulfillment_channel = json_request.get('fulfillment_channel',None)
+    preset = json_request.get('preset')
+    timezone_str =  'US/Pacific'
+    local_tz = pytz.timezone(timezone_str)
+    today = datetime.now(local_tz)
+    limited_summary = []  
+    yesterday_start_date = today - timedelta(days=1)
+    yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
+    print('action',action)
+    previous_day_start_date = yesterday_start_date - timedelta(days=1)
+    previous_day_start_date = previous_day_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    previous_day_end_date = previous_day_start_date.replace(hour=23, minute=59, second=59)
 
-        previous_day_start_date = yesterday_start_date - timedelta(days=1)
-        previous_day_start_date = previous_day_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        previous_day_end_date = previous_day_start_date.replace(hour=23, minute=59, second=59)
+    def fetch_data(start_date, end_date):
+        return grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
 
-        logger.info(f"Yesterday range: {yesterday_start_date} to {yesterday_end_date}")
-        logger.info(f"Previous day range: {previous_day_start_date} to {previous_day_end_date}")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
+        future_yes_data = executor.submit(fetch_data, yesterday_start_date, yesterday_end_date)
 
-        def fetch_data(start_date, end_date):
-            try:
-                result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-                logger.info(f"Fetched data for {start_date.date()}: {len(result) if result else 0} records")
-                return result
-            except Exception as e:
-                logger.error(f"Error fetching data for {start_date.date()}: {e}")
-                return []
+        prev_data = future_prev_data.result()
+        yes_data = future_yes_data.result()
 
-        # Fetch revenue data in parallel
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_prev_data = executor.submit(fetch_data, previous_day_start_date, previous_day_end_date)
-            future_yes_data = executor.submit(fetch_data, yesterday_start_date, yesterday_end_date)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_yes_data = executor.submit(sales, yes_data)
+        future_prev_data = executor.submit(sales, prev_data)
 
-            prev_data = future_prev_data.result()
-            yes_data = future_yes_data.result()
+        yes_data = future_yes_data.result()
+        prev_data = future_prev_data.result()
 
-        logger.info(f"Raw data - Yesterday: {len(yes_data) if yes_data else 0}, Previous: {len(prev_data) if prev_data else 0}")
+    data = get_top_movers(yes_data, prev_data)
 
-        # Process sales data in parallel
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_yes_data = executor.submit(sales, yes_data)
-            future_prev_data = executor.submit(sales, prev_data)
-
-            yes_data = future_yes_data.result()
-            prev_data = future_prev_data.result()
-
-        logger.info(f"Processed sales data - Yesterday: {len(yes_data) if yes_data else 0}, Previous: {len(prev_data) if prev_data else 0}")
-
-        # Get top movers
-        data = get_top_movers(yes_data, prev_data)
-        logger.info(f"Top movers result: {data}")
-        
-        if data:
-            logger.info(f"Top increasing: {len(data.get('top_increasing', []))}")
-            logger.info(f"Top decreasing: {len(data.get('top_decreasing', []))}")
-        else:
-            logger.warning("No data returned from get_top_movers")
-
-        # Filter data based on action
-        limited_summary = []
-        if action == "top":
-            limited_summary = data.get('top_increasing', []) if data else []
-        elif action == "least":
-            limited_summary = data.get('top_decreasing', []) if data else []
-        else:
-            logger.warning(f"Invalid action parameter: {action}. Expected 'top' or 'least'")
-            limited_summary = []
-
-        logger.info(f"Limited summary count: {len(limited_summary)}")
-
-        # If no data, log the issue
-        if not limited_summary:
-            logger.warning("No data found for CSV export")
-            if not data:
-                logger.error("get_top_movers returned empty data")
-            elif action not in ["top", "least"]:
-                logger.error(f"Invalid action: {action}")
-            else:
-                logger.error(f"No data found for action: {action}")
-
-        # Create CSV response
-        response = HttpResponse(content_type='text/csv')
-        filename = f"Product_Performance_{yesterday_start_date.strftime('%Y-%m-%d')}.csv"
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-
-        writer = csv.writer(response)
-        
-        # CSV headers
+    if action == "top":
+        limited_summary = data.get('top_increasing',[])
+    elif action == "least":
+        limited_summary = data.get('top_decreasing',[])
+    else:
+        limited_summary=[]
+ 
+    # Create CSV response
+    response = HttpResponse(content_type='text/csv')
+    filename = f"Product_Performance_{yesterday_start_date.strftime('%Y-%m-%d')}.csv"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+ 
+    writer = csv.writer(response)
+    # CSV headers
+    writer.writerow([
+         "Product Title","ASIN","SKU","Fulfillment Type","Marketplace" ,"Start Date","End Date","Gross Revenue","Net Profit","Units Sold","Trend"
+    ])
+ 
+    # CSV rows
+    for data in limited_summary:
         writer.writerow([
-            "Product Title", "ASIN", "SKU", "Fulfillment Type", "Marketplace", 
-            "Start Date", "End Date", "Gross Revenue", "Net Profit", "Units Sold", "Trend"
+            data["product_name"],
+            data["asin"],
+            data["sku"],
+            data["fulfillment_channel"],
+            data["m_name"],
+            yesterday_start_date.date(),
+            yesterday_end_date.date(),
+            round(data["grossRevenue"], 2),
+            round(data["netProfit"], 2),
+            data["unitsSold"],
+            data["Trend"],
+
         ])
+ 
+    return response
+ 
 
-        # Add a test row to verify CSV is working (remove this in production)
-        # writer.writerow(["TEST PRODUCT", "TEST123", "TEST-SKU", "FBA", "Amazon", 
-        #                 yesterday_start_date.date(), yesterday_end_date.date(), 
-        #                 100.00, 50.00, 5, "UP"])
 
-        # CSV rows
-        row_count = 0
-        for item in limited_summary:
-            try:
-                writer.writerow([
-                    item.get("product_name", ""),
-                    item.get("asin", ""),
-                    item.get("sku", ""),
-                    item.get("fulfillment_channel", ""),
-                    item.get("m_name", ""),
-                    yesterday_start_date.date(),
-                    yesterday_end_date.date(),
-                    round(float(item.get("grossRevenue", 0)), 2),
-                    round(float(item.get("netProfit", 0)), 2),
-                    int(item.get("unitsSold", 0)),
-                    item.get("Trend", ""),
-                ])
-                row_count += 1
-            except Exception as e:
-                logger.error(f"Error writing row: {e}, Data: {item}")
-                # Write a placeholder row to identify the problematic data
-                writer.writerow([
-                    "ERROR", "ERROR", "ERROR", "ERROR", "ERROR",
-                    yesterday_start_date.date(), yesterday_end_date.date(),
-                    0.00, 0.00, 0, "ERROR"
-                ])
-
-        logger.info(f"Successfully wrote {row_count} rows to CSV")
-        return response
-
-    except Exception as e:
-        logger.error(f"Error in downloadProductPerformanceCSV: {e}")
-        # Return an error CSV
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = 'attachment; filename="error.csv"'
-        writer = csv.writer(response)
-        writer.writerow(["Error", "Message"])
-        writer.writerow(["Error occurred", str(e)])
-        return response
 
 
 @csrf_exempt
