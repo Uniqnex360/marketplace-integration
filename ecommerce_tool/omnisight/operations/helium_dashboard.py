@@ -2976,6 +2976,7 @@ def downloadProductPerformanceCSV(request):
     timezone_str =  'US/Pacific'
     local_tz = pytz.timezone(timezone_str)
     today = datetime.now(local_tz)
+    limited_summary = []  
     yesterday_start_date = today - timedelta(days=1)
     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_end_date = yesterday_start_date.replace(hour=23, minute=59, second=59)
@@ -3004,9 +3005,11 @@ def downloadProductPerformanceCSV(request):
     data = get_top_movers(yes_data, prev_data)
 
     if action == "top":
-        limited_summary = data['top_increasing']
+        limited_summary = data.get('top_increasing',[])
     elif action == "least":
-        limited_summary = data['top_decreasing']
+        limited_summary = data.get('top_decreasing',[])
+    else:
+        limited_summary=[]
  
     # Create CSV response
     response = HttpResponse(content_type='text/csv')
