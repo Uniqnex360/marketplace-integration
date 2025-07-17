@@ -1086,7 +1086,8 @@ def get_top_products(request):
                 "timeBucket": {
                     "$dateToString": {
                         "format": chart_date_format,
-                        "date": "$chart_key_raw"
+                        "date": "$chart_key_raw",
+                        'timeZone':"US/Pacific"
                     }
                 }
             },
