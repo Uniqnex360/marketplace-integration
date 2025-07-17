@@ -1074,10 +1074,6 @@ def get_top_products(request):
             "path": "$product_ins",
             "preserveNullAndEmptyArrays": True
         }},
-        # Add this match stage to filter out products with empty titles
-        {"$match": {
-            "product_ins.product_title": {"$exists": True, "$ne": "", "$ne": None}
-        }},
         {"$addFields": {
             "chart_key_raw": "$order_date",
             "chart_value": chart_value_field
@@ -1151,7 +1147,7 @@ def get_top_products(request):
             "refund_qty": 1
         }},
         {"$sort": SON([(sort_field, -1)])},
-        {"$limit": 10}
+        {"$limit": 11}
     ]
 
     result = list(Order.objects.aggregate(pipeline))
@@ -1186,11 +1182,12 @@ def get_top_products(request):
         if chart:
             product_dict["chart"] = chart
 
-        # Remove the filter here since we're now filtering in the pipeline
-        formatted_results.append(product_dict)
+        if product_dict.get('product') or product_dict.get('name') or product_dict.get('title'):
+            formatted_results.append(product_dict)
 
     data = {"results": {"items": formatted_results}}
     return data
+
 def getPreviousDateRange(start_date, end_date):
 
     duration = end_date - start_date
