@@ -1087,7 +1087,6 @@ def get_top_products(request):
                     "$dateToString": {
                         "format": chart_date_format,
                         "date": "$chart_key_raw",
-                        'timeZone':"US/Pacific"
                     }
                 }
             },
@@ -1157,36 +1156,47 @@ def get_top_products(request):
     formatted_results = []
     for item in result:
         product_info = item.get("product") or {}
+        pacific_tz = timezone('US/Pacific')
         chart = item.get("chart", {})
-        chart = {str(k): float(v) for k, v in chart.items() if k and v is not None}
+        converted_chart = {}
 
-        product_dict = {}
+        for k, v in chart.items():
+            try:
+                dt_utc = datetime.strptime(k, chart_date_format).replace(tzinfo=pytz.UTC)
+                dt_pacific = dt_utc.astimezone(pacific_tz)
+                k_pacific = dt_pacific.strftime(chart_date_format)
+                converted_chart[k_pacific] = float(v)
+            except Exception:
+                continue
 
-        _id = item.get("_id")
-        if _id:
-            product_dict["id"] = str(_id)
+    chart = converted_chart
+    product_dict = {}
 
-        if product_info.get("title"):
-            product_dict["product"] = product_info["title"]
-        if product_info.get("asin"):
-            product_dict["asin"] = product_info["asin"]
-        if product_info.get("sellerSku"):
-            product_dict["sku"] = product_info["sellerSku"]
-        if product_info.get("imageUrl"):
-            product_dict["product_image"] = product_info["imageUrl"]
+    _id = item.get("_id")
+    if _id:
+        product_dict["id"] = str(_id)
 
-        if item.get("total_units") is not None:
-            product_dict["total_units"] = item["total_units"]
-        if item.get("total_price"):
-            product_dict["total_price"] = item["total_price"]
-        if item.get("refund_qty"):
-            product_dict["refund_qty"] = item["refund_qty"]
+    if product_info.get("title"):
+        product_dict["product"] = product_info["title"]
+    if product_info.get("asin"):
+        product_dict["asin"] = product_info["asin"]
+    if product_info.get("sellerSku"):
+        product_dict["sku"] = product_info["sellerSku"]
+    if product_info.get("imageUrl"):
+        product_dict["product_image"] = product_info["imageUrl"]
 
-        if chart:
-            product_dict["chart"] = chart
+    if item.get("total_units") is not None:
+        product_dict["total_units"] = item["total_units"]
+    if item.get("total_price"):
+        product_dict["total_price"] = item["total_price"]
+    if item.get("refund_qty"):
+        product_dict["refund_qty"] = item["refund_qty"]
 
-        if product_dict.get('product') or product_dict.get('name') or product_dict.get('title'):
-            formatted_results.append(product_dict)
+    if chart:
+        product_dict["chart"] = chart
+
+    if product_dict.get('product') or product_dict.get('name') or product_dict.get('title'):
+        formatted_results.append(product_dict)
 
     data = {"results": {"items": formatted_results}}
     return data
