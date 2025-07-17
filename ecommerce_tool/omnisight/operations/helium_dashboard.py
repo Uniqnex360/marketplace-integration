@@ -2965,7 +2965,7 @@ def downloadProductPerformanceSummary(request):
  
 @csrf_exempt
 def downloadProductPerformanceCSV(request):
-    action = request.GET.get("action", "").lower()
+    action = json_request.get("action", "").lower()
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
