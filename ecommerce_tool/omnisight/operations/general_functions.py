@@ -1338,7 +1338,6 @@ def salesAnalytics(request):
 
         data['order_days'] = formatted_order_days
 
-        # 🔑 SANITIZE RESPONSE DATA
         sanitized_data = sanitize_floats(data)
         return sanitized_data
 

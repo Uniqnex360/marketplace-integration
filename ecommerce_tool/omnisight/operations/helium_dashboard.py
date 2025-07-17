@@ -40,7 +40,6 @@ from django.utils import timezone
 from concurrent.futures import ThreadPoolExecutor
 from rest_framework.parsers import JSONParser
 from datetime import datetime
-import pytz
 from datetime import datetime, timedelta
 from rest_framework.parsers import JSONParser
 from django.http import JsonResponse
@@ -2880,8 +2879,8 @@ def downloadProductPerformanceSummary(request):
     product_id = json_request.get('product_id',[])
     manufacturer_name = json_request.get('manufacturer_name',[])
     fulfillment_channel = json_request.get('fulfillment_channel',None)
-    timezone_str = 'timezone', 'US/Pacific'
-    local_tz = timezone(timezone_str)
+    timezone_str = 'US/Pacific'
+    local_tz = pytz.timezone(timezone_str)
     today = datetime.now(local_tz)
     yesterday_start_date = today - timedelta(days=1)
     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -2975,7 +2974,7 @@ def downloadProductPerformanceCSV(request):
     fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
     timezone_str =  'US/Pacific'
-    local_tz = timezone(timezone_str)
+    local_tz = pytz.timezone(timezone_str)
     today = datetime.now(local_tz)
     yesterday_start_date = today - timedelta(days=1)
     yesterday_start_date = yesterday_start_date.replace(hour=0, minute=0, second=0, microsecond=0)
