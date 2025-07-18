@@ -1042,17 +1042,17 @@ def get_top_products(request):
     elif brand_id:
         if isinstance(brand_id, str):
             brand_ids_for_match = [ObjectId(brand_id)]
-    elif isinstance(brand_id, list):
-        brand_ids_for_match = [ObjectId(bid) for bid in brand_id]
-    product_ids_from_brands = getproductIdListBasedonbrand(brand_ids_for_match)
-    if product_ids_from_brands:
-        ids_from_brands = getOrdersListBasedonProductId(product_ids_from_brands, start_date, end_date)
-        if ids_from_brands:
-            match["_id"] = {"$in": ids_from_brands}
+        elif isinstance(brand_id, list):
+            brand_ids_for_match = [ObjectId(bid) for bid in brand_id]
+        product_ids_from_brands = getproductIdListBasedonbrand(brand_ids_for_match, start_date, end_date)
+        if product_ids_from_brands:
+            ids_from_brands = getOrdersListBasedonProductId(product_ids_from_brands, start_date, end_date)
+            if ids_from_brands:
+                match["_id"] = {"$in": ids_from_brands}
+            else:
+                return {"results": {"items": []}}
         else:
             return {"results": {"items": []}}
-    else:
-        return {"results": {"items": []}}
 
     pipeline = [
         {"$match": match},
