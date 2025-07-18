@@ -1213,6 +1213,13 @@ def totalSalesAmount(request):
     return data
 
 
+def get_product_ids_by_brand(brand_id_list):
+    # Get all product IDs for the given brand(s)
+    return list(Product.objects(brand_id__in=brand_id_list).only('id').scalar('id'))
+
+def get_order_item_ids_by_product_ids(product_ids):
+    # Get all OrderItems IDs where ProductDetails.product_id is in product_ids
+    return list(OrderItems.objects(ProductDetails__product_id__in=product_ids).only('id').scalar('id'))
 @csrf_exempt
 def salesAnalytics(request):
     try:
@@ -1224,7 +1231,7 @@ def salesAnalytics(request):
         date_range = json_request.get('date_range', 'all')  
         start_date = json_request.get('start_date')  
         end_date = json_request.get('end_date')  
-        timezone_str = 'US/Pacific'
+        timezone_str = json_request.get('timezone', 'US/Pacific')
         brand_id_list = json_request.get('brand_id')
         preset = json_request.get("preset", "Today")        
 
@@ -1236,7 +1243,6 @@ def salesAnalytics(request):
 
         # Date logic for main queries
         if start_date and start_date != "":
-            # Ensure start_date and end_date are strings before conversion
             if isinstance(start_date, datetime):
                 start_date = start_date.isoformat()
             if isinstance(end_date, datetime):
@@ -1248,7 +1254,14 @@ def salesAnalytics(request):
         if timezone_str != 'UTC':
             start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
-        # Match conditions for Order collection
+        # --- BRAND FILTER LOGIC ---
+        product_ids = None
+        order_item_ids = None
+        if brand_id_list:
+            product_ids = get_product_ids_by_brand(brand_id_list)
+            order_item_ids = get_order_item_ids_by_product_ids(product_ids)
+
+        # --- ORDER FILTERS ---
         match_conditions = {}
         if start_date:
             match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
@@ -1256,34 +1269,28 @@ def salesAnalytics(request):
             match_conditions["marketplace_id"] = ObjectId(marketplace_id)
         match_conditions['order_status'] = {"$ne": "Cancelled"}
         match_conditions['order_total'] = {"$gt": 0}
-        if brand_id_list:
-            match_conditions["brand_id"] = {"$in": brand_id_list}
+        if order_item_ids is not None:
+            match_conditions['order_items__in'] = order_item_ids
 
-        # Custom match conditions for custom_order collection
+        # --- CUSTOM ORDER FILTERS ---
         custom_match_conditions = {}
-        
-        # Use separate date handling for custom orders
         custom_start_date, custom_end_date = start_date, end_date
-        
-        # If no dates provided, set default range
         if not custom_start_date or not custom_end_date:
-            # Expand default range when filters are applied
             if brand_id_list or marketplace_id != "all":
                 preset = "last_7_days"
             custom_start_date, custom_end_date = get_date_range(preset, timezone_str)
-            
             if timezone_str != 'UTC':
                 custom_start_date, custom_end_date = convertLocalTimeToUTC(custom_start_date, custom_end_date, timezone_str)
-
-        # Set custom match conditions
         if custom_start_date and custom_end_date:
             custom_match_conditions["purchase_order_date"] = {"$gte": custom_start_date, "$lte": custom_end_date}
         if marketplace_id not in ["all", "custom"]:
             custom_match_conditions["marketplace_id"] = ObjectId(marketplace_id)
         custom_match_conditions['order_status'] = {"$ne": "Cancelled"}
         custom_match_conditions['total_price'] = {"$gt": 0}
-        if brand_id_list:
-            custom_match_conditions["brand_id"] = {"$in": brand_id_list}
+        if product_ids is not None:
+            custom_match_conditions['ordered_products__product_id__in'] = product_ids
+
+        # --- AGGREGATION PIPELINES ---
 
         # Total Sales Pipeline (Order collection)
         total_sales_pipeline = [
@@ -1379,6 +1386,9 @@ def salesAnalytics(request):
 
         sanitized_data = sanitize_floats(data)
         return sanitized_data
+
+    except Exception as e:
+        return {"error": str(e)}
 
     except Exception as e:
         # Handle/log exception as needed
