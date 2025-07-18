@@ -971,15 +971,13 @@ def get_top_products(request):
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', None)
     product_id = json_request.get('product_id', None)
-    metric = json_request.get("sortBy", "units_sold")  # 'price', 'refund', etc.
-    preset = json_request.get("preset", "Today")  # today, yesterday, last_7_days
-
+    metric = json_request.get("sortBy", "units_sold")
+    preset = json_request.get("preset", "Today")
     start_date_str = json_request.get("start_date", None)
     end_date_str = json_request.get("end_date", None)
-
     timezone_str = 'US/Pacific'
 
-    # Determine start and end dates
+    # Date logic
     if start_date_str and end_date_str:
         local_tz = pytz.timezone(timezone_str)
         naive_from_date = datetime.strptime(start_date_str, '%Y-%m-%d')
@@ -992,203 +990,44 @@ def get_top_products(request):
     else:
         start_date, end_date = get_date_range(preset, timezone_str)
 
-    if timezone_str != 'UTC':
-        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+    # Use grossRevenue to get all relevant orders
+    orders = grossRevenue(
+        start_date, end_date,
+        marketplace_id=marketplace_id,
+        brand_id=brand_id,
+        product_id=product_id,
+        timezone=timezone_str
+    )
 
-    duration_hours = (end_date - start_date).total_seconds() / 3600
+    # Aggregate orders by product
+    product_stats = {}
+    for order in orders:
+        for order_item_id in order.get('order_items', []):
+            # Fetch the OrderItem document (you may want to optimize this with a batch query)
+            order_item = OrderItems.objects(id=order_item_id).first()
+            if not order_item or not order_item.ProductDetails:
+                continue
+            product_id = str(order_item.ProductDetails.product_id.id)
+            quantity = order_item.ProductDetails.QuantityOrdered or 0
+            price = (order_item.Pricing.ItemPrice.Amount or 0) * quantity
 
-    if duration_hours <= 24:
-        chart_date_format = "%Y-%m-%d %H:00:00+00:00"
-    else:
-        chart_date_format = "%Y-%m-%d 00:00:00+00:00"
-
-    sort_field = {
-        "units_sold": "total_units",
-        "price": "total_price",
-        "refund": "refund_qty"
-    }.get(metric, "total_units")
-
-    chart_value_field = {
-        "units_sold": "$order_items_ins.ProductDetails.QuantityOrdered",
-        "price": {
-            "$multiply": [
-                "$order_items_ins.Pricing.ItemPrice.Amount",
-                "$order_items_ins.ProductDetails.QuantityOrdered"
-            ]
-        },
-        "refund": "$order_items_ins.ProductDetails.QuantityShipped"
-    }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
-
-    match = dict()
-    match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
-
-    if marketplace_id and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
-    if metric == "refund":
-        match['order_status'] = "Refunded"
-
-    product_ids_for_match = []
-    if product_id:
-        if isinstance(product_id, str):
-            product_ids_for_match = [ObjectId(product_id)]
-        elif isinstance(product_id, list):
-            product_ids_for_match = [ObjectId(pid) for pid in product_id]
-        ids_from_products = getOrdersListBasedonProductId(product_ids_for_match, start_date, end_date)
-        if ids_from_products:
-            match["_id"] = {"$in": ids_from_products}
-        else:
-            return {"results": {"items": []}}
-    elif brand_id:
-        if isinstance(brand_id, str):
-            brand_ids_for_match = [ObjectId(brand_id)]
-        elif isinstance(brand_id, list):
-            brand_ids_for_match = [ObjectId(bid) for bid in brand_id]
-        product_ids_from_brands = getproductIdListBasedonbrand(brand_ids_for_match, start_date, end_date)
-        if product_ids_from_brands:
-            ids_from_brands = getOrdersListBasedonProductId(product_ids_from_brands, start_date, end_date)
-            if ids_from_brands:
-                match["_id"] = {"$in": ids_from_brands}
-            else:
-                return {"results": {"items": []}}
-        else:
-            return {"results": {"items": []}}
-
-    pipeline = [
-        {"$match": match},
-        {"$lookup": {
-            "from": "order_items",
-            "localField": "order_items",
-            "foreignField": "_id",
-            "as": "order_items_ins"
-        }},
-        {"$unwind": {
-            "path": "$order_items_ins",
-            "preserveNullAndEmptyArrays": True
-        }},
-        {"$lookup": {
-            "from": "product",
-            "localField": "order_items_ins.ProductDetails.product_id",
-            "foreignField": "_id",
-            "as": "product_ins"
-        }},
-        {"$unwind": {
-            "path": "$product_ins",
-            "preserveNullAndEmptyArrays": True
-        }},
-        {"$addFields": {
-            "chart_key_raw": "$order_date",
-            "chart_value": chart_value_field
-        }},
-        {"$group": {
-            "_id": {
-                "productId": "$product_ins._id",
-                "timeBucket": {
-                    "$dateToString": {
-                        "format": chart_date_format,
-                        "date": "$chart_key_raw"
-                    }
+            if product_id not in product_stats:
+                product_stats[product_id] = {
+                    "total_units": 0,
+                    "total_price": 0,
+                    "product": str(order_item.ProductDetails.Title),
+                    "asin": order_item.ProductDetails.ASIN,
+                    "sku": order_item.ProductDetails.SKU,
+                    # Add more fields as needed
                 }
-            },
-            "productTitle": {"$first": "$product_ins.product_title"},
-            "asin": {"$first": "$product_ins.product_id"},
-            "sellerSku": {"$first": "$product_ins.sku"},
-            "imageUrl": {"$first": "$product_ins.image_url"},
-            "total_units_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
-            "total_price_sum": {
-                "$sum": {
-                    "$multiply": [
-                        "$order_items_ins.Pricing.ItemPrice.Amount",
-                        "$order_items_ins.ProductDetails.QuantityOrdered"
-                    ]
-                }
-            },
-            "refund_qty_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityShipped"},
-            "hourly_or_daily_sale": {"$sum": "$chart_value"}
-        }},
-        {"$group": {
-            "_id": "$_id.productId",
-            "product": {
-                "$first": {
-                    "title": "$productTitle",
-                    "asin": "$asin",
-                    "sellerSku": "$sellerSku",
-                    "imageUrl": "$imageUrl"
-                }
-            },
-            "chart": {
-                "$push": {
-                    "k": "$_id.timeBucket",
-                    "v": "$hourly_or_daily_sale"
-                }
-            },
-            "total_units": {"$sum": "$total_units_sum"},
-            "total_price": {"$sum": "$total_price_sum"},
-            "refund_qty": {"$sum": "$refund_qty_sum"}
-        }},
-        {"$project": {
-            "_id": 1,
-            "product": 1,
-            "chart": {
-                "$arrayToObject": {
-                    "$filter": {
-                        "input": "$chart",
-                        "as": "item",
-                        "cond": {
-                            "$and": [
-                                {"$ne": ["$$item.k", None]},
-                                {"$ne": ["$$item.v", None]},
-                                {"$eq": [{"$type": "$$item.k"}, "string"]}
-                            ]
-                        }
-                    }
-                }
-            },
-            "total_units": 1,
-            "total_price": 1,
-            "refund_qty": 1
-        }},
-        {"$sort": SON([(sort_field, -1)])},
-        {"$limit": 10}
-    ]
+            product_stats[product_id]["total_units"] += quantity
+            product_stats[product_id]["total_price"] += price
 
-    result = list(Order.objects.aggregate(pipeline))
-    formatted_results = []
-    for item in result:
-        product_info = item.get("product") or {}
-        chart = item.get("chart", {})
-        chart = {str(k): float(v) for k, v in chart.items() if k and v is not None}
+    # Sort and limit top products
+    sort_key = "total_units" if metric == "units_sold" else "total_price"
+    top_products = sorted(product_stats.values(), key=lambda x: x[sort_key], reverse=True)[:10]
 
-        product_dict = {}
-
-        _id = item.get("_id")
-        if _id:
-            product_dict["id"] = str(_id)
-
-        if product_info.get("title"):
-            product_dict["product"] = product_info["title"]
-        if product_info.get("asin"):
-            product_dict["asin"] = product_info["asin"]
-        if product_info.get("sellerSku"):
-            product_dict["sku"] = product_info["sellerSku"]
-        if product_info.get("imageUrl"):
-            product_dict["product_image"] = product_info["imageUrl"]
-
-        if item.get("total_units") is not None:
-            product_dict["total_units"] = item["total_units"]
-        if item.get("total_price"):
-            product_dict["total_price"] = item["total_price"]
-        if item.get("refund_qty"):
-            product_dict["refund_qty"] = item["refund_qty"]
-
-        if chart:
-            product_dict["chart"] = chart
-
-        if product_dict.get('product') or product_dict.get('name'):
-            formatted_results.append(product_dict)
-
-    data = {"results": {"items": formatted_results}}
-    return data
+    return {"results": {"items": top_products}}
 
 def getPreviousDateRange(start_date, end_date):
 
