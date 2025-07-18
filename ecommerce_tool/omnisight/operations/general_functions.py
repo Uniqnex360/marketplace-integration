@@ -1228,8 +1228,13 @@ def salesAnalytics(request):
         brand_id_list = json_request.get('brand_id_list')
         preset = json_request.get("preset", "Today")        
 
-        # Date logic
+        # Date logic for main queries
         if start_date and start_date != "":
+            # Ensure start_date and end_date are strings before conversion
+            if isinstance(start_date, datetime):
+                start_date = start_date.isoformat()
+            if isinstance(end_date, datetime):
+                end_date = end_date.isoformat()
             start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
         else:
             start_date, end_date = get_date_range(preset, timezone_str)
@@ -1237,7 +1242,7 @@ def salesAnalytics(request):
         if timezone_str != 'UTC':
             start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
-        # Match conditions
+        # Match conditions for Order collection
         match_conditions = {}
         if start_date:
             match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
@@ -1246,14 +1251,29 @@ def salesAnalytics(request):
         match_conditions['order_status'] = {"$ne": "Cancelled"}
         match_conditions['order_total'] = {"$gt": 0}
 
+        # Custom match conditions for custom_order collection
         custom_match_conditions = {}
-        if start_date and end_date:
-            start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
-        else:
-    # Expand default range when filters are applied
+        
+        # Use separate date handling for custom orders
+        custom_start_date, custom_end_date = start_date, end_date
+        
+        # If no dates provided, set default range
+        if not custom_start_date or not custom_end_date:
+            # Expand default range when filters are applied
             if brand_id_list or marketplace_id != "all":
                 preset = "last_7_days"
-            start_date, end_date = get_date_range(preset, timezone_str)
+            custom_start_date, custom_end_date = get_date_range(preset, timezone_str)
+            
+            if timezone_str != 'UTC':
+                custom_start_date, custom_end_date = convertLocalTimeToUTC(custom_start_date, custom_end_date, timezone_str)
+
+        # Set custom match conditions
+        if custom_start_date and custom_end_date:
+            custom_match_conditions["purchase_order_date"] = {"$gte": custom_start_date, "$lte": custom_end_date}
+        if marketplace_id not in ["all", "custom"]:
+            custom_match_conditions["marketplace_id"] = ObjectId(marketplace_id)
+        custom_match_conditions['order_status'] = {"$ne": "Cancelled"}
+        custom_match_conditions['total_price'] = {"$gt": 0}
 
         # Total Sales Pipeline (Order collection)
         total_sales_pipeline = [
@@ -1352,10 +1372,12 @@ def salesAnalytics(request):
 
     except ValueError as ve:
         logger.error("ValueError in salesAnalytics: %s", ve)
-        return JsonResponse({"error": "Invalid data format", "details": str(ve)}, status=400)
+        # Return dict instead of JsonResponse for consistency
+        return {"error": "Invalid data format", "details": str(ve), "status": 400}
     except Exception as e:
         logger.error("Unexpected error in salesAnalytics: %s", e)
-        return JsonResponse({"error": "Internal server error", "details": str(e)}, status=500)
+        # Return dict instead of JsonResponse for consistency
+        return {"error": "Internal server error", "details": str(e), "status": 500}
 @csrf_exempt
 def mostSellingProducts(request):
     data = dict()
