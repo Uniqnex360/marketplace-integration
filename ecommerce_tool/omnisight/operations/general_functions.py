@@ -1225,6 +1225,7 @@ def salesAnalytics(request):
         start_date = json_request.get('start_date')  
         end_date = json_request.get('end_date')  
         timezone_str = 'US/Pacific'
+        brand_id_list = json_request.get('brand_id_list')
         preset = json_request.get("preset", "Today")        
 
         # Date logic
@@ -1248,6 +1249,9 @@ def salesAnalytics(request):
         custom_match_conditions = {}
         if start_date:
             custom_match_conditions["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
+        if brand_id_list:
+             match_conditions["brand_id"] = {"$in": [ObjectId(bid) for bid in brand_id_list]}
+             custom_match_conditions["brand_id"] = {"$in": [ObjectId(bid) for bid in brand_id_list]}
 
         # Total Sales Pipeline (Order collection)
         total_sales_pipeline = [
