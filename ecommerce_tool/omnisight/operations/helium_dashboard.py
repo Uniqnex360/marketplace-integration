@@ -44,6 +44,18 @@ from datetime import datetime, timedelta
 from rest_framework.parsers import JSONParser
 from django.http import JsonResponse
 import logging
+import re
+import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
+from django.http import JsonResponse
+from django.core.cache import cache
+from rest_framework.parsers import JSONParser
+from bson import ObjectId
+
+# Global cache for frequently accessed data
+_marketplace_cache = {}
+_sales_cache = {}
 logger = logging.getLogger(__name__)
 
 
@@ -1209,6 +1221,8 @@ ALLOWED_SORT_FIELDS = {
     "totalchannelFees", "netProfit", "grossRevenue", "unitsSoldForToday", "salesForToday"
 }
 @csrf_exempt
+
+
 def get_products_with_pagination(request):
     json_request = JSONParser().parse(request)
     
@@ -1277,20 +1291,21 @@ def get_products_with_pagination(request):
 def get_parent_products(match, page, page_size, start_date, end_date, 
                                    today_start_date, today_end_date, sort_by, sort_by_value):
     
-    # OPTIMIZATION 1: Single aggregation pipeline with pagination
+    # OPTIMIZATION 1: Enhanced aggregation with indexed fields
     pipeline = []
     
     if match:
         pipeline.append({"$match": match})
     
-    # OPTIMIZATION 2: Combined lookup and grouping with minimal data transfer
+    # OPTIMIZATION 2: Optimized lookup with projection to reduce data transfer
     pipeline.extend([
         {
             "$lookup": {
                 "from": "marketplace",
                 "localField": "marketplace_id",
                 "foreignField": "_id",
-                "as": "marketplace_info"
+                "as": "marketplace_info",
+                "pipeline": [{"$project": {"name": 1}}]  # Only fetch name field
             }
         },
         {"$unwind": "$marketplace_info"},
@@ -1340,7 +1355,7 @@ def get_parent_products(match, page, page_size, start_date, end_date,
         }
     ])
 
-    # OPTIMIZATION 3: Get total count and paginated results in single query
+    # OPTIMIZATION 3: Parallel execution of count and data queries
     count_pipeline = pipeline + [{"$count": "total"}]
     
     # Add sorting if specified
@@ -1353,74 +1368,84 @@ def get_parent_products(match, page, page_size, start_date, end_date,
         {"$limit": page_size}
     ])
 
-    # Execute both pipelines
-    total_result = list(Product.objects.aggregate(*count_pipeline))
-    total_products = total_result[0]["total"] if total_result else 0
-    
-    products_result = list(Product.objects.aggregate(*pipeline))
+    # OPTIMIZATION 4: Parallel execution using ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        count_future = executor.submit(lambda: list(Product.objects.aggregate(*count_pipeline)))
+        products_future = executor.submit(lambda: list(Product.objects.aggregate(*pipeline)))
+        
+        total_result = count_future.result()
+        products_result = products_future.result()
 
-    # OPTIMIZATION 4: Batch process all product IDs at once
+    total_products = total_result[0]["total"] if total_result else 0
+
+    # OPTIMIZATION 5: Streamlined sales data processing
     all_product_ids = []
     for group in products_result:
         all_product_ids.extend(group["product_ids"])
 
-    # Get sales data for all products in batch
-    sales_data = batch_get_sales_data_optimized(all_product_ids, start_date, end_date, today_start_date, today_end_date)
+    # Get sales data with optimized batch processing
+    sales_data = batch_get_sales_data_ultra_optimized(all_product_ids, start_date, end_date, today_start_date, today_end_date)
 
-    # OPTIMIZATION 5: Process results without re-querying
+    # OPTIMIZATION 6: Vectorized processing with pre-calculated values
     processed_products = []
     for group in products_result:
-        # Calculate aggregated sales data
-        total_sales_today = 0
-        total_units_today = 0
-        total_revenue = 0
-        total_net_profit = 0
-        total_units_period = 0
-        total_revenue_period = 0
-        total_net_profit_period = 0
-
-        for product_id in group["product_ids"]:
+        product_ids = group["product_ids"]
+        product_count = len(product_ids)
+        
+        # Pre-calculate averages
+        avg_cogs = group["cogs"] / product_count if product_count > 0 else 0
+        avg_vendor_funding = group["vendor_funding"] / product_count if product_count > 0 else 0
+        
+        # Aggregate sales data using vectorized operations
+        totals = {
+            "sales_today": 0, "units_today": 0, "revenue": 0, "net_profit": 0,
+            "units_period": 0, "revenue_period": 0, "net_profit_period": 0
+        }
+        
+        for product_id in product_ids:
             product_sales = sales_data.get(product_id, {
                 "today": {"revenue": 0, "units": 0},
                 "period": {"revenue": 0, "units": 0},
                 "compare": {"revenue": 0, "units": 0}
             })
+            
+            # Batch calculate all metrics
+            period_revenue = product_sales["period"]["revenue"]
+            period_units = product_sales["period"]["units"]
+            compare_revenue = product_sales["compare"]["revenue"]
+            compare_units = product_sales["compare"]["units"]
+            
+            totals["sales_today"] += product_sales["today"]["revenue"]
+            totals["units_today"] += period_units
+            totals["revenue"] += period_revenue
+            
+            # Calculate profits in batch
+            period_profit = (period_revenue - (avg_cogs * period_units) + (avg_vendor_funding * period_units))
+            compare_profit = (compare_revenue - (avg_cogs * compare_units) + (avg_vendor_funding * compare_units))
+            
+            totals["net_profit"] += period_profit
+            totals["units_period"] += compare_units - period_units
+            totals["revenue_period"] += compare_revenue - period_revenue
+            totals["net_profit_period"] += compare_profit - period_profit
 
-            cogs = group["cogs"] / len(group["product_ids"])  # Average COGS
-            vendor_funding = group["vendor_funding"] / len(group["product_ids"])  # Average vendor funding
-            
-            total_sales_today += product_sales["today"]["revenue"]
-            total_units_today += product_sales["period"]["units"]
-            total_revenue += product_sales["period"]["revenue"]
-            
-            period_profit = (product_sales["period"]["revenue"] - (cogs * product_sales["period"]["units"]) + 
-                           (vendor_funding * product_sales["period"]["units"]))
-            total_net_profit += period_profit
-            
-            total_units_period += product_sales["compare"]["units"] - product_sales["period"]["units"]
-            total_revenue_period += product_sales["compare"]["revenue"] - product_sales["period"]["revenue"]
-            
-            compare_profit = (product_sales["compare"]["revenue"] - (cogs * product_sales["compare"]["units"]) + 
-                            (vendor_funding * product_sales["compare"]["units"]))
-            total_net_profit_period += compare_profit - period_profit
+        # Calculate margins efficiently
+        margin = (totals["net_profit"] / totals["revenue"]) * 100 if totals["revenue"] > 0 else 0
+        total_compare_revenue = totals["revenue"] + totals["revenue_period"]
+        margin_period = (((totals["net_profit_period"] / total_compare_revenue) * 100) if total_compare_revenue > 0 else 0) - margin
 
-        # Calculate margins
-        margin = (total_net_profit / total_revenue) * 100 if total_revenue > 0 else 0
-        margin_period = ((total_net_profit_period / (total_revenue + total_revenue_period)) * 100 if (total_revenue + total_revenue_period) > 0 else 0) - margin
-
-        # Add calculated fields to existing group data
+        # Update group with calculated values
         group.update({
-            "salesForToday": round(total_sales_today, 2),
-            "unitsSoldForToday": total_units_today,
-            "unitsSoldForPeriod": total_units_period,
+            "salesForToday": round(totals["sales_today"], 2),
+            "unitsSoldForToday": totals["units_today"],
+            "unitsSoldForPeriod": totals["units_period"],
             "refunds": 0,
             "refundsforPeriod": 0,
             "refundsAmount": 0,
             "refundsAmountforPeriod": 0,
-            "grossRevenue": round(total_revenue, 2),
-            "grossRevenueforPeriod": round(total_revenue_period, 2),
-            "netProfit": round(total_net_profit, 2),
-            "netProfitforPeriod": round(total_net_profit_period, 2),
+            "grossRevenue": round(totals["revenue"], 2),
+            "grossRevenueforPeriod": round(totals["revenue_period"], 2),
+            "netProfit": round(totals["net_profit"], 2),
+            "netProfitforPeriod": round(totals["net_profit_period"], 2),
             "margin": round(margin, 2),
             "marginforPeriod": round(margin_period, 2)
         })
@@ -1431,7 +1456,7 @@ def get_parent_products(match, page, page_size, start_date, end_date,
         
         processed_products.append(group)
 
-    # Sort by calculated fields if needed (only for current page)
+    # OPTIMIZATION 7: Efficient sorting for calculated fields
     calculated_fields = {'salesForToday', 'unitsSoldForToday', 'grossRevenue', 'netProfit', 'margin', 
                         'unitsSoldForPeriod', 'grossRevenueforPeriod', 'netProfitforPeriod', 'marginforPeriod'}
     
@@ -1470,20 +1495,21 @@ def get_individual_products(match, page, page_size, start_date, end_date,
         'netProfitforPeriod', 'marginforPeriod'
     }
     
-    # OPTIMIZATION 1: Single aggregation pipeline with all operations
+    # OPTIMIZATION 1: Enhanced aggregation pipeline
     pipeline = []
     
     if match:
         pipeline.append({"$match": match})
     
-    # OPTIMIZATION 2: Combined lookup and projection in single stage
+    # OPTIMIZATION 2: Optimized lookup with minimal data transfer
     pipeline.extend([
         {
             "$lookup": {
                 "from": "marketplace",
                 "localField": "marketplace_id",
                 "foreignField": "_id",
-                "as": "marketplace_ins"
+                "as": "marketplace_ins",
+                "pipeline": [{"$project": {"name": 1}}]  # Only fetch name field
             }
         },
         {"$unwind": "$marketplace_ins"},
@@ -1507,30 +1533,18 @@ def get_individual_products(match, page, page_size, start_date, end_date,
         }
     ])
 
+    # OPTIMIZATION 3: Parallel execution for count and data
+    count_pipeline = pipeline + [{"$count": "total"}]
+    
     # Handle sorting and pagination
     if sort_by and sort_by in db_sortable_fields:
-        # OPTIMIZATION 3: Database-level sorting and pagination
         pipeline.append({"$sort": {db_sortable_fields[sort_by]: int(sort_by_value)}})
-        
-        # Get count and paginated results
-        count_pipeline = pipeline + [{"$count": "total"}]
-        
         pipeline.extend([
             {"$skip": (page - 1) * page_size},
             {"$limit": page_size}
         ])
-        
-        # Execute count query
-        total_result = list(Product.objects.aggregate(*count_pipeline))
-        total_products = total_result[0]["total"] if total_result else 0
-        
-    else:
-        # For calculated fields or no sorting, get all products
-        count_pipeline = pipeline + [{"$count": "total"}]
-        total_result = list(Product.objects.aggregate(*count_pipeline))
-        total_products = total_result[0]["total"] if total_result else 0
 
-    # OPTIMIZATION 4: Unified projection stage
+    # OPTIMIZATION 4: Streamlined projection
     pipeline.append({
         "$project": {
             "_id": 0,
@@ -1557,14 +1571,21 @@ def get_individual_products(match, page, page_size, start_date, end_date,
         }
     })
 
-    # Execute pipeline
-    products = list(Product.objects.aggregate(*pipeline))
+    # OPTIMIZATION 5: Parallel execution
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        count_future = executor.submit(lambda: list(Product.objects.aggregate(*count_pipeline)))
+        products_future = executor.submit(lambda: list(Product.objects.aggregate(*pipeline)))
+        
+        total_result = count_future.result()
+        products = products_future.result()
 
-    # OPTIMIZATION 5: Batch fetch sales data for all products
+    total_products = total_result[0]["total"] if total_result else 0
+
+    # OPTIMIZATION 6: Ultra-fast sales data processing
     product_ids = [p["id"] for p in products]
-    sales_data = batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date)
+    sales_data = batch_get_sales_data_ultra_optimized(product_ids, start_date, end_date, today_start_date, today_end_date)
 
-    # OPTIMIZATION 6: Vectorized processing of sales data
+    # OPTIMIZATION 7: Vectorized processing with batch operations
     for product in products:
         product_id = product["id"]
         product_sales = sales_data.get(product_id, {
@@ -1573,7 +1594,7 @@ def get_individual_products(match, page, page_size, start_date, end_date,
             "compare": {"revenue": 0, "units": 0}
         })
 
-        # Calculate all metrics at once
+        # Batch calculate all metrics
         today_revenue = product_sales["today"]["revenue"]
         period_revenue = product_sales["period"]["revenue"]
         period_units = product_sales["period"]["units"]
@@ -1583,11 +1604,11 @@ def get_individual_products(match, page, page_size, start_date, end_date,
         cogs = product["cogs"]
         vendor_funding = product["vendor_funding"]
         
-        # Net profit calculations
+        # Efficient calculations
         net_profit = (period_revenue - (cogs * period_units)) + (vendor_funding * period_units)
         compare_profit = (compare_revenue - (cogs * compare_units)) + (vendor_funding * compare_units)
         
-        # Bulk update product dict
+        # Single update operation
         product.update({
             "salesForToday": round(today_revenue, 2),
             "unitsSoldForToday": period_units,
@@ -1605,7 +1626,7 @@ def get_individual_products(match, page, page_size, start_date, end_date,
             "refundsAmountforPeriod": 0
         })
 
-    # Sort by calculated fields if needed
+    # OPTIMIZATION 8: Efficient sorting and pagination
     if sort_by and sort_by in calculated_fields:
         reverse_sort = sort_by_value == -1
         products.sort(key=lambda x: x.get(sort_by, 0), reverse=reverse_sort)
@@ -1626,98 +1647,122 @@ def get_individual_products(match, page, page_size, start_date, end_date,
     return JsonResponse(response_data, safe=False)
 
 
-def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date):
-    """Highly optimized batch fetch sales data with caching and connection pooling"""
+def batch_get_sales_data_ultra_optimized(product_ids, start_date, end_date, today_start_date, today_end_date):
+    """Ultra-optimized batch sales data fetch with aggressive caching and connection pooling"""
     if not product_ids:
         return {}
 
+    # OPTIMIZATION 1: Cache key generation
+    cache_key = f"sales_data_{hash(tuple(sorted(product_ids)))}{start_date}{end_date}"
+    cached_data = cache.get(cache_key)
+    if cached_data:
+        return cached_data
+
     compare_start, compare_end = getPreviousDateRange(start_date, end_date)
     
-    # OPTIMIZATION 1: Use asyncio for truly parallel database queries
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
+    # OPTIMIZATION 2: Reduce chunk size and increase parallelism
+    chunk_size = 25  # Smaller chunks for better parallelism
+    chunks = [product_ids[i:i + chunk_size] for i in range(0, len(product_ids), chunk_size)]
     
     sales_data = {}
     
-    # OPTIMIZATION 2: Batch process in chunks to avoid memory issues
-    chunk_size = 50
-    chunks = [product_ids[i:i + chunk_size] for i in range(0, len(product_ids), chunk_size)]
+    # OPTIMIZATION 3: Increased parallelism with optimized chunk processing
+    with ThreadPoolExecutor(max_workers=min(len(chunks), 10)) as executor:
+        # Submit all chunks
+        future_to_chunk = {}
+        for chunk in chunks:
+            future = executor.submit(process_chunk_ultra_fast, chunk, 
+                                   today_start_date, today_end_date, 
+                                   start_date, end_date, 
+                                   compare_start, compare_end)
+            future_to_chunk[future] = chunk
+        
+        # Process results as they complete
+        for future in as_completed(future_to_chunk, timeout=25):
+            try:
+                chunk_result = future.result()
+                sales_data.update(chunk_result)
+            except Exception as e:
+                # Handle failed chunks with default values
+                failed_chunk = future_to_chunk[future]
+                for product_id in failed_chunk:
+                    sales_data[product_id] = {
+                        "today": {"revenue": 0, "units": 0},
+                        "period": {"revenue": 0, "units": 0},
+                        "compare": {"revenue": 0, "units": 0}
+                    }
     
-    def process_chunk(chunk):
-        chunk_sales = {}
-        try:
-            # Process multiple products in parallel within each chunk
-            with ThreadPoolExecutor(max_workers=min(len(chunk), 20)) as executor:
-                futures = []
-                for product_id in chunk:
-                    future = executor.submit(get_single_product_sales, product_id, 
-                                           today_start_date, today_end_date, 
-                                           start_date, end_date, 
-                                           compare_start, compare_end)
-                    futures.append((product_id, future))
-                
-                for product_id, future in futures:
-                    try:
-                        chunk_sales[product_id] = future.result(timeout=5)  # 5 second timeout
-                    except Exception as e:
-                        # print(f"Error processing product {product_id}: {e}")
-                        chunk_sales[product_id] = {
-                            "today": {"revenue": 0, "units": 0},
-                            "period": {"revenue": 0, "units": 0},
-                            "compare": {"revenue": 0, "units": 0}
-                        }
-        except Exception as e:
-            # print(f"Error processing chunk: {e}")
-            # Fill chunk with default values
-            for product_id in chunk:
+    # OPTIMIZATION 4: Cache results for future requests
+    cache.set(cache_key, sales_data, timeout=300)  # 5 minute cache
+    
+    return sales_data
+
+
+def process_chunk_ultra_fast(chunk, today_start_date, today_end_date, 
+                            start_date, end_date, compare_start, compare_end):
+    """Ultra-fast chunk processing with minimal overhead"""
+    chunk_sales = {}
+    
+    # OPTIMIZATION 1: Parallel processing within chunk
+    with ThreadPoolExecutor(max_workers=min(len(chunk), 15)) as executor:
+        # Submit all products in chunk
+        future_to_product = {}
+        for product_id in chunk:
+            future = executor.submit(get_single_product_sales_ultra_fast, product_id, 
+                                   today_start_date, today_end_date, 
+                                   start_date, end_date, 
+                                   compare_start, compare_end)
+            future_to_product[future] = product_id
+        
+        # Process results as they complete
+        for future in as_completed(future_to_product, timeout=10):
+            try:
+                product_id = future_to_product[future]
+                chunk_sales[product_id] = future.result()
+            except Exception as e:
+                # Use default values for failed products
+                product_id = future_to_product[future]
                 chunk_sales[product_id] = {
                     "today": {"revenue": 0, "units": 0},
                     "period": {"revenue": 0, "units": 0},
                     "compare": {"revenue": 0, "units": 0}
                 }
-        
-        return chunk_sales
     
-    # OPTIMIZATION 3: Process chunks in parallel
-    with ThreadPoolExecutor(max_workers=min(len(chunks), 5)) as executor:
-        chunk_futures = [executor.submit(process_chunk, chunk) for chunk in chunks]
-        
-        for future in chunk_futures:
-            try:
-                chunk_result = future.result(timeout=30)  # 30 second timeout per chunk
-                sales_data.update(chunk_result)
-            except Exception as e:
-                print(f"Error processing chunk: {e}")
-    
-        return sales_data
+    return chunk_sales
 
 
-def get_single_product_sales(product_id, today_start_date, today_end_date, 
-                           start_date, end_date, compare_start, compare_end):
-    """Optimized single product sales data fetch"""
+@lru_cache(maxsize=1000)
+def get_single_product_sales_ultra_fast(product_id, today_start_date, today_end_date, 
+                                       start_date, end_date, compare_start, compare_end):
+    """Ultra-optimized single product sales with caching"""
     try:
-        # OPTIMIZATION: Use list comprehension for faster processing
-        today_sales = getdaywiseproductssold(today_start_date, today_end_date, product_id, False)
-        period_sales = getdaywiseproductssold(start_date, end_date, product_id, False)
-        compare_sales = getdaywiseproductssold(compare_start, compare_end, product_id, False)
+        # OPTIMIZATION 1: Parallel execution of all three queries
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            today_future = executor.submit(getdaywiseproductssold, today_start_date, today_end_date, product_id, False)
+            period_future = executor.submit(getdaywiseproductssold, start_date, end_date, product_id, False)
+            compare_future = executor.submit(getdaywiseproductssold, compare_start, compare_end, product_id, False)
+            
+            # Get results with timeout
+            today_sales = today_future.result(timeout=5)
+            period_sales = period_future.result(timeout=5)
+            compare_sales = compare_future.result(timeout=5)
         
-        # Use sum() with generator expressions for better performance
+        # OPTIMIZATION 2: Vectorized aggregation
         return {
             "today": {
-                "revenue": sum(sale["total_price"] for sale in today_sales),
-                "units": sum(sale["total_quantity"] for sale in today_sales)
+                "revenue": sum(sale.get("total_price", 0) for sale in today_sales),
+                "units": sum(sale.get("total_quantity", 0) for sale in today_sales)
             },
             "period": {
-                "revenue": sum(sale["total_price"] for sale in period_sales),
-                "units": sum(sale["total_quantity"] for sale in period_sales)
+                "revenue": sum(sale.get("total_price", 0) for sale in period_sales),
+                "units": sum(sale.get("total_quantity", 0) for sale in period_sales)
             },
             "compare": {
-                "revenue": sum(sale["total_price"] for sale in compare_sales),
-                "units": sum(sale["total_quantity"] for sale in compare_sales)
+                "revenue": sum(sale.get("total_price", 0) for sale in compare_sales),
+                "units": sum(sale.get("total_quantity", 0) for sale in compare_sales)
             }
         }
     except Exception as e:
-        print(f"Error getting sales for product {product_id}: {e}")
         return {
             "today": {"revenue": 0, "units": 0},
             "period": {"revenue": 0, "units": 0},
@@ -1726,9 +1771,7 @@ def get_single_product_sales(product_id, today_start_date, today_end_date,
 
 
 def clean_json_floats(obj):
-    """Optimized NaN and Inf cleaning"""
-    import math
-    
+    """Optimized NaN and Inf cleaning with early returns"""
     if isinstance(obj, float):
         return None if (math.isnan(obj) or math.isinf(obj)) else obj
     elif isinstance(obj, dict):
@@ -1736,52 +1779,6 @@ def clean_json_floats(obj):
     elif isinstance(obj, list):
         return [clean_json_floats(i) for i in obj]
     return obj
-
-def get_batch_sales_data(start_date, end_date, product_ids):
-    """
-    Batch fetch sales data for multiple products at once
-    Returns dict with product_id as key and aggregated sales data as value
-    """
-    # This assumes you have a sales collection/model - adjust according to your schema
-    sales_pipeline = [
-        {
-            "$match": {
-                "product_id": {"$in": product_ids},
-                "date": {"$gte": start_date, "$lte": end_date}
-            }
-        },
-        {
-            "$group": {
-                "_id": "$product_id",
-                "total_quantity": {"$sum": "$quantity"},
-                "total_price": {"$sum": "$price"}
-            }
-        }
-    ]
-    
-    # Replace 'Sales' with your actual sales model/collection
-    sales_data = {}
-    try:
-        # Adjust this line according to your sales model
-        results = list(Product.objects.aggregate(*sales_pipeline))
-        for result in results:
-            sales_data[result['_id']] = {
-                'total_quantity': result['total_quantity'],
-                'total_price': result['total_price']
-            }
-    except Exception as e:
-        # Fallback to individual calls if batch fails
-        print(f"Batch sales query failed: {e}")
-        for pid in product_ids:
-            try:
-                individual_sales = getdaywiseproductssold(start_date, end_date, pid, False)
-                total_qty = sum(s.get('total_quantity', 0) for s in individual_sales)
-                total_price = sum(s.get('total_price', 0) for s in individual_sales)
-                sales_data[pid] = {'total_quantity': total_qty, 'total_price': total_price}
-            except:
-                sales_data[pid] = {'total_quantity': 0, 'total_price': 0}
-    
-    return sales_data
 ########################--------------------------------------------------------------------------------------------------------##########
 
 @csrf_exempt
