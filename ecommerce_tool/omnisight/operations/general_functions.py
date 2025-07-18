@@ -1247,11 +1247,13 @@ def salesAnalytics(request):
         match_conditions['order_total'] = {"$gt": 0}
 
         custom_match_conditions = {}
-        if start_date:
-            custom_match_conditions["purchase_order_date"] = {"$gte": start_date, "$lte": end_date}
-        if brand_id_list:
-             match_conditions["brand_id"] = {"$in": [ObjectId(bid) for bid in brand_id_list]}
-             custom_match_conditions["brand_id"] = {"$in": [ObjectId(bid) for bid in brand_id_list]}
+        if start_date and end_date:
+            start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
+        else:
+    # Expand default range when filters are applied
+            if brand_id_list or marketplace_id != "all":
+                preset = "last_7_days"
+            start_date, end_date = get_date_range(preset, timezone_str)
 
         # Total Sales Pipeline (Order collection)
         total_sales_pipeline = [
