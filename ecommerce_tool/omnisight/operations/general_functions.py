@@ -1,3 +1,4 @@
+from __future__ import annotations
 import requests
 import uuid
 import xml.etree.ElementTree as ET  # Import XML parser
@@ -1241,6 +1242,8 @@ def salesAnalytics(request):
             match_conditions["order_date"] = {"$gte": start_date, "$lte": end_date}
         if marketplace_id not in ["all", "custom"]:
             match_conditions["marketplace_id"] = ObjectId(marketplace_id)
+        match_conditions['order_status'] = {"$ne": "Cancelled"}
+        match_conditions['order_total'] = {"$gt": 0}
 
         custom_match_conditions = {}
         if start_date:

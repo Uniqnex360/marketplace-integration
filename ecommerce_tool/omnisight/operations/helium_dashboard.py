@@ -2940,13 +2940,11 @@ def downloadProductPerformanceSummary(request):
             data["asin"],
             data["sku"],
             data["fulfillmentChannel"],
-            data["m_name"],
             yesterday_start_date.date(),
             yesterday_end_date.date(),
             round(data["grossRevenue"], 2),
             round(data["netProfit"], 2),
             data["unitsSold"],
-            data["Trend"],
 
         ])
  

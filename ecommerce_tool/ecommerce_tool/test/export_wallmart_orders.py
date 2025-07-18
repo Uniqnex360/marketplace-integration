@@ -3,26 +3,33 @@ import uuid
 import json
 import pandas as pd
 from datetime import datetime, timedelta
+import pytz
 from omnisight.operations.walmart_utils import oauthFunction
-from ecommerce_tool.crud import DatabaseModel
-from omnisight.models import Marketplace
 import os
 
 
-def fetchYesterdayWalmartOrders():
+def fetchTodayWalmartOrdersCount(exclude_cancelled=True, min_order_value=0):
     """
-    Fetches Walmart orders from yesterday and saves them as JSON and Excel files.
-    Returns the fetched orders data.
+    Fetches Walmart orders for today (US/Pacific) and displays count of orders and order items.
+    Filters out cancelled orders and orders with total <= min_order_value.
     """
     access_token = oauthFunction()
     if not access_token:
         print("❌ Failed to get access token")
         return None
 
-    # Calculate yesterday's date range
-    yesterday = datetime.utcnow() - timedelta(days=1)
-    start_date = yesterday.strftime("%Y-%m-%dT00:00:00Z")
-    end_date = yesterday.strftime("%Y-%m-%dT23:59:59Z")
+    # Get today's date range in US/Pacific
+    pacific = pytz.timezone("US/Pacific")
+    now_pacific = datetime.now(pacific)
+    start_of_day = now_pacific.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_day = now_pacific.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    # Convert to UTC for API
+    start_date_utc = start_of_day.astimezone(pytz.utc)
+    end_date_utc = end_of_day.astimezone(pytz.utc)
+    
+    start_date = start_date_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_date = end_date_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
     
     base_url = "https://marketplace.walmartapis.com/v3/orders"
     headers = {
@@ -40,7 +47,9 @@ def fetchYesterdayWalmartOrders():
     next_cursor = None
     page = 1
 
-    print(f"📅 Fetching Walmart orders for {yesterday.strftime('%Y-%m-%d')}...")
+    print(f"📦 Fetching Walmart orders for today")
+    print(f"📅 Pacific Time: {start_of_day.strftime('%Y-%m-%d %H:%M:%S')} → {end_of_day.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🌐 UTC Time: {start_date} → {end_date}")
 
     while True:
         # Use cursor for pagination if available
@@ -72,123 +81,189 @@ def fetchYesterdayWalmartOrders():
             print(f"❌ Error fetching orders: [HTTP {response.status_code}] {response.text}")
             break
 
-    print(f"📋 Total orders fetched: {len(fetched_orders)}")
+    print(f"\n📊 Initial orders fetched: {len(fetched_orders)}")
+
+    # Filter orders
+    filtered_orders = []
+    cancelled_count = 0
+    zero_value_count = 0
     
-    if fetched_orders:
-        # Save as JSON file
-        json_filename = f"walmart_orders_{yesterday.strftime('%Y%m%d')}.json"
-        saveOrdersAsJSON(fetched_orders, json_filename)
+    for order in fetched_orders:
+        # Check if order is cancelled
+        order_lines = order.get('orderLines', {}).get('orderLine', [])
         
-        # Save as Excel file
-        excel_filename = f"walmart_orders_{yesterday.strftime('%Y%m%d')}.xlsx"
-        saveOrdersAsExcel(fetched_orders, excel_filename)
+        # Skip if no order lines
+        if not order_lines:
+            continue
+            
+        # Check order status - skip if all lines are cancelled
+        all_cancelled = True # Assume all lines are cancelled until proven otherwise
+        order_total = 0
         
-        print(f"✅ Orders saved as {json_filename} and {excel_filename}")
-    else:
-        print("📭 No orders found for yesterday")
+        for line in order_lines:
+            # Get line status
+            line_statuses = line.get('orderLineStatuses', {}).get('orderLineStatus', [])
+            
+            current_status = '' # Default value if nothing found or invalid structure
+
+            if line_statuses:
+                first_status_entry = line_statuses[0]
+                
+                if isinstance(first_status_entry, dict):
+                    # Attempt to get the status field. This might be a string or another dict.
+                    status_value = first_status_entry.get('status', '') # Default to empty string if 'status' key is missing
+                    
+                    if isinstance(status_value, dict):
+                        # If status_value is a dict, get the nested 'status'
+                        current_status = status_value.get('status', '')
+                    else:
+                        # If status_value is already a string, use it directly
+                        current_status = str(status_value)
+                else:
+                    # If first_status_entry itself is a string, use it directly
+                    current_status = str(first_status_entry)
+            
+            # Now, current_status should always be a string.
+            if current_status.upper() not in ['CANCELLED', 'CANCELED']:
+                all_cancelled = False
+            # No 'else' here, `all_cancelled` should only be set to False if a non-cancelled line is found.
+            
+            # Calculate line total
+            charges = line.get('charges', {}).get('charge', [])
+            for charge in charges:
+                if charge.get('chargeType') == 'PRODUCT':
+                    charge_amount = float(charge.get('chargeAmount', {}).get('amount', 0))
+                    quantity = int(line.get('orderLineQuantity', {}).get('amount', 0))
+                    order_total += charge_amount * quantity
+        
+        # Apply filters
+        if exclude_cancelled and all_cancelled:
+            cancelled_count += 1
+            continue
+            
+        if order_total <= min_order_value:
+            zero_value_count += 1
+            continue
+            
+        filtered_orders.append(order)
     
-    return fetched_orders
+    if exclude_cancelled:
+        print(f"✅ Filtered out {cancelled_count} cancelled orders")
+    if min_order_value > 0:
+        print(f"✅ Filtered out {zero_value_count} orders with total <= ${min_order_value}")
 
-
-def saveOrdersAsJSON(orders, filename):
-    """
-    Saves orders data as a JSON file.
-    """
-    try:
-        # Create downloads directory if it doesn't exist
-        os.makedirs("downloads", exist_ok=True)
-        filepath = os.path.join("downloads", filename)
+    # Count filtered orders and items
+    total_orders = len(filtered_orders)
+    total_order_items = 0
+    total_revenue = 0
+    
+    # Collect order details for summary
+    order_status_count = {}
+    
+    for order in filtered_orders:
+        order_lines = order.get('orderLines', {}).get('orderLine', [])
         
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(orders, f, indent=2, default=str)
-        
-        print(f"💾 JSON file saved: {filepath}")
-        
-    except Exception as e:
-        print(f"❌ Error saving JSON file: {e}")
-
-
-def saveOrdersAsExcel(orders, filename):
-    """
-    Saves orders data as an Excel file with one row per order (not per order line).
-    """
-    try:
-        os.makedirs("downloads", exist_ok=True)
-        filepath = os.path.join("downloads", filename)
-        
-        order_rows = []
-        for order in orders:
-            # Gather all SKUs and product names in this order
+        for line in order_lines:
+            # Count items
+            quantity = int(line.get('orderLineQuantity', {}).get('amount', 0))
+            total_order_items += quantity
+            
+            # Calculate revenue
+            charges = line.get('charges', {}).get('charge', [])
+            for charge in charges:
+                if charge.get('chargeType') == 'PRODUCT':
+                    charge_amount = float(charge.get('chargeAmount', {}).get('amount', 0))
+                    total_revenue += charge_amount * quantity
+            
+            # Track order status
+            line_statuses = line.get('orderLineStatuses', {}).get('orderLineStatus', [])
+            status = 'Unknown' # Default
+            if line_statuses:
+                first_status_entry = line_statuses[0]
+                if isinstance(first_status_entry, dict):
+                    status_value = first_status_entry.get('status', '')
+                    if isinstance(status_value, dict):
+                        status = status_value.get('status', 'Unknown')
+                    else:
+                        status = str(status_value)
+                else:
+                    status = str(first_status_entry)
+            
+            order_status_count[status] = order_status_count.get(status, 0) + 1
+    
+    # Calculate average order value
+    avg_order_value = total_revenue / total_orders if total_orders > 0 else 0
+    
+    print(f"\n📅 Date: {now_pacific.strftime('%Y-%m-%d')} (US/Pacific)")
+    print(f"📊 Total Orders Today: {total_orders}")
+    print(f"📦 Total Order Items Today: {total_order_items}")
+    print(f"💰 Total Revenue Today: ${total_revenue:,.2f}")
+    print(f"💵 Average Order Value: ${avg_order_value:,.2f}")
+    
+    # Show order status breakdown
+    if order_status_count:
+        print(f"\n📊 Order Status Breakdown:")
+        for status, count in order_status_count.items():
+            print(f"  - {status}: {count} items")
+    
+    # Show sample orders if available
+    if filtered_orders:
+        print(f"\n🔍 Sample orders (first 5):")
+        for i, order in enumerate(filtered_orders[:5]):
+            order_date = datetime.fromtimestamp(int(order.get('orderDate', 0)) / 1000)
+            order_date_pacific = pytz.utc.localize(order_date).astimezone(pacific)
+            
+            # Get order total for this order
+            order_total = 0
             order_lines = order.get('orderLines', {}).get('orderLine', [])
-            skus = [line.get('item', {}).get('sku', '') for line in order_lines]
-            product_names = [line.get('item', {}).get('productName', '') for line in order_lines]
-            total_quantity = sum(int(line.get('orderLineQuantity', {}).get('amount', 0)) for line in order_lines)
+            for line in order_lines:
+                charges = line.get('charges', {}).get('charge', [])
+                for charge in charges:
+                    if charge.get('chargeType') == 'PRODUCT':
+                        charge_amount = float(charge.get('chargeAmount', {}).get('amount', 0))
+                        quantity = int(line.get('orderLineQuantity', {}).get('amount', 0))
+                        order_total += charge_amount * quantity
             
-            row = {
-                'purchase_order_id': order.get('purchaseOrderId', ''),
-                'customer_order_id': order.get('customerOrderId', ''),
-                'customer_email_id': order.get('customerEmailId', ''),
-                'order_date': datetime.fromtimestamp(int(order.get('orderDate', 0)) / 1000).strftime('%Y-%m-%d %H:%M:%S') if order.get('orderDate') else '',
-                'ship_node_type': order.get('shipNode', {}).get('type', ''),
-                'ship_node_id': order.get('shipNode', {}).get('shipNodeId', ''),
-                'shipping_phone': order.get('shippingInfo', {}).get('phone', ''),
-                'shipping_estimated_delivery': order.get('shippingInfo', {}).get('estimatedDeliveryDate', ''),
-                'shipping_method': order.get('shippingInfo', {}).get('methodCode', ''),
-                'shipping_postal_address': str(order.get('shippingInfo', {}).get('postalAddress', {})),
-                'all_skus': ', '.join(skus),
-                'all_product_names': ', '.join(product_names),
-                'total_quantity': total_quantity,
-                'number_of_items': len(order_lines),
-            }
-            order_rows.append(row)
-        
-        df = pd.DataFrame(order_rows)
-        df.to_excel(filepath, index=False, engine='openpyxl')
-        print(f"📊 Excel file saved: {filepath}")
-        print(f"📈 Total orders: {len(order_rows)}")
-        
-    except Exception as e:
-        print(f"❌ Error saving Excel file: {e}")
-def downloadYesterdayOrdersReport():
-    """
-    Main function to download yesterday's Walmart orders report.
-    Can be called directly or from a scheduled job.
-    """
-    try:
-        print("🚀 Starting Walmart Yesterday Orders Download...")
-        orders = fetchYesterdayWalmartOrders()
-        
-        if orders:
-            print(f"✅ Successfully downloaded {len(orders)} orders from yesterday")
-            return True
-        else:
-            print("📭 No orders found for yesterday")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Error in downloadYesterdayOrdersReport: {e}")
-        return False
+            print(f"  Order {i+1}: {order.get('purchaseOrderId')} - {order_date_pacific.strftime('%Y-%m-%d %H:%M:%S PST')} - ${order_total:.2f}")
+    else:
+        print("\n⚠️  No orders found for today (after filtering)")
+    
+    return {
+        "total_orders": total_orders,
+        "total_order_items": total_order_items,
+        "total_revenue": total_revenue,
+        "average_order_value": avg_order_value,
+        "filtered_orders": filtered_orders
+    }
 
 
-def fetchWalmartOrdersByDateRange(start_date, end_date):
+def countWalmartOrdersByDateRange(start_date, end_date, timezone="US/Pacific", exclude_cancelled=True, min_order_value=0):
     """
-    Fetches Walmart orders for a custom date range.
+    Fetches and counts Walmart orders for a custom date range with filtering options.
     
     Args:
         start_date (str): Start date in format 'YYYY-MM-DD'
         end_date (str): End date in format 'YYYY-MM-DD'
+        timezone (str): Timezone for the date range (default: US/Pacific)
+        exclude_cancelled (bool): Whether to exclude cancelled orders
+        min_order_value (float): Minimum order value to include
     
     Returns:
-        list: List of orders
+        dict: Dictionary with order counts and details
     """
     access_token = oauthFunction()
     if not access_token:
         print("❌ Failed to get access token")
         return None
 
-    # Format dates for API
-    start_date_str = f"{start_date}T00:00:00Z"
-    end_date_str = f"{end_date}T23:59:59Z"
+    # Parse dates and set timezone
+    tz = pytz.timezone(timezone)
+    start_dt = tz.localize(datetime.strptime(start_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0))
+    end_dt = tz.localize(datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59))
+    
+    # Convert to UTC for API
+    start_date_utc = start_dt.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_date_utc = end_dt.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     
     base_url = "https://marketplace.walmartapis.com/v3/orders"
     headers = {
@@ -199,18 +274,17 @@ def fetchWalmartOrdersByDateRange(start_date, end_date):
         "Accept": "application/json"
     }
 
-    url = f"{base_url}?createdStartDate={start_date_str}&createdEndDate={end_date_str}&limit=100"
+    url = f"{base_url}?createdStartDate={start_date_utc}&createdEndDate={end_date_utc}&limit=100"
     
     fetched_orders = []
     next_cursor = None
     page = 1
 
-    print(f"📅 Fetching Walmart orders from {start_date} to {end_date}...")
+    print(f"📅 Fetching Walmart orders from {start_date} to {end_date} ({timezone})...")
 
     while True:
         paged_url = f"{base_url}{next_cursor}" if next_cursor else url
         
-        print(f"📡 Fetching page {page}...")
         response = requests.get(paged_url, headers=headers)
         
         if response.status_code == 200:
@@ -221,7 +295,6 @@ def fetchWalmartOrdersByDateRange(start_date, end_date):
                 break
                 
             fetched_orders.extend(new_orders)
-            print(f"📦 Found {len(new_orders)} orders on page {page}")
             
             next_cursor = result.get("list", {}).get("meta", {}).get("nextCursor")
             if not next_cursor:
@@ -233,26 +306,89 @@ def fetchWalmartOrdersByDateRange(start_date, end_date):
             print(f"❌ Error fetching orders: [HTTP {response.status_code}] {response.text}")
             break
 
-    print(f"📋 Total orders fetched: {len(fetched_orders)}")
+    # Apply the same filtering logic as fetchTodayWalmartOrdersCount
+    filtered_orders = []
+    cancelled_count = 0
+    zero_value_count = 0
     
-    if fetched_orders:
-        # Save files with date range in filename
-        json_filename = f"walmart_orders_{start_date}_to_{end_date}.json"
-        excel_filename = f"walmart_orders_{start_date}_to_{end_date}.xlsx"
+    for order in fetched_orders:
+        order_lines = order.get('orderLines', {}).get('orderLine', [])
+        if not order_lines:
+            continue
+            
+        all_cancelled = True
+        order_total = 0
         
-        saveOrdersAsJSON(fetched_orders, json_filename)
-        saveOrdersAsExcel(fetched_orders, excel_filename)
+        for line in order_lines:
+            line_statuses = line.get('orderLineStatuses', {}).get('orderLineStatus', [])
+            
+            current_status = '' # Default value
+            if line_statuses:
+                first_status_entry = line_statuses[0]
+                if isinstance(first_status_entry, dict):
+                    status_value = first_status_entry.get('status', '')
+                    if isinstance(status_value, dict):
+                        current_status = status_value.get('status', '')
+                    else:
+                        current_status = str(status_value)
+                else:
+                    current_status = str(first_status_entry)
+            
+            if current_status.upper() not in ['CANCELLED', 'CANCELED']:
+                all_cancelled = False
+            # No 'else' here
+            
+            charges = line.get('charges', {}).get('charge', [])
+            for charge in charges:
+                if charge.get('chargeType') == 'PRODUCT':
+                    charge_amount = float(charge.get('chargeAmount', {}).get('amount', 0))
+                    quantity = int(line.get('orderLineQuantity', {}).get('amount', 0))
+                    order_total += charge_amount * quantity
         
-        print(f"✅ Orders saved as {json_filename} and {excel_filename}")
+        if exclude_cancelled and all_cancelled:
+            cancelled_count += 1
+            continue
+            
+        if order_total <= min_order_value:
+            zero_value_count += 1
+            continue
+            
+        filtered_orders.append(order)
+
+    # Count orders and order items
+    total_orders = len(filtered_orders)
+    total_order_items = 0
+    total_revenue = 0
     
-    return fetched_orders
+    for order in filtered_orders:
+        order_lines = order.get('orderLines', {}).get('orderLine', [])
+        for line in order_lines:
+            quantity = int(line.get('orderLineQuantity', {}).get('amount', 0))
+            total_order_items += quantity
+            
+            charges = line.get('charges', {}).get('charge', [])
+            for charge in charges:
+                if charge.get('chargeType') == 'PRODUCT':
+                    charge_amount = float(charge.get('chargeAmount', {}).get('amount', 0))
+                    total_revenue += charge_amount * quantity
+    
+    avg_order_value = total_revenue / total_orders if total_orders > 0 else 0
+    
+    print(f"\n📊 Total Orders: {total_orders}")
+    print(f"📦 Total Order Items: {total_order_items}")
+    print(f"💰 Total Revenue: ${total_revenue:,.2f}")
+    print(f"💵 Average Order Value: ${avg_order_value:,.2f}")
+    
+    return {
+        "total_orders": total_orders,
+        "total_order_items": total_order_items,
+        "total_revenue": total_revenue,
+        "average_order_value": avg_order_value,
+        "filtered_orders": filtered_orders
+    }
 
 
 # Example usage:
 if __name__ == "__main__":
-    # Download yesterday's orders
-    # downloadYesterdayOrdersReport()
-    
-    # Or download orders for a specific date range
-    fetchWalmartOrdersByDateRange("2025-07-13", "2025-07-13")
-
+    # Get today's order count (excluding cancelled orders and orders with total <= 0)
+    fetchTodayWalmartOrdersCount(exclude_cancelled=True, min_order_value=0)
