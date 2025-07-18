@@ -1797,46 +1797,35 @@ def getPeriodWiseData(request):
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = 'US/Pacific'
 
-    # Modified to avoid nested threading
     def calculate_metrics_sync(start_date, end_date):
-       
         return calculate_metricss(
             start_date, end_date, 
             marketplace_id, brand_id, 
             product_id, manufacturer_name, 
             fulfillment_channel,
-            timezone_str,False,
+            timezone_str, False,
             use_threads=False
         )
 
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
         current_metrics = calculate_metrics_sync(current_start, current_end)
-        # previous_metrics = calculate_metrics_sync(prev_start, prev_end)  # Uncomment if needed
-
         period_format = {
             "current": {"from": to_utc_format(current_start)},
             "previous": {"from": to_utc_format(prev_start)}
         }
-        
         if label not in ['Today', 'Yesterday']:
             period_format["current"]["to"] = to_utc_format(current_end)
             period_format["previous"]["to"] = to_utc_format(prev_end)
-
         output = {
             "label": label,
             "period": period_format
         }
-
         for key in current_metrics:
             output[key] = {
                 "current": current_metrics[key],
-                # "previous": previous_metrics[key],  # Uncomment if needed
-                # "delta": round(current_metrics[key] - previous_metrics[key], 2)
             }
-
         return output
 
-    # Get all date ranges first
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1845,35 +1834,34 @@ def getPeriodWiseData(request):
         "lastYear": get_date_range("Last Year", timezone_str)
     }
 
-    # Process sequentially instead of using ThreadPoolExecutor
-    response_data = {
-        "yesterday": format_period_metrics(
-            "Yesterday",
-            date_ranges["yesterday"][0], date_ranges["yesterday"][1],
-            date_ranges["yesterday"][0] - timedelta(days=1), 
-            date_ranges["yesterday"][0] - timedelta(seconds=1)
-        ),
-        "last7Days": format_period_metrics(
-            "Last 7 Days",
-            date_ranges["last7Days"][0], date_ranges["last7Days"][1],
-            date_ranges["last7Days"][0] - timedelta(days=7), 
-            date_ranges["last7Days"][0] - timedelta(seconds=1)
-        ),
-        "last30Days": format_period_metrics(
-            "Last 30 Days",
-            date_ranges["last30Days"][0], date_ranges["last30Days"][1],
-            date_ranges["last30Days"][0] - timedelta(days=30), 
-            date_ranges["last30Days"][0] - timedelta(seconds=1)
-        ),
-        "yearToDate": format_period_metrics(
-            "Year to Date",
-            date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
-            date_ranges["lastYear"][0], date_ranges["lastYear"][1]
-        )
-    }
+    # Prepare all period jobs
+    period_jobs = [
+        ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
+         date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)),
+        ("last7Days", "Last 7 Days", date_ranges["last7Days"][0], date_ranges["last7Days"][1],
+         date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][0] - timedelta(seconds=1)),
+        ("last30Days", "Last 30 Days", date_ranges["last30Days"][0], date_ranges["last30Days"][1],
+         date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][0] - timedelta(seconds=1)),
+        ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
+         date_ranges["lastYear"][0], date_ranges["lastYear"][1])
+    ]
+
+    response_data = {}
+
+    # Run all period jobs in parallel
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_label = {
+            executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
+            for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
+        }
+        for future in as_completed(future_to_label):
+            key = future_to_label[future]
+            try:
+                response_data[key] = future.result()
+            except Exception as exc:
+                response_data[key] = {"error": str(exc)}
 
     return JsonResponse(response_data, safe=False)
-
 
 @csrf_exempt
 def getPeriodWiseDataXl(request):
