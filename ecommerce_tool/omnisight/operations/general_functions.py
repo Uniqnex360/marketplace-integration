@@ -1228,6 +1228,12 @@ def salesAnalytics(request):
         brand_id_list = json_request.get('brand_id')
         preset = json_request.get("preset", "Today")        
 
+        # Ensure brand_id_list is a list of ObjectIds
+        if brand_id_list:
+            if not isinstance(brand_id_list, list):
+                brand_id_list = [brand_id_list]
+            brand_id_list = [ObjectId(bid) for bid in brand_id_list]
+
         # Date logic for main queries
         if start_date and start_date != "":
             # Ensure start_date and end_date are strings before conversion
@@ -1250,6 +1256,8 @@ def salesAnalytics(request):
             match_conditions["marketplace_id"] = ObjectId(marketplace_id)
         match_conditions['order_status'] = {"$ne": "Cancelled"}
         match_conditions['order_total'] = {"$gt": 0}
+        if brand_id_list:
+            match_conditions["brand_id"] = {"$in": brand_id_list}
 
         # Custom match conditions for custom_order collection
         custom_match_conditions = {}
@@ -1274,6 +1282,8 @@ def salesAnalytics(request):
             custom_match_conditions["marketplace_id"] = ObjectId(marketplace_id)
         custom_match_conditions['order_status'] = {"$ne": "Cancelled"}
         custom_match_conditions['total_price'] = {"$gt": 0}
+        if brand_id_list:
+            custom_match_conditions["brand_id"] = {"$in": brand_id_list}
 
         # Total Sales Pipeline (Order collection)
         total_sales_pipeline = [
@@ -1369,6 +1379,10 @@ def salesAnalytics(request):
 
         sanitized_data = sanitize_floats(data)
         return sanitized_data
+
+    except Exception as e:
+        # Handle/log exception as needed
+        return {"error": str(e)}
 
     except ValueError as ve:
         logger.error("ValueError in salesAnalytics: %s", ve)
