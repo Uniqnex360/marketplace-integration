@@ -91,17 +91,7 @@ def getOrdersListBasedonProductId(productIds,start_date=None, end_date=None):
 
 
 
-def getproductIdListBasedonbrand(brandIds,start_date=None, end_date=None):
-    """
-    Fetches the list of product IDs based on the provided brand ID using a pipeline aggregation.
-
-    Args:
-        productId (str): The ID of the brand for which to fetch product IDs.
-
-    Returns:
-        list: A list of dictionaries containing product details.
-    """
-    orders = []
+def getproductIdListBasedonbrand(brandIds):
     pipeline = [
         {
             "$match": {
@@ -122,32 +112,21 @@ def getproductIdListBasedonbrand(brandIds,start_date=None, end_date=None):
         }
     ]
     products = list(Product.objects.aggregate(*pipeline))
-    if products != []:
-        orders = getOrdersListBasedonProductId(products[0]['productIds'],start_date, end_date)
-    return orders
+    if products:
+        return products[0]['productIds']
+    return []
 
-
-def getproductIdListBasedonManufacture(manufactureName = [],start_date=None, end_date=None):
-    """
-    Fetches the list of product IDs based on the provided brand ID using a pipeline aggregation.
-
-    Args:
-        productId (str): The ID of the brand for which to fetch product IDs.
-
-    Returns:
-        list: A list of dictionaries containing product details.
-    """
-    orders = []
+def getproductIdListBasedonManufacture(manufactureNames):
     pipeline = [
         {
             "$match": {
-                "manufacturer_name": {"$in":manufactureName }
+                "manufacturer_name": {"$in": manufactureNames}
             }
         },
         {
-            "$group" : {
-                "_id" : None,
-                "productIds" : { "$addToSet": "$_id" }
+            "$group": {
+                "_id": None,
+                "productIds": {"$addToSet": "$_id"}
             }
         },
         {
@@ -158,9 +137,9 @@ def getproductIdListBasedonManufacture(manufactureName = [],start_date=None, end
         }
     ]
     products = list(Product.objects.aggregate(*pipeline))
-    if products != []:
-        orders = getOrdersListBasedonProductId(products[0]['productIds'],start_date, end_date)
-    return orders
+    if products:
+        return products[0]['productIds']
+    return []
 
 def get_date_range(preset, time_zone_str="UTC"):
 
