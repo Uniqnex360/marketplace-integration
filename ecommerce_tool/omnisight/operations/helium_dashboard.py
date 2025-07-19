@@ -2097,10 +2097,11 @@ def  getPeriodWiseDataCustom(request):
                 "previous": previous_value,
                 "delta": delta
             }
-
-        current = calculate_metricss(cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
-        previous = calculate_metricss(prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
-
+        with ThreadPoolExecutor (max_workers=2) as executor:
+            future_current=executor.submit(calculate_metricss,cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
+            future_previous=executor.submit(calculate_metricss,prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
+            current=future_current.result()
+            previous=future_previous.result()
         date_ranges = {
             "current": {"from": to_utc_format(cur_from)},
             "previous": {"from": to_utc_format(prev_from)}
