@@ -1,3 +1,4 @@
+from __future__ import annotations
 from mongoengine import Q
 from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund,Brand,inventry_log,productPriceChange
 from mongoengine.queryset.visitor import Q
@@ -1687,7 +1688,7 @@ def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_star
                 chunk_result = future.result(timeout=30)  # 30 second timeout per chunk
                 sales_data.update(chunk_result)
             except Exception as e:
-                print(f"Error processing chunk: {e}")
+                logger("Error processing chunk:%s",e)
     
         return sales_data
 
@@ -1717,7 +1718,6 @@ def get_single_product_sales(product_id, today_start_date, today_end_date,
             }
         }
     except Exception as e:
-        print(f"Error getting sales for product {product_id}: {e}")
         return {
             "today": {"revenue": 0, "units": 0},
             "period": {"revenue": 0, "units": 0},
@@ -1771,7 +1771,6 @@ def get_batch_sales_data(start_date, end_date, product_ids):
             }
     except Exception as e:
         # Fallback to individual calls if batch fails
-        print(f"Batch sales query failed: {e}")
         for pid in product_ids:
             try:
                 individual_sales = getdaywiseproductssold(start_date, end_date, pid, False)
@@ -5381,7 +5380,6 @@ def getproductIdlist(request):
         # Use id, NOT _id for MongoEngine
         brand_objs = list(Brand.objects.filter(id__in=brand_list))
         brand_names = [b.name for b in brand_objs]
-        print("Brands received in the query:", ", ".join(brand_names))
         match['brand_id'] = {"$in": brand_list}
     else:
         brand_names = []
@@ -5412,9 +5410,6 @@ def getproductIdlist(request):
 
     asin_list = list(Product.objects.aggregate(*pipeline))
 
-
-    for product in asin_list:
-        print(f"  - {product.get('product_title', 'Unknown')}")
 
     return asin_list
 
