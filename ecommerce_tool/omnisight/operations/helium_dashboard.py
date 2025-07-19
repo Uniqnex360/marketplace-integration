@@ -5417,39 +5417,33 @@ def getBrandListforfilter(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')
-    skip = int(request.GET.get('skip',1))
-    match =dict()
-    pipeline = []
-
-
-    if search_query != None and search_query != "":
+    skip = int(request.GET.get('skip', 1))
+    
+    # Build the base query
+    query = {}
+    
+    # Add marketplace filter
+    if marketplace_id and marketplace_id not in ["", "all", "custom"]:
+        query['marketplace_id'] = ObjectId(marketplace_id)
+    
+    # Add search query filter
+    if search_query and search_query.strip():
         search_query = re.escape(search_query.strip())
-        match["name"] = {"$regex": search_query, "$options": "i"}
-
+        query["name"] = {"$regex": search_query, "$options": "i"}
     
-    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
-        match['marketplace_id'] = ObjectId(marketplace_id)
-    if match != {}:
-        pipeline.append({"$match": match})
-    pipeline.extend([
-        {
-            "$project" : {
-                "_id" : 0,
-                "id" : {"$toString" : "$_id"},
-                "name" : 1,
-                
-            }
-        },
-        {
-            "$sort" : {
-                "name" : 1
-            }
-        },
-        
-        
-    ])
+    if not query:
+        brand_cursor = Brand.objects.only('name').order_by('name')
+    else:
+        brand_cursor = Brand.objects.filter(**query).only('name').order_by('name')
     
-    brand_list = list(Brand.objects.aggregate(*(pipeline)))
+    brand_list = [
+        {
+            "id": str(brand.id),
+            "name": brand.name
+        }
+        for brand in brand_cursor
+    ]
+    
     data['brand_list'] = brand_list
     return data
 
