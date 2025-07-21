@@ -1166,7 +1166,7 @@ def get_top_products(request):
             "refund_qty": 1
         }},
         {"$sort": SON([(sort_field, -1)])},
-        {"$limit": 10}
+        {"$limit": 11}
     ])
 
     result = list(Order.objects.aggregate(pipeline))
