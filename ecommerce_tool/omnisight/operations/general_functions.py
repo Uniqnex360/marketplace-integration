@@ -1060,14 +1060,7 @@ def ordersCountForDashboard(request):
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
-    timezone_str = "US/Pacific"
-    product_ids = request.GET.getlist("product_id")
-    if product_ids:
-        try:
-            product_ids = [ObjectId(pid.strip()) for pid in product_ids if pid.strip()]
-            match_conditions["order_items.ProductDetails.product_id"] = {"$in": product_ids}
-        except Exception:
-            pass
+    timezone_str = request.GET.get("timezone", "US/Pacific")
 
     # Time range
     if start_date:
@@ -1086,11 +1079,13 @@ def ordersCountForDashboard(request):
     }
 
     # Add product_id filtering if provided
-    if product_id:
-        if isinstance(product_id, str):
-            product_id = [product_id]
-        product_ids = [ObjectId(pid) for pid in product_id]
-        match_conditions["order_items.ProductDetails.product_id"] = {"$in": product_ids}
+    product_ids = request.GET.getlist("product_id")
+    if product_ids:
+        try:
+            product_ids = [ObjectId(pid.strip()) for pid in product_ids if pid.strip()]
+            match_conditions["order_items.ProductDetails.product_id"] = {"$in": product_ids}
+        except Exception:
+            pass
 
     # Aggregate Orders and Custom Orders - in parallel
     order_count, custom_order_count = 0, 0
@@ -1112,8 +1107,7 @@ def ordersCountForDashboard(request):
         q.put(res[0].get("count", 0) if res else 0)
 
     q1, q2 = Queue(), Queue()
-    t1 = Thread(target=count_orders, args=(q1,))
-    t2 = Thread(target=count_custom_orders, args=(q2,))
+    t1, t2 = Thread(target=count_orders, args=(q1,)), Thread(target=count_custom_orders, args=(q2,))
     t1.start(); t2.start()
     t1.join(); t2.join()
     order_count = q1.get()
@@ -1125,7 +1119,7 @@ def ordersCountForDashboard(request):
         "percentage": "100.0%"
     }
 
-    # If 'all', gather data per marketplace
+    # Marketplace-based data
     if marketplace_id == "all":
         marketplaces = list(Marketplace.objects.only('id', 'name'))
         results = {}
@@ -1162,8 +1156,7 @@ def ordersCountForDashboard(request):
 
         data.update(results)
 
-    elif marketplace_id != "all" and marketplace_id != "custom":
-        # Single marketplace query
+    elif marketplace_id and marketplace_id not in ["all", "custom"]:
         mp_id = ObjectId(marketplace_id)
         pipeline = [
             {"$match": {**match_conditions, "marketplace_id": mp_id}},
@@ -1215,6 +1208,7 @@ def ordersCountForDashboard(request):
         }
 
     return sanitize_data(data)
+
 def totalSalesAmount(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
