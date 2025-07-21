@@ -1114,15 +1114,13 @@ def ordersCountForDashboard(request):
                     }
                 },
                 # Group back to get unique orders (in case multiple items match)
-                # FIXED: Preserve brand_id in the group stage
                 {
                     "$group": {
                         "_id": "$_id",
                         "order_total": {"$first": "$order_total"},
                         "order_date": {"$first": "$order_date"},
                         "order_status": {"$first": "$order_status"},
-                        "marketplace_id": {"$first": "$marketplace_id"},
-                        "brand_id": {"$first": "$brand_id"}  # Preserve brand_id
+                        "marketplace_id": {"$first": "$marketplace_id"}
                     }
                 }
             ])
@@ -1165,8 +1163,7 @@ def ordersCountForDashboard(request):
                 {
                     "$group": {
                         "_id": "$_id",
-                        "total_price": {"$first": "$total_price"},
-                        "brand_id": {"$first": "$brand_id"}  # Preserve brand_id for custom orders too
+                        "total_price": {"$first": "$total_price"}
                     }
                 },
                 {"$group": {"_id": None, "count": {"$sum": 1}}}
@@ -1282,8 +1279,7 @@ def ordersCountForDashboard(request):
                 {
                     "$group": {
                         "_id": "$_id",
-                        "total_price": {"$first": "$total_price"},
-                        "brand_id": {"$first": "$brand_id"}  # Preserve brand_id
+                        "total_price": {"$first": "$total_price"}
                     }
                 },
                 {
