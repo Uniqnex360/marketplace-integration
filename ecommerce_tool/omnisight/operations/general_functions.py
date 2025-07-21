@@ -1060,7 +1060,16 @@ def ordersCountForDashboard(request):
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
     brand_id = request.GET.get('brand_id', None)
-    product_id = request.GET.get('product_id', None)
+    product_ids = request.GET.getlist('product_id[]')  # Handle array format
+    product_id = request.GET.get('product_id', None)  # Handle single format
+    
+    # Combine both formats
+    if product_ids:
+        product_ids = [ObjectId(pid) for pid in product_ids]
+    elif product_id:
+        product_ids = [ObjectId(product_id)]
+    else:
+        product_ids = None
     timezone_str="US/Pacific"
 
     # Time range
@@ -1085,12 +1094,11 @@ def ordersCountForDashboard(request):
 
     # Build aggregation pipeline for product filtering
     def build_pipeline_with_product_filter(base_match_conditions):
-        pipeline = []
+        pipeline = [{"$match": base_match_conditions}]
         
-        if product_id:
-            # If product_id is specified, we need to join with order_items and filter by product
-            pipeline = [
-                {"$match": base_match_conditions},
+        if product_ids:
+            # Join with order_items and filter by product_id
+            pipeline.extend([
                 {
                     "$lookup": {
                         "from": "order_items",
@@ -1099,15 +1107,23 @@ def ordersCountForDashboard(request):
                         "as": "order_items_details"
                     }
                 },
+                {"$unwind": "$order_items_details"},
                 {
                     "$match": {
-                        "order_items_details.ProductDetails.product_id": ObjectId(product_id)
+                        "order_items_details.ProductDetails.product_id": {"$in": product_ids}
+                    }
+                },
+                # Group back to get unique orders (in case multiple items match)
+                {
+                    "$group": {
+                        "_id": "$_id",
+                        "order_total": {"$first": "$order_total"},
+                        "order_date": {"$first": "$order_date"},
+                        "order_status": {"$first": "$order_status"},
+                        "marketplace_id": {"$first": "$marketplace_id"}
                     }
                 }
-            ]
-        else:
-            # No product filtering needed
-            pipeline = [{"$match": base_match_conditions}]
+            ])
         
         return pipeline
 
@@ -1126,7 +1142,7 @@ def ordersCountForDashboard(request):
         custom_match = match_conditions.copy()
         
         # For custom orders, we might need different field names
-        if product_id:
+        if product_ids:
             # Assuming custom orders have a similar structure
             pipeline = [
                 {"$match": custom_match},
@@ -1138,9 +1154,16 @@ def ordersCountForDashboard(request):
                         "as": "order_items_details"
                     }
                 },
+                {"$unwind": "$order_items_details"},
                 {
                     "$match": {
-                        "order_items_details.product_id": ObjectId(product_id)
+                        "order_items_details.product_id": {"$in": product_ids}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$_id",
+                        "total_price": {"$first": "$total_price"}
                     }
                 },
                 {"$group": {"_id": None, "count": {"$sum": 1}}}
@@ -1236,7 +1259,7 @@ def ordersCountForDashboard(request):
     elif marketplace_id == "custom":
         custom_match = match_conditions.copy()
         
-        if product_id:
+        if product_ids:
             pipeline = [
                 {"$match": custom_match},
                 {
@@ -1247,9 +1270,16 @@ def ordersCountForDashboard(request):
                         "as": "order_items_details"
                     }
                 },
+                {"$unwind": "$order_items_details"},
                 {
                     "$match": {
-                        "order_items_details.product_id": ObjectId(product_id)
+                        "order_items_details.product_id": {"$in": product_ids}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$_id",
+                        "total_price": {"$first": "$total_price"}
                     }
                 },
                 {
