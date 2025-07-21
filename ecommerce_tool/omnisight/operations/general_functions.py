@@ -51,20 +51,34 @@ def sanitize_floats(data):
         return data
 
 def getMarketplaceList(request):
-    query_set = list(Marketplace.objects.only("id","name","image_url"))
-    marketplace_list=[]
-    for marketplace  in query_set:
-        entry={
-            "id":str(marketplace.id),
-            'name':str(marketplace.name),
-            "image_url":marketplace.image_url,
+    pipeline = [
+        {
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "name": 1,
+                "image_url": 1,
+                "fulfillment_channel": {
+                    "$switch": {
+                        "branches": [
+                            {
+                                "case": {"$eq": ["$name", "Amazon"]},
+                                "then": [{"FBA": "AFN"}, {"FBM": "MFN"}]
+                            },
+                            {
+                                "case": {"$eq": ["$name", "Walmart"]},
+                                "then": [{"FBM": "SellerFulfilled"}]
+                            }
+                        ],
+                        "default": []  # no fulfillment_channel if no match
+                    }
+                }
+            }
         }
-        if marketplace.name== "Amazon":
-            entry['fulfillment_channel'] = [{'FBA' : "AFN"},{'FBM' : "MFN"}]
-        elif marketplace.name == "Walmart":
-            entry['fulfillment_channel'] = [{'FBM' : "SellerFulfilled"}]
-    return marketplace_list
+    ]
 
+    marketplace_list = list(Marketplace.objects.aggregate(*pipeline))
+    return marketplace_list
 #---------------------------------------------PRODUCT APIS---------------------------------------------------
 @csrf_exempt
 def getProductList(request):
