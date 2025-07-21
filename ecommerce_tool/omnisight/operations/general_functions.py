@@ -1061,7 +1061,13 @@ def ordersCountForDashboard(request):
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
     timezone_str = "US/Pacific"
-    product_id = request.GET.get("product_id", None)
+    product_ids = request.GET.getlist("product_id")
+    if product_ids:
+        try:
+            product_ids = [ObjectId(pid.strip()) for pid in product_ids if pid.strip()]
+            match_conditions["order_items.ProductDetails.product_id"] = {"$in": product_ids}
+        except Exception:
+            pass
 
     # Time range
     if start_date:
