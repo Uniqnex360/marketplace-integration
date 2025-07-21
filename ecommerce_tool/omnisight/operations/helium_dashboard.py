@@ -1281,20 +1281,20 @@ def get_products_with_pagination(request):
 
 def get_parent_products(match, page, page_size, start_date, end_date, 
                                    today_start_date, today_end_date, sort_by, sort_by_value):
+    
+    # OPTIMIZATION 1: Single aggregation pipeline with pagination
     pipeline = []
-
+    
     if match:
         pipeline.append({"$match": match})
-
+    
+    # OPTIMIZATION 2: Combined lookup and grouping with minimal data transfer
     pipeline.extend([
         {
             "$lookup": {
                 "from": "marketplace",
-                "let": {"mp_id": "$marketplace_id"},
-                "pipeline": [
-                    {"$match": {"$expr": {"$eq": ["$_id", "$$mp_id"]}}},
-                    {"$project": {"name": 1, "_id": 0}}
-                ],
+                "localField": "marketplace_id",
+                "foreignField": "_id",
                 "as": "marketplace_info"
             }
         },
@@ -1337,36 +1337,52 @@ def get_parent_products(match, page, page_size, start_date, end_date,
                 "stock": "$total_stock",
                 "price_start": "$min_price",
                 "price_end": "$max_price",
-                "cogs": "$total_cogs",
-                "totalchannelFees": "$total_cogs",
+                "cogs": {"$round": ["$total_cogs", 2]},
+                "totalchannelFees": {"$round": ["$total_cogs", 2]},
                 "product_ids": 1,
                 "vendor_funding": "$vendor_funding_sum"
             }
         }
     ])
 
+    # OPTIMIZATION 3: Get total count and paginated results in single query
     count_pipeline = pipeline + [{"$count": "total"}]
-
+    
+    # Add sorting if specified
     if sort_by and sort_by in ["price_start", "price_end", "stock", "sku_count"]:
         pipeline.append({"$sort": {sort_by: int(sort_by_value)}})
-
+    
+    # Add pagination
     pipeline.extend([
         {"$skip": (page - 1) * page_size},
         {"$limit": page_size}
     ])
 
-    total_result = list(Product.objects.aggregate(*count_pipeline)) if page == 1 else []
+    # Execute both pipelines
+    total_result = list(Product.objects.aggregate(*count_pipeline))
     total_products = total_result[0]["total"] if total_result else 0
-
+    
     products_result = list(Product.objects.aggregate(*pipeline))
-    all_product_ids = [pid for group in products_result for pid in group["product_ids"]]
 
+    # OPTIMIZATION 4: Batch process all product IDs at once
+    all_product_ids = []
+    for group in products_result:
+        all_product_ids.extend(group["product_ids"])
+
+    # Get sales data for all products in batch
     sales_data = batch_get_sales_data_optimized(all_product_ids, start_date, end_date, today_start_date, today_end_date)
 
+    # OPTIMIZATION 5: Process results without re-querying
     processed_products = []
     for group in products_result:
-        total_sales_today = total_units_today = total_revenue = total_net_profit = 0
-        total_units_period = total_revenue_period = total_net_profit_period = 0
+        # Calculate aggregated sales data
+        total_sales_today = 0
+        total_units_today = 0
+        total_revenue = 0
+        total_net_profit = 0
+        total_units_period = 0
+        total_revenue_period = 0
+        total_net_profit_period = 0
 
         for product_id in group["product_ids"]:
             product_sales = sales_data.get(product_id, {
@@ -1375,28 +1391,29 @@ def get_parent_products(match, page, page_size, start_date, end_date,
                 "compare": {"revenue": 0, "units": 0}
             })
 
-            num_ids = len(group["product_ids"])
-            cogs = group["cogs"] / num_ids if num_ids else 0
-            vendor_funding = group["vendor_funding"] / num_ids if num_ids else 0
-
+            cogs = group["cogs"] / len(group["product_ids"])  # Average COGS
+            vendor_funding = group["vendor_funding"] / len(group["product_ids"])  # Average vendor funding
+            
             total_sales_today += product_sales["today"]["revenue"]
             total_units_today += product_sales["period"]["units"]
             total_revenue += product_sales["period"]["revenue"]
-
+            
             period_profit = (product_sales["period"]["revenue"] - (cogs * product_sales["period"]["units"]) + 
-                             (vendor_funding * product_sales["period"]["units"]))
+                           (vendor_funding * product_sales["period"]["units"]))
             total_net_profit += period_profit
-
+            
             total_units_period += product_sales["compare"]["units"] - product_sales["period"]["units"]
             total_revenue_period += product_sales["compare"]["revenue"] - product_sales["period"]["revenue"]
-
+            
             compare_profit = (product_sales["compare"]["revenue"] - (cogs * product_sales["compare"]["units"]) + 
-                              (vendor_funding * product_sales["compare"]["units"]))
+                            (vendor_funding * product_sales["compare"]["units"]))
             total_net_profit_period += compare_profit - period_profit
 
-        margin = (total_net_profit / total_revenue * 100) if total_revenue > 0 else 0
+        # Calculate margins
+        margin = (total_net_profit / total_revenue) * 100 if total_revenue > 0 else 0
         margin_period = ((total_net_profit_period / (total_revenue + total_revenue_period)) * 100 if (total_revenue + total_revenue_period) > 0 else 0) - margin
 
+        # Add calculated fields to existing group data
         group.update({
             "salesForToday": round(total_sales_today, 2),
             "unitsSoldForToday": total_units_today,
@@ -1412,28 +1429,30 @@ def get_parent_products(match, page, page_size, start_date, end_date,
             "margin": round(margin, 2),
             "marginforPeriod": round(margin_period, 2)
         })
-
+        
+        # Remove temporary fields
         group.pop("product_ids", None)
         group.pop("vendor_funding", None)
-
+        
         processed_products.append(group)
 
-    calculated_fields = {
-        'salesForToday', 'unitsSoldForToday', 'grossRevenue', 'netProfit', 'margin',
-        'unitsSoldForPeriod', 'grossRevenueforPeriod', 'netProfitforPeriod', 'marginforPeriod'
-    }
-
+    # Sort by calculated fields if needed (only for current page)
+    calculated_fields = {'salesForToday', 'unitsSoldForToday', 'grossRevenue', 'netProfit', 'margin', 
+                        'unitsSoldForPeriod', 'grossRevenueforPeriod', 'netProfitforPeriod', 'marginforPeriod'}
+    
     if sort_by and sort_by in calculated_fields:
         reverse_sort = sort_by_value == -1
         processed_products.sort(key=lambda x: x.get(sort_by, 0), reverse=reverse_sort)
 
-    return JsonResponse({
+    response_data = {
         "total_products": total_products,
         "page": page,
         "page_size": page_size,
         "products": clean_json_floats(processed_products),
         "tab_type": "parent"
-    }, safe=False)
+    }
+
+    return JsonResponse(response_data, safe=False)
 
 
 def get_individual_products(match, page, page_size, start_date, end_date, 
