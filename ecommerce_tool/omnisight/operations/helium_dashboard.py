@@ -7,6 +7,8 @@ from dateutil.relativedelta import relativedelta
 from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime,timedelta
 from bson.son import SON
+from bson import ObjectId
+
 import time
 from collections import defaultdict
 from bson import ObjectId
@@ -5170,35 +5172,46 @@ def productsTrafficandConversions(request):
 ##################################-----------------------Dashboard Filter API-----------------------###############################################
 
 @csrf_exempt
+
 def getSKUlist(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id')
     search_query = json_request.get('search_query')
     brand_id = json_request.get('brand_id')
     manufacturer_name = json_request.get('manufacturer_name')
-    query_filter={}
+    query_filter = {}
 
     if search_query:
-        query_filter['sku']={
-            '$regex':f"^{re.escape(search_query.strip())}",
-            "$options":"i"
+        query_filter['sku'] = {
+            '$regex': f"^{re.escape(search_query.strip())}",
+            "$options": "i"
         }
 
-    
-    if marketplace_id and marketplace_id not in ["","all","custom"]:
+    if marketplace_id and marketplace_id not in ["", "all", "custom"]:
         query_filter['marketplace_id'] = ObjectId(marketplace_id)
 
-    if brand_id  and brand_id not in ["",[],"custom"]:
-        brand_list = [ObjectId(i) for i in brand_id]
-        query_filter['brand_id'] = {"$in":brand_list}
+    if brand_id and brand_id not in ["", [], "custom"]:
+        brand_list = []
+        if isinstance(brand_id, str):
+            try:
+                brand_list = [ObjectId(brand_id)]
+            except Exception:
+                pass
+        elif isinstance(brand_id, list):
+            for i in brand_id:
+                try:
+                    brand_list.append(ObjectId(i))
+                except Exception:
+                    continue
+        if brand_list:
+            query_filter['brand_id'] = {"$in": brand_list}
 
-    if manufacturer_name and manufacturer_name not in ["",[],"custom"]:
-        query_filter['manufacturer_name'] = {"$in":manufacturer_name}
+    if manufacturer_name and manufacturer_name not in ["", [], "custom"]:
+        query_filter['manufacturer_name'] = {"$in": manufacturer_name}
 
-    sku_cursor=Product.objects.filter(**query_filter).only("sku").order_by('sku')
-    sku_list = [{"id":str(doc.id),'sku':doc.sku} for doc in sku_cursor]
+    sku_cursor = Product.objects.filter(**query_filter).only("sku").order_by('sku')
+    sku_list = [{"id": str(doc.id), 'sku': doc.sku} for doc in sku_cursor]
     return sku_list
-
 @csrf_exempt
 def getproductIdlist(request):
     json_request = JSONParser().parse(request)
