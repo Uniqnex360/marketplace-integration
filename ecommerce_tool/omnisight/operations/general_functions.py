@@ -1236,7 +1236,9 @@ def salesAnalytics(request):
         end_date = json_request.get('end_date')  
         timezone_str = json_request.get('timezone', 'US/Pacific')
         brand_id_list = json_request.get('brand_id')
-        preset = json_request.get("preset", "Today")        
+        preset = json_request.get("preset", "Today")     
+        product_id_list = json_request.get('product_id')
+   
 
         # Date logic
         if start_date and start_date != "":
@@ -1253,7 +1255,8 @@ def salesAnalytics(request):
             start_date, end_date, 
             marketplace_id=marketplace_id, 
             brand_id=brand_id_list, 
-            timezone=timezone_str
+            timezone=timezone_str,
+            product_id=product_id_list
         )
 
         # Filter out cancelled/zero orders (should already be handled in grossRevenue, but just in case)
