@@ -2113,104 +2113,101 @@ def  getPeriodWiseDataCustom(request):
 
 
 @csrf_exempt
-
-
 def allMarketplaceData(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
-    product_id = json_request.get('product_id', [])
-    manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel', None)
+    product_id = json_request.get('product_id',[])
+    manufacturer_name = json_request.get('manufacturer_name',[])
+    fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
     timezone_str = 'US/Pacific'
 
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
 
-    if start_date:
-        from_date, to_date = convertdateTotimezone(start_date, end_date, timezone_str)
+    if start_date != None and start_date != "":
+       from_date, to_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
-        from_date, to_date = get_date_range(preset, timezone_str)
+        from_date, to_date = get_date_range(preset,timezone_str)
 
-    # Preload marketplaces
-    marketplace_dict = {
-        str(mp.id): mp.name for mp in Marketplace.objects.only("id", "name")
-    }
 
-    def fetch_item_details_bulk(item_ids):
-        pipeline = [
-            {"$match": {"_id": {"$in": item_ids}}},
-            {
-                "$lookup": {
-                    "from": "product",
-                    "localField": "ProductDetails.product_id",
-                    "foreignField": "_id",
-                    "as": "product_ins"
-                }
-            },
-            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-            {
-                "$project": {
-                    "_id": 1,
-                    "price": "$Pricing.ItemPrice.Amount",
-                    "tax_price": "$Pricing.ItemTax.Amount",
-                    "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                    "sku": "$product_ins.sku",
-                    "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                    "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                    "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                }
-            }
-        ]
-        return {
-            item["_id"]: item
-            for item in OrderItems.objects.aggregate(*pipeline)
-        }
-
-    def process_orders(orders):
-        all_item_ids = [item_id for order in orders for item_id in order["order_items"]]
-        item_map = fetch_item_details_bulk(all_item_ids)
-
+    def grouped_marketplace_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str):
+        orders = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
         grouped_orders = defaultdict(list)
+        
         for order in orders:
             key = (order.get("marketplace_id"), order.get("currency"))
             grouped_orders[key].append(order)
 
         marketplace_metrics = defaultdict(lambda: {"currency_list": []})
 
-        for (mp_id, currency), order_list in grouped_orders.items():
+        for (mp_id, currency), orders in grouped_orders.items():
             gross_revenue = 0
             total_cogs = 0
             total_units = 0
+            refund = 0
             tax_price = 0
+            other_price = 0
             total_product_cost = 0
             temp_price = 0
             vendor_funding = 0
-            sku_set = set()
-            marketplace_name = marketplace_dict.get(str(mp_id), "")
 
-            for order in order_list:
+            sku_set = set()
+
+            m_obj = Marketplace.objects(id=mp_id)
+            marketplace = m_obj[0].name if m_obj else ""
+            
+    
+            for order in orders:
                 gross_revenue += order["order_total"]
                 total_units += order['items_order_quantity']
+                order_total = order["order_total"]
+                tax_price = 0
 
                 for item_id in order['order_items']:
-                    item_data = item_map.get(item_id)
-                    if not item_data:
-                        continue
+                    item_pipeline = [
+                        {"$match": {"_id": item_id}},
+                        {
+                            "$lookup": {
+                                "from": "product",
+                                "localField": "ProductDetails.product_id",
+                                "foreignField": "_id",
+                                "as": "product_ins"
+                            }
+                        },
+                        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "price": "$Pricing.ItemPrice.Amount",
+                                "tax_price": "$Pricing.ItemTax.Amount",
+                                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                                "sku": "$product_ins.sku",
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
+                            }
+                        }
+                    ]
+                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                    if item_result:
+                        item_data = item_result[0]
+                        temp_price += item_data['price']
+                        tax_price += item_data['tax_price']
+                        if order['marketplace_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs']
+                        else:
+                            total_cogs += item_data['w_total_cogs']
+                        vendor_funding += item_data['vendor_funding'] 
+                        total_product_cost += item_data['price']
+                        
+                        if item_data.get('sku'):
+                            sku_set.add(item_data['sku'])
 
-                    temp_price += item_data['price']
-                    tax_price += item_data['tax_price']
+            # other_price += order_total - temp_price - tax_price
 
-                    cogs_value = item_data['total_cogs'] if marketplace_name == "Amazon" else item_data['w_total_cogs']
-                    total_cogs += cogs_value
-                    vendor_funding += item_data['vendor_funding']
-                    total_product_cost += item_data['price']
-
-                    if item_data.get('sku'):
-                        sku_set.add(item_data['sku'])
-
-            expenses = total_cogs
+            expenses = total_cogs 
             net_profit = (temp_price - expenses) + vendor_funding
             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
@@ -2222,7 +2219,7 @@ def allMarketplaceData(request):
                 "netProfit": round(net_profit, 2),
                 "roi": round(roi, 2),
                 "unitsSold": total_units,
-                "refunds": 0,
+                "refunds": refund,
                 "skuCount": len(sku_set),
                 "margin": round(margin, 2),
                 "sessions": 0,
@@ -2235,84 +2232,115 @@ def allMarketplaceData(request):
                 "shipping_cost": 0
             }
 
-            marketplace_metrics[marketplace_name]["currency_list"].append(currency_data)
-
+            # Append currency data to the appropriate marketplace
+            marketplace_metrics[marketplace]["currency_list"].append(currency_data)
+        
+        # Convert the grouped dictionary to a list of marketplace data
         return [
-            {
-                "image": (
-                    "https://i.pinimg.com/originals/01/ca/da/01cada77a0a7d326d85b7969fe26a728.jpg"
-                    if mp == "Amazon" else
-                    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRzjtf8dzq48TtkzeRYx2-_li3gTCkstX2juA&s"
-                    if mp == "Walmart" else ""
-                ),
-                "marketplace": mp,
-                "currency_list": data["currency_list"]
-            }
-            for mp, data in marketplace_metrics.items()
-        ]
+                {
+                    "image": (
+                        "https://i.pinimg.com/originals/01/ca/da/01cada77a0a7d326d85b7969fe26a728.jpg"
+                        if marketplace == "Amazon" else
+                        "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRzjtf8dzq48TtkzeRYx2-_li3gTCkstX2juA&s"
+                        if marketplace == "Walmart" else ""
+                    ),
+                    "marketplace": marketplace,
+                    "currency_list": data["currency_list"]
+                }
+                for marketplace, data in marketplace_metrics.items()
+            ]
 
-    def calculate_metrics(orders):
-        all_item_ids = [item_id for order in orders for item_id in order["order_items"]]
-        item_map = fetch_item_details_bulk(all_item_ids)
 
+    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str):
         gross_revenue = 0
         total_cogs = 0
+        refund = 0
         net_profit = 0
         margin = 0
         total_units = 0
         temp_price = 0
         sku_set = set()
-        vendor_funding = 0
+
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
+        order_total = 0
+        other_price = 0
         tax_price = 0
+        vendor_funding = 0
 
-        for order in orders:
-            gross_revenue += order['order_total']
-            total_units += order['items_order_quantity']
+        if result:
+            for order in result:
+                gross_revenue += order['order_total']
+                order_total = order['order_total']
+                total_units += order['items_order_quantity']
+                
+                tax_price = 0
 
-            for item_id in order['order_items']:
-                item_data = item_map.get(item_id)
-                if not item_data:
-                    continue
+                for item_id in order['order_items']:
+                    item_pipeline = [
+                        {"$match": {"_id": item_id}},
+                        {
+                            "$lookup": {
+                                "from": "product",
+                                "localField": "ProductDetails.product_id",
+                                "foreignField": "_id",
+                                "as": "product_ins"
+                            }
+                        },
+                        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "price": "$Pricing.ItemPrice.Amount",
+                                "tax_price": "$Pricing.ItemTax.Amount",
+                                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                                "sku": "$product_ins.sku",
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                                "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                                "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
+                            }
+                        }
+                    ]
+                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                    if item_result:
+                        item_data = item_result[0]
+                        temp_price += item_data['price']
+                        tax_price += item_data['tax_price']
+                        if order['marketplace_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs']
+                        else:
+                            total_cogs += item_data['w_total_cogs']
+                        vendor_funding += item_data['vendor_funding']
+                        # total_units += 1
+                        if item_data.get('sku'):
+                            sku_set.add(item_data['sku'])
 
-                temp_price += item_data['price']
-                tax_price += item_data['tax_price']
-                marketplace_name = order.get("marketplace_name", "Amazon")
+            # other_price += order_total - temp_price - tax_price
 
-                total_cogs += item_data['total_cogs'] if marketplace_name == "Amazon" else item_data['w_total_cogs']
-                vendor_funding += item_data['vendor_funding']
-
-                if item_data.get('sku'):
-                    sku_set.add(item_data['sku'])
-
-        net_profit = (temp_price - total_cogs) + vendor_funding
-        margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-        roi = (net_profit / total_cogs) * 100 if total_cogs > 0 else 0
+            net_profit = (temp_price - total_cogs) + vendor_funding
+            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
 
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round(total_cogs, 2),
+            "expenses": round((total_cogs) , 2),
             "netProfit": round(net_profit, 2),
-            "roi": round(roi, 2),
+            "roi": round((net_profit / (total_cogs)) * 100, 2) if total_cogs > 0 else 0,
             "unitsSold": total_units,
-            "refunds": 0,
+            "refunds": refund,
             "skuCount": len(sku_set),
             "sessions": 0,
             "pageViews": 0,
             "unitSessionPercentage": 0,
             "margin": round(margin, 2),
             "seller": "",
-            "tax_price": round(tax_price, 2),
-            "total_cogs": round(total_cogs, 2),
-            "product_cost": round(gross_revenue, 2),
+            "tax_price": tax_price,
+            "total_cogs": total_cogs,
+            "product_cost": order_total,
             "shipping_cost": 0
         }
 
-    def create_period_response(cur_from, cur_to, prev_from, prev_to):
-        current_orders = grossRevenue(cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        previous_orders = grossRevenue(prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-
-        current = calculate_metrics(current_orders)
-        previous = calculate_metrics(previous_orders)
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str):
+        current = calculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
+        previous = calculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
 
         def with_delta(metric):
             return {
@@ -2323,25 +2351,35 @@ def allMarketplaceData(request):
 
         return {
             "all_marketplace": {
-                metric: with_delta(metric) for metric in [
-                    "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds",
-                    "skuCount", "sessions", "pageViews", "unitSessionPercentage", "margin", "roi"
-                ]
+                "grossRevenue": with_delta("grossRevenue"),
+                "netProfit": with_delta("netProfit"),
+                "expenses": with_delta("expenses"),
+                "unitsSold": with_delta("unitsSold"),
+                "refunds": with_delta("refunds"),
+                "skuCount": with_delta("skuCount"),
+                "sessions": with_delta("sessions"),
+                "pageViews": with_delta("pageViews"),
+                "unitSessionPercentage": with_delta("unitSessionPercentage"),
+                "margin": with_delta("margin"),
+                "roi": with_delta("roi")
             },
-            "marketplace_list": process_orders(current_orders)
+            "marketplace_list": grouped_marketplace_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str)
         }
 
+    current_date = datetime.now()
     custom_duration = to_date - from_date
     prev_from_date = from_date - custom_duration
     prev_to_date = to_date - custom_duration
 
     response_data = {
-        "custom": create_period_response(from_date, to_date, prev_from_date, prev_to_date),
-        "from_date": from_date,
-        "to_date": to_date
+        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone_str),
+        "from_date":from_date,
+        "to_date":to_date
     }
 
     return JsonResponse(response_data, safe=False)
+
+
 
 @csrf_exempt
 def allMarketplaceDataxl(request):
