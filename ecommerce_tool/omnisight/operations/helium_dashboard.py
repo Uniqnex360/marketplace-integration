@@ -8,7 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime,timedelta
 from bson.son import SON
 from bson import ObjectId
-
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
 from collections import defaultdict
 from bson import ObjectId
@@ -1878,7 +1878,7 @@ def getPeriodWiseData(request):
     response_data = {}
 
     # Run all period jobs in parallel
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ProcessPoolExecutor(max_workers=4) as executor:
         future_to_label = {
             executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
             for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
