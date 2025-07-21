@@ -1260,7 +1260,7 @@ def get_products_with_pagination(request):
     search_query = json_request.get('search_query')
     timezone_str = 'US/Pacific'
 
-    # Date handling (unchanged)
+    # Date handling
     if start_date and start_date != "":
         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
@@ -1272,61 +1272,36 @@ def get_products_with_pagination(request):
         today_start_date, today_end_date = convertLocalTimeToUTC(today_start_date, today_end_date, timezone_str)
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
-    # Build match conditions - MODIFIED TO HANDLE BOTH PARENT AND SKU CASES
+    # Build match conditions
     match = {}
     if marketplace_id and marketplace_id not in ["", "all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
     
-    # These filters should apply to both parent and SKU views
     if product_id and product_id != []:
-        if parent:
-            match["_id"] = {"$in": [ObjectId(pid) for pid in product_id]}
-        else:
-            # For SKUs, we need to match parent products that have these IDs
-            match["parent_id"] = {"$in": [ObjectId(pid) for pid in product_id]}
+        match["_id"] = {"$in": [ObjectId(pid) for pid in product_id]}
     elif brand_id and brand_id != []:
-        if parent:
-            match["brand_id"] = {"$in": [ObjectId(bid) for bid in brand_id]}
-        else:
-            # For SKUs, we need to match parent products that have these brand IDs
-            match["parent_brand_id"] = {"$in": [ObjectId(bid) for bid in brand_id]}
+        match["brand_id"] = {"$in": [ObjectId(bid) for bid in brand_id]}
     elif manufacturer_name and manufacturer_name != []:
-        if parent:
-            match["manufacturer_name"] = {"$in": manufacturer_name}
-        else:
-            # For SKUs, we need to match parent products that have these manufacturers
-            match["parent_manufacturer_name"] = {"$in": manufacturer_name}
+        match["manufacturer_name"] = {"$in": manufacturer_name}
 
-    # Add SKU/parent specific filters
     if parent_search:
-        if parent:
-            match["parent_sku"] = {"$regex": parent_search, "$options": "i"}
-        else:
-            match["parent_sku"] = {"$regex": parent_search, "$options": "i"}
-    
+        match["parent_sku"] = {"$regex": parent_search, "$options": "i"}
     if not parent and sku_search:
         match["sku"] = {"$regex": sku_search, "$options": "i"}
 
     if search_query:
         search_query = re.escape(search_query.strip())
-        if parent:
-            match["$or"] = [
-                {"product_title": {"$regex": search_query, "$options": "i"}},
-                {"parent_sku": {"$regex": search_query, "$options": "i"}},
-            ]
-        else:
-            match["$or"] = [
-                {"product_title": {"$regex": search_query, "$options": "i"}},
-                {"sku": {"$regex": search_query, "$options": "i"}},
-                {"parent_sku": {"$regex": search_query, "$options": "i"}},
-            ]
+        match["$or"] = [
+            {"product_title": {"$regex": search_query, "$options": "i"}},
+            {"sku": {"$regex": search_query, "$options": "i"}},
+        ]
 
     if parent:
         return get_parent_products(match, page, page_size, start_date, end_date, 
-                                 today_start_date, today_end_date, sort_by, sort_by_value)
+                                              today_start_date, today_end_date, sort_by, sort_by_value)
     else:
         return get_individual_products(match, page, page_size, start_date, end_date, 
-                                     today_start_date, today_end_date, sort_by, sort_by_value)
+                                                  today_start_date, today_end_date, sort_by, sort_by_value)
 def get_parent_products(match, page, page_size, start_date, end_date, 
                                    today_start_date, today_end_date, sort_by, sort_by_value):
     
