@@ -1,4 +1,3 @@
-from __future__ import annotations
 from mongoengine import Q
 from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund,Brand,inventry_log,productPriceChange
 from mongoengine.queryset.visitor import Q
@@ -8,10 +7,6 @@ from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime,timedelta
 from bson.son import SON
 import time
-from collections import defaultdict
-from bson import ObjectId
-from django.http import JsonResponse
-from datetime import datetime
 from django.core.cache import cache 
 from django.http import JsonResponse
 from django.http import HttpResponse
@@ -1692,8 +1687,7 @@ def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_star
                 chunk_result = future.result(timeout=30)  # 30 second timeout per chunk
                 sales_data.update(chunk_result)
             except Exception as e:
-                logger.error("Error processing chunk: %s", e)
-
+                print(f"Error processing chunk: {e}")
     
         return sales_data
 
@@ -1723,6 +1717,7 @@ def get_single_product_sales(product_id, today_start_date, today_end_date,
             }
         }
     except Exception as e:
+        print(f"Error getting sales for product {product_id}: {e}")
         return {
             "today": {"revenue": 0, "units": 0},
             "period": {"revenue": 0, "units": 0},
@@ -1742,6 +1737,51 @@ def clean_json_floats(obj):
         return [clean_json_floats(i) for i in obj]
     return obj
 
+def get_batch_sales_data(start_date, end_date, product_ids):
+    """
+    Batch fetch sales data for multiple products at once
+    Returns dict with product_id as key and aggregated sales data as value
+    """
+    # This assumes you have a sales collection/model - adjust according to your schema
+    sales_pipeline = [
+        {
+            "$match": {
+                "product_id": {"$in": product_ids},
+                "date": {"$gte": start_date, "$lte": end_date}
+            }
+        },
+        {
+            "$group": {
+                "_id": "$product_id",
+                "total_quantity": {"$sum": "$quantity"},
+                "total_price": {"$sum": "$price"}
+            }
+        }
+    ]
+    
+    # Replace 'Sales' with your actual sales model/collection
+    sales_data = {}
+    try:
+        # Adjust this line according to your sales model
+        results = list(Product.objects.aggregate(*sales_pipeline))
+        for result in results:
+            sales_data[result['_id']] = {
+                'total_quantity': result['total_quantity'],
+                'total_price': result['total_price']
+            }
+    except Exception as e:
+        # Fallback to individual calls if batch fails
+        print(f"Batch sales query failed: {e}")
+        for pid in product_ids:
+            try:
+                individual_sales = getdaywiseproductssold(start_date, end_date, pid, False)
+                total_qty = sum(s.get('total_quantity', 0) for s in individual_sales)
+                total_price = sum(s.get('total_price', 0) for s in individual_sales)
+                sales_data[pid] = {'total_quantity': total_qty, 'total_price': total_price}
+            except:
+                sales_data[pid] = {'total_quantity': 0, 'total_price': 0}
+    
+    return sales_data
 ########################--------------------------------------------------------------------------------------------------------##########
 
 @csrf_exempt
@@ -2058,11 +2098,10 @@ def  getPeriodWiseDataCustom(request):
                 "previous": previous_value,
                 "delta": delta
             }
-        with ThreadPoolExecutor (max_workers=2) as executor:
-            future_current=executor.submit(calculate_metricss,cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
-            future_previous=executor.submit(calculate_metricss,prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
-            current=future_current.result()
-            previous=future_previous.result()
+
+        current = calculate_metricss(cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
+        previous = calculate_metricss(prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
+
         date_ranges = {
             "current": {"from": to_utc_format(cur_from)},
             "previous": {"from": to_utc_format(prev_from)}
@@ -2378,7 +2417,6 @@ def allMarketplaceData(request):
     }
 
     return JsonResponse(response_data, safe=False)
-
 
 
 @csrf_exempt
@@ -3592,136 +3630,146 @@ def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,ma
 def getProfitAndLossDetails(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
-    product_id = json_request.get('product_id', [])
-    manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel', None)
+    product_id = json_request.get('product_id',[])
+    manufacturer_name = json_request.get('manufacturer_name',[])
+    fulfillment_channel = json_request.get('fulfillment_channel',None)
     preset = json_request.get('preset')
     timezone = 'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-
-    if start_date:
-        from_date, to_date = convertdateTotimezone(start_date, end_date, timezone)
+    if start_date != None and start_date != "":
+        from_date, to_date = convertdateTotimezone(start_date,end_date,timezone)
     else:
-        from_date, to_date = get_date_range(preset, timezone)
+        from_date, to_date = get_date_range(preset,timezone)
 
-    def pLcalculate_metrics(start_date, end_date, marketplace_id, brand_id, product_id,
-                                 manufacturer_name, fulfillment_channel, timezone):
-        gross_revenue = total_cogs = refund = net_profit = margin = total_units = 0
-        shipping_cost = channel_fee = product_cost = vendor_funding = tax_price = temp_price = 0
+    
+    
+    def pLcalculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone):
+        gross_revenue = 0
+        total_cogs = 0
+        refund = 0
+        net_profit = 0
+        margin = 0
+        total_units = 0
+        shipping_cost = 0
+        channel_fee = 0
         sku_set = set()
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
 
-        result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id,
-                              manufacturer_name, fulfillment_channel, timezone)
+        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone)
+        order_total = 0
+        product_cost = 0
+        tax_price = 0
+        temp_price = 0
+        vendor_funding = 0
+        if result:
+            for order in result:
+                gross_revenue += order['order_total']
+                total_units +=order['items_order_quantity']
+                # order_total = order['order_total']
+                # tax_price = 0
+                
+                for item_id in order['order_items']:
+                    item_pipeline = [
+                        { "$match": { "_id": item_id } },
+                        {
+                            "$lookup": {
+                                "from": "product",
+                                "localField": "ProductDetails.product_id",
+                                "foreignField": "_id",
+                                "as": "product_ins"
+                            }
+                        },
+                        { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "price": "$Pricing.ItemPrice.Amount",
+                                "tax_price": "$Pricing.ItemTax.Amount",
+                                "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
+                                
+                                "sku": "$product_ins.sku",
+                                "category": "$product_ins.category",
+                                "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
+                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
+                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
+                            "a_shipping_cost" : {"$ifNull":["$product_ins.a_shipping_cost",0]},
+                            "w_shiping_cost" : {"$ifNull":["$product_ins.w_shiping_cost",0]},
+                            "referral_fee" : {"$ifNull":["$product_ins.referral_fee",0]},
+                            "walmart_fee" : {"$ifNull":["$product_ins.walmart_fee",0]},
+                            "product_cost" : {"$ifNull":["$product_ins.product_cost",0]},
+                            "w_product_cost" : {"$ifNull":["$product_ins.w_product_cost",0]},
+                            }
+                        }
+                    ]
+                    item_result = list(OrderItems.objects.aggregate(*item_pipeline))
+                    if item_result:
+                        item_data = item_result[0]
+                        temp_price += item_data['price']
+                        tax_price += item_data['tax_price']
+                        if order['marketplace_name'] == "Amazon":
+                            total_cogs += item_data['total_cogs']
+                            shipping_cost += item_data['a_shipping_cost']
+                            channel_fee += item_data['referral_fee']
+                            product_cost += item_data['product_cost']
+                        else:
+                            total_cogs += item_data['w_total_cogs']
+                            shipping_cost += item_data['w_shiping_cost']
+                            channel_fee += item_data['walmart_fee']
+                            product_cost += item_data['w_product_cost']
 
-        all_item_ids = []
-        for order in result:
-            all_item_ids.extend(order['order_items'])
+                        vendor_funding += item_data['vendor_funding']
+                        total_units += 1
+                        if item_data.get('sku'):
+                            sku_set.add(item_data['sku'])
+                        
+                        # Track product category distribution
+                        category = item_data.get('category', 'Unknown')
+                        if category in product_categories:
+                            product_categories[category] += 1
+                        else:
+                            product_categories[category] = 1
 
-        item_pipeline = [
-            {"$match": {"_id": {"$in": all_item_ids}}},
-            {"$lookup": {
-                "from": "product",
-                "localField": "ProductDetails.product_id",
-                "foreignField": "_id",
-                "as": "product_ins"
-            }},
-            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-            {"$project": {
-                "_id": 1,
-                "price": "$Pricing.ItemPrice.Amount",
-                "tax_price": "$Pricing.ItemTax.Amount",
-                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                "sku": "$product_ins.sku",
-                "category": "$product_ins.category",
-                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                "a_shipping_cost": {"$ifNull": ["$product_ins.a_shipping_cost", 0]},
-                "w_shiping_cost": {"$ifNull": ["$product_ins.w_shiping_cost", 0]},
-                "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
-                "walmart_fee": {"$ifNull": ["$product_ins.walmart_fee", 0]},
-                "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
-                "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]}
-            }}
-        ]
+                        # Track product completeness
+                        if item_data['price'] and item_data['total_cogs'] and item_data['sku']:
+                            product_completeness["complete"] += 1
+                        else:
+                            product_completeness["incomplete"] += 1
 
-        item_results = list(OrderItems.objects.aggregate(*item_pipeline))
-        item_lookup = {item['_id']: item for item in item_results}
-
-        for order in result:
-            gross_revenue += order['order_total']
-            total_units += order['items_order_quantity']
-
-            for item_id in order['order_items']:
-                item_data = item_lookup.get(item_id)
-                if not item_data:
-                    continue
-
-                temp_price += item_data['price']
-                tax_price += item_data['tax_price']
-                if order['marketplace_name'] == "Amazon":
-                    total_cogs += item_data['total_cogs']
-                    shipping_cost += item_data['a_shipping_cost']
-                    channel_fee += item_data['referral_fee']
-                    product_cost += item_data['product_cost']
-                else:
-                    total_cogs += item_data['w_total_cogs']
-                    shipping_cost += item_data['w_shiping_cost']
-                    channel_fee += item_data['walmart_fee']
-                    product_cost += item_data['w_product_cost']
-
-                vendor_funding += item_data['vendor_funding']
-                sku_set.add(item_data.get('sku'))
-
-                category = item_data.get('category', 'Unknown')
-                product_categories[category] = product_categories.get(category, 0) + 1
-
-                if item_data['price'] and item_data['total_cogs'] and item_data.get('sku'):
-                    product_completeness["complete"] += 1
-                else:
-                    product_completeness["incomplete"] += 1
-
-        net_profit = (temp_price - total_cogs) + vendor_funding
-        margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
-
+            # other_price += order_total - temp_price - ta x_price
+            net_profit = (temp_price - total_cogs) + vendor_funding
+            margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+            
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round(total_cogs, 2),
+            "expenses": round((total_cogs) , 2),
             "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs else 0,
+            "roi": round((net_profit / (total_cogs)) * 100, 2) if total_cogs > 0 else 0,
             "unitsSold": total_units,
-            "refunds": refund,
+            "refunds": refund,   
             "skuCount": len(sku_set),
             "sessions": 0,
             "pageViews": 0,
             "unitSessionPercentage": 0,
             "margin": round(margin, 2),
-            "seller": "",
-            "tax_price": tax_price,
-            "total_cogs": total_cogs,
-            "product_cost": product_cost,
-            "shipping_cost": shipping_cost,
-            "productCategories": product_categories,
-            "productCompleteness": product_completeness,
-            "base_price": temp_price,
-            "channel_fee": channel_fee
+            "seller":"",
+            "tax_price":tax_price,
+            "total_cogs":total_cogs,
+            "product_cost":product_cost,
+            "shipping_cost":shipping_cost,
+            "productCategories": product_categories,  # Added product distribution data
+            "productCompleteness": product_completeness,  # Added product completeness data
+            'base_price':temp_price,
+            'channel_fee' : channel_fee
         }
 
-    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,
-                               marketplace_id, brand_id, product_id,
-                               manufacturer_name, fulfillment_channel, preset, timezone):
-
-        current = pLcalculate_metrics(cur_from, cur_to, marketplace_id, brand_id, product_id,
-                                      manufacturer_name, fulfillment_channel, timezone)
-        previous = pLcalculate_metrics(prev_from, prev_to, marketplace_id, brand_id, product_id,
-                                       manufacturer_name, fulfillment_channel, timezone)
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,preset,timezone):
+        current = pLcalculate_metrics(cur_from, cur_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone)
+        previous = pLcalculate_metrics(prev_from, prev_to,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone)
 
         def with_delta(metric):
             return {
@@ -3729,74 +3777,134 @@ def getProfitAndLossDetails(request):
                 "previous": previous[metric],
                 "delta": round(current[metric] - previous[metric], 2)
             }
+        if preset in ['Today', 'Yesterday']:
+            return {
+                "dateRanges": {
+                    "current": {"from": to_utc_format(cur_from),},
+                    "previous": {"from": to_utc_format(prev_from),}
+                },
+                "summary": {
+                    "grossRevenue": with_delta("grossRevenue"),
+                    "netProfit": with_delta("netProfit"),
+                    "expenses": with_delta("expenses"),
+                    "unitsSold": with_delta("unitsSold"),
+                    "refunds": with_delta("refunds"),
+                    "skuCount": with_delta("skuCount"),
+                    "sessions": with_delta("sessions"),
+                    "pageViews": with_delta("pageViews"),
+                    "unitSessionPercentage": with_delta("unitSessionPercentage"),
+                    "margin": with_delta("margin"),
+                    "roi": with_delta("roi"),
+                    "channel_fee" : with_delta("channel_fee"),
 
-        summary = {metric: with_delta(metric) for metric in [
-            "grossRevenue", "netProfit", "expenses", "unitsSold",
-            "refunds", "skuCount", "sessions", "pageViews",
-            "unitSessionPercentage", "margin", "roi", "channel_fee"]}
-
-        netProfitCalculation = {
-            "current": {
-                "gross": current["grossRevenue"],
-                "totalCosts": current["expenses"],
-                "productRefunds": current["refunds"],
-                "totalTax": current["tax_price"],
-                "totalTaxWithheld": 0,
-                "ppcProductCost": 0,
-                "ppcBrandsCost": 0,
-                "ppcDisplayCost": 0,
-                "ppcStCost": 0,
-                "cogs": current["total_cogs"],
-                "product_cost": current["product_cost"],
-                "base_price": current["base_price"],
-                "shipping_cost": current["shipping_cost"],
-                "channel_fee": current["channel_fee"]
-            },
-            "previous": {
-                "gross": previous["grossRevenue"],
-                "totalCosts": previous["expenses"],
-                "productRefunds": previous["refunds"],
-                "totalTax": previous["total_cogs"],
-                "totalTaxWithheld": 0,
-                "ppcProductCost": 0,
-                "ppcBrandsCost": 0,
-                "ppcDisplayCost": 0,
-                "ppcStCost": 0,
-                "cogs": previous["total_cogs"],
-                "product_cost": previous["product_cost"],
-                "base_price": current["base_price"],
-                "shipping_cost": previous["shipping_cost"],
-                "channel_fee": previous["channel_fee"]
+                },
+                "netProfitCalculation": {
+                    "current": {
+                        "gross": current["grossRevenue"],
+                        "totalCosts": current["expenses"],
+                        "productRefunds": current["refunds"],
+                        "totalTax": current["tax_price"] if 'tax_price' in current else 0,
+                        "totalTaxWithheld": 0,
+                        "ppcProductCost": 0,
+                        "ppcBrandsCost": 0,
+                        "ppcDisplayCost": 0,
+                        "ppcStCost": 0,
+                        "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
+                        "product_cost": current["product_cost"],
+                        "base_price": current["base_price"],
+                        "shipping_cost": current["shipping_cost"],
+                        "channel_fee" : current["channel_fee"],
+                    },
+                    "previous": {
+                        "gross": previous["grossRevenue"],
+                        "totalCosts": previous["expenses"],
+                        "productRefunds": previous["refunds"],
+                        "totalTax": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                        "totalTaxWithheld": 0,
+                        "ppcProductCost": 0,
+                        "ppcBrandsCost": 0,
+                        "ppcDisplayCost": 0,
+                        "ppcStCost": 0,
+                        "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                        "product_cost": previous["product_cost"],
+                        "base_price": current["base_price"],
+                        "shipping_cost": previous["shipping_cost"],
+                        "channel_fee" : previous["channel_fee"]
+                    }
+                },
+                "charts": {
+                    "productDistribution": current["productCategories"],  # Bar chart data
+                    "productCompleteness": current["productCompleteness"]  # Pie chart data
+                }
             }
-        }
-
-        date_ranges = {
-            "current": {"from": to_utc_format(cur_from)},
-            "previous": {"from": to_utc_format(prev_from)}
-        }
-
-        if preset not in ['Today', 'Yesterday']:
-            date_ranges["current"]["to"] = to_utc_format(cur_to)
-            date_ranges["previous"]["to"] = to_utc_format(prev_to)
-
-        return {
-            "dateRanges": date_ranges,
-            "summary": summary,
-            "netProfitCalculation": netProfitCalculation,
-            "charts": {
-                "productDistribution": current["productCategories"],
-                "productCompleteness": current["productCompleteness"]
+        else:
+            return {
+                "dateRanges": {
+                    "current": {"from": to_utc_format(cur_from),"to": to_utc_format(cur_to)},
+                    "previous": {"from": to_utc_format(prev_from),"to": to_utc_format(prev_to)}
+                },
+                "summary": {
+                    "grossRevenue": with_delta("grossRevenue"),
+                    "netProfit": with_delta("netProfit"),
+                    "expenses": with_delta("expenses"),
+                    "unitsSold": with_delta("unitsSold"),
+                    "refunds": with_delta("refunds"),
+                    "skuCount": with_delta("skuCount"),
+                    "sessions": with_delta("sessions"),
+                    "pageViews": with_delta("pageViews"),
+                    "unitSessionPercentage": with_delta("unitSessionPercentage"),
+                    "margin": with_delta("margin"),
+                    "roi": with_delta("roi")
+                },
+                "netProfitCalculation": {
+                    "current": {
+                        "gross": current["grossRevenue"],
+                        "totalCosts": current["expenses"],
+                        "productRefunds": current["refunds"],
+                        "totalTax": current["tax_price"] if 'tax_price' in current else 0,
+                        "totalTaxWithheld": 0,
+                        "ppcProductCost": 0,
+                        "ppcBrandsCost": 0,
+                        "ppcDisplayCost": 0,
+                        "ppcStCost": 0,
+                        "cogs": current["total_cogs"] if 'total_cogs' in current else 0,
+                        "product_cost": current["product_cost"],
+                        "base_price": current["base_price"],
+                        "shipping_cost": current["shipping_cost"],
+                    },
+                    "previous": {
+                        "gross": previous["grossRevenue"],
+                        "totalCosts": previous["expenses"],
+                        "productRefunds": previous["refunds"],
+                        "totalTax": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                        "totalTaxWithheld": 0,
+                        "ppcProductCost": 0,
+                        "ppcBrandsCost": 0,
+                        "ppcDisplayCost": 0,
+                        "ppcStCost": 0,
+                        "cogs": previous["total_cogs"] if 'total_cogs' in previous else 0,
+                        "product_cost": previous["product_cost"],
+                        "base_price": current["base_price"],
+                        "shipping_cost": previous["shipping_cost"],
+                    }
+                },
+                "charts": {
+                    "productDistribution": current["productCategories"],  # Bar chart data
+                    "productCompleteness": current["productCompleteness"]  # Pie chart data
+                }
             }
-        }
+    # current_date = datetime.now()
+    # today_start = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    # now = current_date
 
+    
+    
     custom_duration = to_date - from_date
     prev_from_date = from_date - custom_duration
     prev_to_date = to_date - custom_duration
 
     response_data = {
-        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,
-                                          marketplace_id, brand_id, product_id, manufacturer_name,
-                                          fulfillment_channel, preset, timezone)
+        "custom": create_period_response("Custom", from_date, to_date, prev_from_date, prev_to_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,preset,timezone),
     }
 
     return JsonResponse(response_data, safe=False)
@@ -5214,27 +5322,41 @@ def getSKUlist(request):
     search_query = json_request.get('search_query')
     brand_id = json_request.get('brand_id')
     manufacturer_name = json_request.get('manufacturer_name')
-    query_filter={}
+    match =dict()
+    pipeline = []
 
-    if search_query:
-        query_filter['sku']={
-            '$regex':f"^{re.escape(search_query.strip())}",
-            "$options":"i"
-        }
+    if search_query != None and search_query != "":
+        search_query = re.escape(search_query.strip())
+        match["sku"] = {"$regex": search_query, "$options": "i"}
 
     
-    if marketplace_id and marketplace_id not in ["","all","custom"]:
-        query_filter['marketplace_id'] = ObjectId(marketplace_id)
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        match['marketplace_id'] = ObjectId(marketplace_id)
 
-    if brand_id  and brand_id not in ["",[],"custom"]:
+    if brand_id != None and brand_id != "" and brand_id != [] and brand_id != "custom":
         brand_list = [ObjectId(i) for i in brand_id]
-        query_filter['brand_id'] = {"$in":brand_list}
+        match['brand_id'] = {"$in":brand_list}
 
-    if manufacturer_name and manufacturer_name not in ["",[],"custom"]:
-        query_filter['manufacturer_name'] = {"$in":manufacturer_name}
+    if manufacturer_name != None and manufacturer_name != "" and manufacturer_name != [] and manufacturer_name != "custom":
+        match['manufacturer_name'] = {"$in":manufacturer_name}
 
-    sku_cursor=Product.objects.filter(**query_filter).only("sku").order_by('sku')
-    sku_list = [{"id":str(doc.id),'sku':doc.sku} for doc in sku_cursor]
+    if match != {}:
+        pipeline.append({"$match": match})
+
+    pipeline.extend([
+        {
+            "$project": {
+                "_id": 0,
+                "id": {"$toString": "$_id"},
+                "sku": "$sku",
+            }
+        },{
+            "$sort":{
+                "sku":1}
+        }
+    ])
+    
+    sku_list = list(Product.objects.aggregate(*pipeline))
     return sku_list
 
 @csrf_exempt
@@ -5259,6 +5381,7 @@ def getproductIdlist(request):
         # Use id, NOT _id for MongoEngine
         brand_objs = list(Brand.objects.filter(id__in=brand_list))
         brand_names = [b.name for b in brand_objs]
+        print("Brands received in the query:", ", ".join(brand_names))
         match['brand_id'] = {"$in": brand_list}
     else:
         brand_names = []
@@ -5290,39 +5413,48 @@ def getproductIdlist(request):
     asin_list = list(Product.objects.aggregate(*pipeline))
 
 
+    for product in asin_list:
+        print(f"  - {product.get('product_title', 'Unknown')}")
+
     return asin_list
 
 def getBrandListforfilter(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')
-    skip = int(request.GET.get('skip', 1))
-    
-    # Build the base query
-    query = {}
-    
-    # Add marketplace filter
-    if marketplace_id and marketplace_id not in ["", "all", "custom"]:
-        query['marketplace_id'] = ObjectId(marketplace_id)
-    
-    # Add search query filter
-    if search_query and search_query.strip():
+    skip = int(request.GET.get('skip',1))
+    match =dict()
+    pipeline = []
+
+
+    if search_query != None and search_query != "":
         search_query = re.escape(search_query.strip())
-        query["name"] = {"$regex": search_query, "$options": "i"}
+        match["name"] = {"$regex": search_query, "$options": "i"}
+
     
-    if not query:
-        brand_cursor = Brand.objects.only('name').order_by('name')
-    else:
-        brand_cursor = Brand.objects.filter(**query).only('name').order_by('name')
-    
-    brand_list = [
+    if marketplace_id != None and marketplace_id != "" and marketplace_id != "all" and marketplace_id != "custom":
+        match['marketplace_id'] = ObjectId(marketplace_id)
+    if match != {}:
+        pipeline.append({"$match": match})
+    pipeline.extend([
         {
-            "id": str(brand.id),
-            "name": brand.name
-        }
-        for brand in brand_cursor
-    ]
+            "$project" : {
+                "_id" : 0,
+                "id" : {"$toString" : "$_id"},
+                "name" : 1,
+                
+            }
+        },
+        {
+            "$sort" : {
+                "name" : 1
+            }
+        },
+        
+        
+    ])
     
+    brand_list = list(Brand.objects.aggregate(*(pipeline)))
     data['brand_list'] = brand_list
     return data
 
