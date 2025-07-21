@@ -1058,13 +1058,13 @@ def ordersCountForDashboard(request):
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
-    timezone_str = "US/Pacific"
+    timezone_str = "Asia/Calcutta"
     brand_id_list = request.GET.get('brand_id')
     product_id = request.GET.get("product_id")
     manufacturer_name = request.GET.get("manufacturer_name")
     fulfillment_channel = request.GET.get("fulfillment_channel")
 
-    # Parse product_id and brand_id as lists if present
+    # Parse JSON params
     if product_id:
         try:
             product_id = json.loads(product_id)
@@ -1081,7 +1081,7 @@ def ordersCountForDashboard(request):
         except Exception:
             manufacturer_name = [manufacturer_name]
 
-    # Time range
+    # Time range logic
     if start_date:
         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
@@ -1090,7 +1090,7 @@ def ordersCountForDashboard(request):
     if timezone_str != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
-    # Total orders (with all filters)
+    # Get orders
     orders = grossRevenue(
         start_date, end_date,
         marketplace_id=marketplace_id,
@@ -1100,47 +1100,53 @@ def ordersCountForDashboard(request):
         fulfillment_channel=fulfillment_channel,
         timezone=timezone_str
     )
+
     order_count = len(orders)
     data['total_order_count'] = {
         "value": order_count,
         "percentage": "100.0%"
     }
 
-    # --- ✅ SKU-Level Breakdown ---
-    if product_id:
+    # ✅ Show SKU breakdown if product_id or brand_id is provided
+    if product_id or brand_id_list:
         sku_data = {}
         for order in orders:
+            marketplace_name = order.get('marketplace_name', 'Unknown Marketplace')
             for item in order.get('order_items', []):
                 pid = str(item.get('product_id'))
+                bid = str(item.get('brand_id', ''))
                 sku = item.get('sku', 'Unknown SKU')
-                if pid in product_id:
-                    if sku not in sku_data:
-                        sku_data[sku] = {
-                            "count": 0,
+
+                # Check for match (product OR brand match)
+                matches_product = not product_id or pid in product_id
+                matches_brand = not brand_id_list or bid in brand_id_list
+                if matches_product or matches_brand:
+                    key = f"{marketplace_name} - {sku}"
+                    if key not in sku_data:
+                        sku_data[key] = {
+                            "value": 0,
                             "order_value": 0.0
                         }
-                    sku_data[sku]["count"] += 1
-                    sku_data[sku]["order_value"] += order.get('order_total', 0.0)
+                    sku_data[key]["value"] += 1
+                    sku_data[key]["order_value"] += order.get('order_total', 0.0)
 
-        for sku, values in sku_data.items():
-            percentage = round((values["count"] / order_count) * 100, 2) if order_count else 0
-            data[sku] = {
-                "value": values["count"],
+        for key, values in sku_data.items():
+            percentage = round((values["value"] / order_count) * 100, 2) if order_count else 0
+            data[key] = {
+                "value": values["value"],
                 "percentage": f"{percentage}%",
                 "order_value": round(values["order_value"], 2)
             }
 
-    # --- Existing Marketplace Breakdown Logic ---
-
-    if marketplace_id == "all":
+    # ✅ Else: fallback to marketplace summary
+    elif marketplace_id == "all":
         marketplaces = list(Marketplace.objects.only('id', 'name'))
-        results = {}
         for mp in marketplaces:
             mp_orders = grossRevenue(
                 start_date, end_date,
                 marketplace_id=str(mp.id),
-                brand_id=brand_id_list,
-                product_id=product_id,
+                brand_id=None,
+                product_id=None,
                 manufacuture_name=manufacturer_name,
                 fulfillment_channel=fulfillment_channel,
                 timezone=timezone_str
@@ -1148,12 +1154,11 @@ def ordersCountForDashboard(request):
             count = len(mp_orders)
             order_value = round(sum(o['order_total'] for o in mp_orders), 2)
             percentage = round((count / order_count) * 100, 2) if order_count else 0
-            results[mp.name] = {
+            data[mp.name] = {
                 "count": count,
                 "percentage": f"{percentage}%",
                 "order_value": order_value
             }
-        data.update(results)
 
     elif marketplace_id == "custom":
         data['custom'] = {
@@ -1170,8 +1175,8 @@ def ordersCountForDashboard(request):
         mp_orders = grossRevenue(
             start_date, end_date,
             marketplace_id=marketplace_id,
-            brand_id=brand_id_list,
-            product_id=product_id,
+            brand_id=None,
+            product_id=None,
             manufacuture_name=manufacturer_name,
             fulfillment_channel=fulfillment_channel,
             timezone=timezone_str
@@ -1190,6 +1195,7 @@ def ordersCountForDashboard(request):
         }
 
     return sanitize_data(data)
+
 
 
 def totalSalesAmount(request):
