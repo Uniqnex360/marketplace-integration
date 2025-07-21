@@ -1053,33 +1053,35 @@ def fetchManualOrderDetails(request):
 #-------------------------------------DASH BOARD APIS-------------------------------------------------------------------------------------------------
 def ordersCountForDashboard(request):
     import json
-    from bson import ObjectId
     data = dict()
-
     marketplace_id = request.GET.get('marketplace_id')
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
-    timezone_str = request.GET.get("timezone", "US/Pacific")
+    timezone_str = "US/Pacific"
     brand_id_list = request.GET.get('brand_id')
     product_id = request.GET.get("product_id")
     manufacturer_name = request.GET.get("manufacturer_name")
     fulfillment_channel = request.GET.get("fulfillment_channel")
 
-    # Parse inputs to lists
-    def parse_json_list(val):
-        if not val:
-            return []
+    # Parse product_id and brand_id as lists if present
+    if product_id:
         try:
-            return json.loads(val) if isinstance(val, str) else val
+            product_id = json.loads(product_id)
         except Exception:
-            return [val]
+            product_id = [product_id]
+    if brand_id_list:
+        try:
+            brand_id_list = json.loads(brand_id_list)
+        except Exception:
+            brand_id_list = [brand_id_list]
+    if manufacturer_name:
+        try:
+            manufacturer_name = json.loads(manufacturer_name)
+        except Exception:
+            manufacturer_name = [manufacturer_name]
 
-    product_id_list = parse_json_list(product_id)
-    brand_id_list = parse_json_list(brand_id_list)
-    manufacturer_name_list = parse_json_list(manufacturer_name)
-
-    # Handle dates
+    # Time range
     if start_date:
         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
@@ -1088,44 +1090,23 @@ def ordersCountForDashboard(request):
     if timezone_str != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
-    # Convert product IDs to ObjectId and get matching order _id list
-    order_id_filter = None
-    if product_id_list:
-        try:
-            product_obj_ids = [ObjectId(pid) for pid in product_id_list]
-            order_id_filter = getOrdersListBasedonProductId(product_obj_ids, start_date, end_date)
-        except Exception as e:
-            order_id_filter = []
-
-    # Fetch all relevant orders using existing filters (product_id left as None to avoid conflict)
+    # Total orders (with all filters)
     orders = grossRevenue(
         start_date, end_date,
         marketplace_id=marketplace_id,
         brand_id=brand_id_list,
-        product_id=None,  # do not filter here, filter manually after
-        manufacuture_name=manufacturer_name_list,
+        product_id=product_id,
+        manufacuture_name=manufacturer_name,
         fulfillment_channel=fulfillment_channel,
         timezone=timezone_str
     )
-
-    # Post-filter orders if filtering by product_id
-    if order_id_filter is not None:
-        orders = [o for o in orders if o['_id'] in order_id_filter]
-
     order_count = len(orders)
     data['total_order_count'] = {
         "value": order_count,
         "percentage": "100.0%"
     }
 
-    # Optional: Access SKUs if needed
-    # for order in orders:
-    #     for item in order.get("order_items", []):
-    #         sku = item.get("sku")
-    #         product_id = item.get("product_id")
-    #         # do something with sku/product_id
-
-    # Per-marketplace breakdown
+    # Per-marketplace breakdown (if 'all')
     if marketplace_id == "all":
         marketplaces = list(Marketplace.objects.only('id', 'name'))
         results = {}
@@ -1134,15 +1115,11 @@ def ordersCountForDashboard(request):
                 start_date, end_date,
                 marketplace_id=str(mp.id),
                 brand_id=brand_id_list,
-                product_id=None,
-                manufacuture_name=manufacturer_name_list,
+                product_id=product_id,
+                manufacuture_name=manufacturer_name,
                 fulfillment_channel=fulfillment_channel,
                 timezone=timezone_str
             )
-            # Post-filter again by product_id if needed
-            if order_id_filter is not None:
-                mp_orders = [o for o in mp_orders if o['_id'] in order_id_filter]
-
             count = len(mp_orders)
             order_value = round(sum(o['order_total'] for o in mp_orders), 2)
             percentage = round((count / order_count) * 100, 2) if order_count else 0
@@ -1153,7 +1130,10 @@ def ordersCountForDashboard(request):
             }
         data.update(results)
 
+    # Handle 'custom' marketplace if needed (example: custom_order collection)
     elif marketplace_id == "custom":
+        # If you have a custom_order collection, implement similar logic here
+        # For now, just return 0
         data['custom'] = {
             "value": 0,
             "percentage": "100.0%",
@@ -1164,21 +1144,20 @@ def ordersCountForDashboard(request):
             "percentage": "100.0%"
         }
 
+    # Single marketplace breakdown (not 'all' or 'custom')
     elif marketplace_id and marketplace_id not in ["all", "custom"]:
         mp_orders = grossRevenue(
             start_date, end_date,
             marketplace_id=marketplace_id,
             brand_id=brand_id_list,
-            product_id=None,
-            manufacuture_name=manufacturer_name_list,
+            product_id=product_id,
+            manufacuture_name=manufacturer_name,
             fulfillment_channel=fulfillment_channel,
             timezone=timezone_str
         )
-        if order_id_filter is not None:
-            mp_orders = [o for o in mp_orders if o['_id'] in order_id_filter]
-
         count = len(mp_orders)
         order_value = round(sum(o['order_total'] for o in mp_orders), 2)
+        # Get marketplace name
         name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
         data[name] = {
             "value": count,
