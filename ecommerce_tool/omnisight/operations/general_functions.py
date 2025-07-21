@@ -1056,13 +1056,12 @@ def ordersCountForDashboard(request):
     from bson import ObjectId
 
     data = dict()
-    json_request = JSONParser().parse(request)
     marketplace_id = request.GET.get('marketplace_id')
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
     timezone_str = "US/Pacific"
-    product_id = json_request.get("product_id", None)
+    product_id = request.get("product_id", None)
 
     # Time range
     if start_date:
