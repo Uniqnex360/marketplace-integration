@@ -1053,13 +1053,16 @@ def fetchManualOrderDetails(request):
 #-------------------------------------DASH BOARD APIS-------------------------------------------------------------------------------------------------
 def ordersCountForDashboard(request):
     from django.utils.timezone import now
+    from bson import ObjectId
 
     data = dict()
+    json_request = JSONParser().parse(request)
     marketplace_id = request.GET.get('marketplace_id')
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
-    timezone_str="US/Pacific"
+    timezone_str = "US/Pacific"
+    product_id = json_request.get("product_id", None)
 
     # Time range
     if start_date:
@@ -1070,15 +1073,23 @@ def ordersCountForDashboard(request):
     if timezone_str != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
-    # Shared match
+    # Shared match conditions
     match_conditions = {
         "order_date": {"$gte": start_date, "$lte": end_date},
         "order_status": {"$ne": "Cancelled"},
         "order_total": {"$gt": 0}
     }
 
+    # Add product_id filtering if provided
+    if product_id:
+        if isinstance(product_id, str):
+            product_id = [product_id]
+        product_ids = [ObjectId(pid) for pid in product_id]
+        match_conditions["order_items.ProductDetails.product_id"] = {"$in": product_ids}
+
     # Aggregate Orders and Custom Orders - in parallel
     order_count, custom_order_count = 0, 0
+
     def count_orders(q):
         pipeline = [
             {"$match": match_conditions},
@@ -1199,7 +1210,6 @@ def ordersCountForDashboard(request):
         }
 
     return sanitize_data(data)
-
 def totalSalesAmount(request):
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
