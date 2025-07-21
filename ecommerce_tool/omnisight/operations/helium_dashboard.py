@@ -1258,6 +1258,10 @@ def get_products_with_pagination(request):
     parent_search = json_request.get('parent_search')
     sku_search = json_request.get('sku_search')
     search_query = json_request.get('search_query')
+    
+    # NEW: Handle specific SKU list filtering
+    sku_list = json_request.get('sku_list', [])  # Expecting a list of exact SKUs
+    
     timezone_str = 'US/Pacific'
 
     # Date handling
@@ -1277,24 +1281,47 @@ def get_products_with_pagination(request):
     if marketplace_id and marketplace_id not in ["", "all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
     
+    # FIXED: Priority-based filtering logic
     if product_id and product_id != []:
+        # Highest priority: specific product IDs
         match["_id"] = {"$in": [ObjectId(pid) for pid in product_id]}
+    elif sku_list and sku_list != []:
+        # NEW: Second priority: specific SKU list (exact matches)
+        if parent:
+            match["parent_sku"] = {"$in": sku_list}
+        else:
+            match["sku"] = {"$in": sku_list}
     elif brand_id and brand_id != []:
+        # Third priority: brand filtering
         match["brand_id"] = {"$in": [ObjectId(bid) for bid in brand_id]}
     elif manufacturer_name and manufacturer_name != []:
+        # Fourth priority: manufacturer filtering
         match["manufacturer_name"] = {"$in": manufacturer_name}
 
-    if parent_search:
-        match["parent_sku"] = {"$regex": parent_search, "$options": "i"}
-    if not parent and sku_search:
-        match["sku"] = {"$regex": sku_search, "$options": "i"}
+    # FIXED: Apply search filters only if no specific ID/SKU list filtering
+    if not (product_id and product_id != []) and not (sku_list and sku_list != []):
+        if parent_search:
+            match["parent_sku"] = {"$regex": parent_search, "$options": "i"}
+        if not parent and sku_search:
+            match["sku"] = {"$regex": sku_search, "$options": "i"}
 
+    # General search query (can be combined with other filters)
     if search_query:
         search_query = re.escape(search_query.strip())
-        match["$or"] = [
+        search_conditions = [
             {"product_title": {"$regex": search_query, "$options": "i"}},
             {"sku": {"$regex": search_query, "$options": "i"}},
         ]
+        
+        # If we already have other match conditions, combine with $and
+        if match:
+            if "$or" in match:
+                # If $or already exists, we need to restructure
+                match = {"$and": [match, {"$or": search_conditions}]}
+            else:
+                match["$or"] = search_conditions
+        else:
+            match["$or"] = search_conditions
 
     if parent:
         return get_parent_products(match, page, page_size, start_date, end_date, 
@@ -1302,8 +1329,7 @@ def get_products_with_pagination(request):
     else:
         return get_individual_products(match, page, page_size, start_date, end_date, 
                                                   today_start_date, today_end_date, sort_by, sort_by_value)
-
-
+        
 def get_parent_products(match, page, page_size, start_date, end_date, 
                                    today_start_date, today_end_date, sort_by, sort_by_value):
     
