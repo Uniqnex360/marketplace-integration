@@ -38,33 +38,24 @@ def convertLocalTimeToUTC(start_date, end_date, timezone_str):
     end_date = end_date.astimezone(pytz.UTC)
     return start_date, end_date
 
-def getOrdersListBasedonProductId(productIds, start_date=None, end_date=None):
+def getOrdersListBasedonProductId(productIds,start_date=None, end_date=None):
     """
-    Fetches the list of order IDs based on the provided product IDs using aggregation.
+    Fetches the list of orders based on the provided product ID using a pipeline aggregation.
 
     Args:
-        productIds (list): List of product IDs (ObjectId or string)
-        start_date (datetime, optional): Start date for filtering orders
-        end_date (datetime, optional): End date for filtering orders
+        productId (str): The ID of the product for which to fetch orders.
 
     Returns:
-        list: A list of order IDs (ObjectIds) that contain the specified products
+        list: A list of dictionaries containing order details.
     """
-    # Convert string IDs to ObjectIds if needed
-    if productIds and isinstance(productIds[0], str):
-        productIds = [ObjectId(pid) for pid in productIds]
-    
     pipeline = []
-    
-    # Add date and status filters if provided
     if start_date and end_date:
         pipeline.append({
             "$match": {
                 "order_date": {"$gte": start_date, "$lte": end_date},
-                "order_status": {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
+                "order_status": {"$in": ['Shipped', 'Delivered','Acknowledged','Pending','Unshipped','PartiallyShipped']}
             }
         })
-    
     pipeline.extend([
         {
             "$lookup": {
@@ -81,9 +72,9 @@ def getOrdersListBasedonProductId(productIds, start_date=None, end_date=None):
             }
         },
         {
-            "$group": {
-                "_id": None,
-                "orderIds": {"$addToSet": "$_id"}
+            "$group" : {
+                "_id" : None,
+                "orderIds" : { "$addToSet": "$_id" }
             }
         },
         {
@@ -93,115 +84,34 @@ def getOrdersListBasedonProductId(productIds, start_date=None, end_date=None):
             }
         }
     ])
-    
-    try:
-        result = list(Order.objects.aggregate(pipeline))
-        return result[0]['orderIds'] if result else []
-    except Exception as e:
-        print(f"Error in getOrdersListBasedonProductId: {e}")
-        return []
+    orders = list(Order.objects.aggregate(*pipeline))
+    if orders != []:
+        orders = orders[0]['orderIds']
+    return orders
 
 
-def getOrdersListBasedonBrand(brandIds, start_date=None, end_date=None):
+
+def getproductIdListBasedonbrand(brandIds,start_date=None, end_date=None):
     """
-    Fetches the list of order IDs based on the provided brand IDs using aggregation.
-    
+    Fetches the list of product IDs based on the provided brand ID using a pipeline aggregation.
+
     Args:
-        brandIds (list): List of brand IDs (ObjectId or string)
-        start_date (datetime, optional): Start date for filtering orders
-        end_date (datetime, optional): End date for filtering orders
-    
-    Returns:
-        list: A list of order IDs (ObjectIds) that contain products from the specified brands
-    """
-    # Convert string IDs to ObjectIds if needed
-    if brandIds and isinstance(brandIds[0], str):
-        brandIds = [ObjectId(bid) for bid in brandIds]
-    
-    # Single pipeline to get orders directly from brands
-    pipeline = []
-    
-    # Add date and status filters if provided
-    if start_date and end_date:
-        pipeline.append({
-            "$match": {
-                "order_date": {"$gte": start_date, "$lte": end_date},
-                "order_status": {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
-            }
-        })
-    
-    pipeline.extend([
-        {
-            "$lookup": {
-                "from": "order_items",
-                "localField": "order_items",
-                "foreignField": "_id",
-                "as": "order_items"
-            }
-        },
-        {"$unwind": "$order_items"},
-        {
-            "$lookup": {
-                "from": "product",
-                "localField": "order_items.ProductDetails.product_id",
-                "foreignField": "_id",
-                "as": "product"
-            }
-        },
-        {"$unwind": "$product"},
-        {
-            "$match": {
-                "product.brand_id": {"$in": brandIds}
-            }
-        },
-        {
-            "$group": {
-                "_id": None,
-                "orderIds": {"$addToSet": "$_id"}
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "orderIds": 1
-            }
-        }
-    ])
-    
-    try:
-        result = list(Order.objects.aggregate(pipeline))
-        return result[0]['orderIds'] if result else []
-    except Exception as e:
-        print(f"Error in getOrdersListBasedonBrand: {e}")
-        return []
+        productId (str): The ID of the brand for which to fetch product IDs.
 
-
-def getproductIdListBasedonbrand(brandIds, start_date=None, end_date=None):
-    """
-    Fetches the list of product IDs based on the provided brand IDs.
-    
-    Args:
-        brandIds (list): List of brand IDs (ObjectId or string)
-        start_date (datetime, optional): Not used in this function but kept for compatibility
-        end_date (datetime, optional): Not used in this function but kept for compatibility
-    
     Returns:
-        list: A list of product IDs (ObjectIds) for the specified brands
+        list: A list of dictionaries containing product details.
     """
-    # Convert string IDs to ObjectIds if needed
-    if brandIds and isinstance(brandIds[0], str):
-        brandIds = [ObjectId(bid) for bid in brandIds]
-    
+    orders = []
     pipeline = [
         {
             "$match": {
-                "brand_id": {"$in": brandIds}
+                "brand_id": {"$in": [ObjectId(bid) for bid in brandIds]}
             }
         },
         {
-            "$group": {
-                "_id": None,
-                "productIds": {"$addToSet": "$_id"}
+            "$group" : {
+                "_id" : None,
+                "productIds" : { "$addToSet": "$_id" }
             }
         },
         {
@@ -211,13 +121,11 @@ def getproductIdListBasedonbrand(brandIds, start_date=None, end_date=None):
             }
         }
     ]
-    
-    try:
-        result = list(Product.objects.aggregate(pipeline))
-        return result[0]['productIds'] if result else []
-    except Exception as e:
-        print(f"Error in getproductIdListBasedonbrand: {e}")
-        return []
+    products = list(Product.objects.aggregate(*pipeline))
+    if products != []:
+        orders = getOrdersListBasedonProductId(products[0]['productIds'],start_date, end_date)
+    return orders
+
 
 def getproductIdListBasedonManufacture(manufactureName = [],start_date=None, end_date=None):
     """
@@ -346,18 +254,15 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     
     if manufacuture_name not in [None, "", []]:
         ids = getproductIdListBasedonManufacture(manufacuture_name, start_date, end_date)
-        match["_id"] = {"$in": ids} if "_id" not in match else {"$in": list(set(match["_id"]["$in"]) & set(ids))}
-
-    if product_id not in [None, "", []]:
+        match["_id"] = {"$in": ids}
+    elif product_id not in [None, "", []]:
         product_id = [ObjectId(pid) for pid in product_id]
         ids = getOrdersListBasedonProductId(product_id, start_date, end_date)
-        match["_id"] = {"$in": ids} if "_id" not in match else {"$in": list(set(match["_id"]["$in"]) & set(ids))}
-
-    if brand_id not in [None, "", []]:
+        match["_id"] = {"$in": ids}
+    elif brand_id not in [None, "", []]:
         brand_id = [ObjectId(bid) for bid in brand_id]
         ids = getproductIdListBasedonbrand(brand_id, start_date, end_date)
-        match["_id"] = {"$in": ids} if "_id" not in match else {"$in": list(set(match["_id"]["$in"]) & set(ids))}
-
+        match["_id"] = {"$in": ids}
     
     pipeline = [
         {
@@ -1209,6 +1114,7 @@ def get_top_movers(yesterday_data, previous_day_data):
             "netProfit" : item['netProfit'],
             "totalCogs" : round(item['totalCogs'],2),
             "netProfit" : item['netProfit'],
+            "m_name": item.get("m_name", ""),
             'yesterday_units': yesterday_units,
             'previous_units': prev_units,
             'change_in_units': change,
