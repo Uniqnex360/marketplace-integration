@@ -1058,7 +1058,7 @@ def ordersCountForDashboard(request):
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
-    timezone_str = "US/Pacific"
+    timezone_str = request.GET.get("timezone", "US/Pacific")
     brand_id_list = request.GET.get('brand_id')
     product_id = request.GET.get("product_id")
     manufacturer_name = request.GET.get("manufacturer_name")
@@ -1090,21 +1090,37 @@ def ordersCountForDashboard(request):
     if timezone_str != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
-    # --- Helper for item-level filter ---
-    def item_matches(oi):
+    def item_matches(order_item):
+        # Fetch the ProductDetails.product_id or other identifying fields
+        product = order_item.get('ProductDetails', {})
+        pid = product.get('product_id')
+        brand = product.get('brand_id')
         return (
-            (not product_id or oi.get("product_id") in product_id) and
-            (not brand_id_list or oi.get("brand_id") in brand_id_list)
+            (not product_id or pid in product_id) and
+            (not brand_id_list or brand in brand_id_list)
         )
 
     def filter_orders(orders):
-        return [
-            o for o in orders
-            if any(item_matches(oi) for oi in o.get("order_items", []))
-        ] if product_id or brand_id_list else orders
+        if not product_id and not brand_id_list:
+            return orders
+        filtered_orders = []
+        for order in orders:
+            matched_items = [
+                oi for oi in order.get("order_items", [])
+                if item_matches(oi)
+            ]
+            if matched_items:
+                order_copy = dict(order)
+                order_copy["order_items"] = matched_items
+                order_copy["order_total"] = sum(
+                    oi.get("item_total", oi.get("price", 0) * oi.get("quantity", 1))
+                    for oi in matched_items
+                )
+                filtered_orders.append(order_copy)
+        return filtered_orders
 
-    # Total orders (with all filters)
-    orders = grossRevenue(
+    # Fetch all relevant orders
+    all_orders = grossRevenue(
         start_date, end_date,
         marketplace_id=marketplace_id,
         brand_id=brand_id_list,
@@ -1113,15 +1129,15 @@ def ordersCountForDashboard(request):
         fulfillment_channel=fulfillment_channel,
         timezone=timezone_str
     )
-    orders = filter_orders(orders)
-    order_count = len(orders)
 
+    filtered_orders = filter_orders(all_orders)
+    order_count = len(filtered_orders)
     data['total_order_count'] = {
         "value": order_count,
         "percentage": "100.0%"
     }
 
-    # Per-marketplace breakdown (if 'all')
+    # Per-marketplace breakdown
     if marketplace_id == "all":
         marketplaces = list(Marketplace.objects.only('id', 'name'))
         results = {}
@@ -1146,7 +1162,6 @@ def ordersCountForDashboard(request):
             }
         data.update(results)
 
-    # Custom marketplace stub
     elif marketplace_id == "custom":
         data['custom'] = {
             "value": 0,
@@ -1158,7 +1173,6 @@ def ordersCountForDashboard(request):
             "percentage": "100.0%"
         }
 
-    # Single marketplace
     elif marketplace_id and marketplace_id not in ["all", "custom"]:
         mp_orders = grossRevenue(
             start_date, end_date,
@@ -1184,7 +1198,6 @@ def ordersCountForDashboard(request):
         }
 
     return sanitize_data(data)
-
 
 def totalSalesAmount(request):
     import json
