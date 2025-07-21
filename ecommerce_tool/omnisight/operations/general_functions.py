@@ -51,12 +51,18 @@ def sanitize_floats(data):
         return data
 
 def getMarketplaceList(request):
-    marketplace_list = list(Marketplace.objects.only("id","name","image_url").values("id","name","image_url"))
-    for marketplace_ins  in marketplace_list:
-        if marketplace_ins['name'] == "Amazon":
-            marketplace_ins['fulfillment_channel'] = [{'FBA' : "AFN"},{'FBM' : "MFN"}]
-        elif marketplace_ins['name'] == "Walmart":
-            marketplace_ins['fulfillment_channel'] = [{'FBM' : "SellerFulfilled"}]
+    query_set = list(Marketplace.objects.only("id","name","image_url"))
+    marketplace_list=[]
+    for marketplace  in query_set:
+        entry={
+            "id":str(marketplace.id),
+            'name':str(marketplace.name),
+            "image_url":marketplace.image_url,
+        }
+        if marketplace.name== "Amazon":
+            entry['fulfillment_channel'] = [{'FBA' : "AFN"},{'FBM' : "MFN"}]
+        elif marketplace.name == "Walmart":
+            entry['fulfillment_channel'] = [{'FBM' : "SellerFulfilled"}]
     return marketplace_list
 
 #---------------------------------------------PRODUCT APIS---------------------------------------------------
