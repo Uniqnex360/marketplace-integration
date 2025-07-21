@@ -1106,7 +1106,32 @@ def ordersCountForDashboard(request):
         "percentage": "100.0%"
     }
 
-    # Per-marketplace breakdown (if 'all')
+    # --- ✅ SKU-Level Breakdown ---
+    if product_id:
+        sku_data = {}
+        for order in orders:
+            for item in order.get('order_items', []):
+                pid = str(item.get('product_id'))
+                sku = item.get('sku', 'Unknown SKU')
+                if pid in product_id:
+                    if sku not in sku_data:
+                        sku_data[sku] = {
+                            "count": 0,
+                            "order_value": 0.0
+                        }
+                    sku_data[sku]["count"] += 1
+                    sku_data[sku]["order_value"] += order.get('order_total', 0.0)
+
+        for sku, values in sku_data.items():
+            percentage = round((values["count"] / order_count) * 100, 2) if order_count else 0
+            data[sku] = {
+                "value": values["count"],
+                "percentage": f"{percentage}%",
+                "order_value": round(values["order_value"], 2)
+            }
+
+    # --- Existing Marketplace Breakdown Logic ---
+
     if marketplace_id == "all":
         marketplaces = list(Marketplace.objects.only('id', 'name'))
         results = {}
@@ -1130,10 +1155,7 @@ def ordersCountForDashboard(request):
             }
         data.update(results)
 
-    # Handle 'custom' marketplace if needed (example: custom_order collection)
     elif marketplace_id == "custom":
-        # If you have a custom_order collection, implement similar logic here
-        # For now, just return 0
         data['custom'] = {
             "value": 0,
             "percentage": "100.0%",
@@ -1144,7 +1166,6 @@ def ordersCountForDashboard(request):
             "percentage": "100.0%"
         }
 
-    # Single marketplace breakdown (not 'all' or 'custom')
     elif marketplace_id and marketplace_id not in ["all", "custom"]:
         mp_orders = grossRevenue(
             start_date, end_date,
@@ -1157,7 +1178,6 @@ def ordersCountForDashboard(request):
         )
         count = len(mp_orders)
         order_value = round(sum(o['order_total'] for o in mp_orders), 2)
-        # Get marketplace name
         name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
         data[name] = {
             "value": count,
@@ -1170,6 +1190,7 @@ def ordersCountForDashboard(request):
         }
 
     return sanitize_data(data)
+
 
 def totalSalesAmount(request):
     import json
