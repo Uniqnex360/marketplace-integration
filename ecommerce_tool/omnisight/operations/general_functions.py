@@ -51,17 +51,7 @@ def sanitize_floats(data):
         return data
 
 def getMarketplaceList(request):
-    pipeline = [
-        {
-            "$project" : {
-                "_id" : 0,
-                "id" : {"$toString" : "$_id"},
-                "name" : 1,
-                "image_url" : 1,
-            }
-        }
-    ]
-    marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
+    marketplace_list = list(Marketplace.objects.only("id","name","image_url").values("id","name","image_url"))
     for marketplace_ins  in marketplace_list:
         if marketplace_ins['name'] == "Amazon":
             marketplace_ins['fulfillment_channel'] = [{'FBA' : "AFN"},{'FBM' : "MFN"}]
