@@ -1171,30 +1171,59 @@ def ordersCountForDashboard(request):
 
     return sanitize_data(data)
 
-# def totalSalesAmount(request):
-#     data = dict()
-#     marketplace_id = request.GET.get('marketplace_id')
-#     pipeline = []
-#     if marketplace_id != None and marketplace_id != "":
-#         match = {
-#             "$match" : {
-#                 "marketplace_id" : ObjectId(marketplace_id)
-#             }
-#         }
-#         pipeline.append(match)
-#     pipeline.extend([
-#         {
-#             "$group": {
-#                 "_id": None,
-#                 "total_sales": {"$sum": "$order_total"}
-#             }
-#         }
-#     ])
-#     total_sales=sum(order['order_total'] for order in orders)
-#     total_sales = list(Order.objects.aggregate(*(pipeline)))
-#     data['total_sales'] = total_sales[0]['total_sales'] if total_sales else 0
-#     return data
+def totalSalesAmount(request):
+    import json
+    data = dict()
+    marketplace_id = request.GET.get('marketplace_id')
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    preset = request.GET.get("preset", "Today")
+    timezone_str = "US/Pacific"
+    brand_id_list = request.GET.get('brand_id')
+    product_id = request.GET.get("product_id")
+    manufacturer_name = request.GET.get("manufacturer_name")
+    fulfillment_channel = request.GET.get("fulfillment_channel")
 
+    # Parse product_id and brand_id as lists if present
+    if product_id:
+        try:
+            product_id = json.loads(product_id)
+        except Exception:
+            product_id = [product_id]
+    if brand_id_list:
+        try:
+            brand_id_list = json.loads(brand_id_list)
+        except Exception:
+            brand_id_list = [brand_id_list]
+    if manufacturer_name:
+        try:
+            manufacturer_name = json.loads(manufacturer_name)
+        except Exception:
+            manufacturer_name = [manufacturer_name]
+
+    # Time range
+    if start_date:
+        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
+    else:
+        start_date, end_date = get_date_range(preset, timezone_str)
+
+    if timezone_str != 'UTC':
+        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+
+    # Get filtered orders using grossRevenue
+    orders = grossRevenue(
+        start_date, end_date,
+        marketplace_id=marketplace_id,
+        brand_id=brand_id_list,
+        product_id=product_id,
+        manufacuture_name=manufacturer_name,
+        fulfillment_channel=fulfillment_channel,
+        timezone=timezone_str
+    )
+    total_sales = sum(order['order_total'] for order in orders)
+    data['total_sales'] = round(total_sales, 2)
+
+    return data
 
 @csrf_exempt
 def salesAnalytics(request):
