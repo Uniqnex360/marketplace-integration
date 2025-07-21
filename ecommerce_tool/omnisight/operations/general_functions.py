@@ -1061,7 +1061,7 @@ def ordersCountForDashboard(request):
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
     timezone_str = "US/Pacific"
-    product_id = request.get("product_id", None)
+    product_id = request.GET.get("product_id", None)
 
     # Time range
     if start_date:
