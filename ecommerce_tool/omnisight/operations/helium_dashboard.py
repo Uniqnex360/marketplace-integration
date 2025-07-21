@@ -1694,8 +1694,7 @@ def batch_get_sales_data_optimized(product_ids, start_date, end_date, today_star
                 chunk_result = future.result(timeout=30)  # 30 second timeout per chunk
                 sales_data.update(chunk_result)
             except Exception as e:
-                logger.error("Error processing chunk: %s", e)
-
+                logger.error("Error processing chunk:%s",e)
     
         return sales_data
 
@@ -1744,6 +1743,51 @@ def clean_json_floats(obj):
         return [clean_json_floats(i) for i in obj]
     return obj
 
+def get_batch_sales_data(start_date, end_date, product_ids):
+    """
+    Batch fetch sales data for multiple products at once
+    Returns dict with product_id as key and aggregated sales data as value
+    """
+    # This assumes you have a sales collection/model - adjust according to your schema
+    sales_pipeline = [
+        {
+            "$match": {
+                "product_id": {"$in": product_ids},
+                "date": {"$gte": start_date, "$lte": end_date}
+            }
+        },
+        {
+            "$group": {
+                "_id": "$product_id",
+                "total_quantity": {"$sum": "$quantity"},
+                "total_price": {"$sum": "$price"}
+            }
+        }
+    ]
+    
+    # Replace 'Sales' with your actual sales model/collection
+    sales_data = {}
+    try:
+        # Adjust this line according to your sales model
+        results = list(Product.objects.aggregate(*sales_pipeline))
+        for result in results:
+            sales_data[result['_id']] = {
+                'total_quantity': result['total_quantity'],
+                'total_price': result['total_price']
+            }
+    except Exception as e:
+        # Fallback to individual calls if batch fails
+        for pid in product_ids:
+            try:
+                individual_sales = getdaywiseproductssold(start_date, end_date, pid, False)
+                total_qty = sum(s.get('total_quantity', 0) for s in individual_sales)
+                total_price = sum(s.get('total_price', 0) for s in individual_sales)
+                sales_data[pid] = {'total_quantity': total_qty, 'total_price': total_price}
+            except:
+                sales_data[pid] = {'total_quantity': 0, 'total_price': 0}
+    
+    return sales_data
+########################----
 ########################--------------------------------------------------------------------------------------------------------##########
 
 @csrf_exempt
