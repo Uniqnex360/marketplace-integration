@@ -1093,80 +1093,94 @@ def get_top_products(request):
         })
 
     pipeline.extend([
-        {"$addFields": {
-            "chart_key_raw": "$order_date",
-            "chart_value": chart_value_field
-        }},
-        {"$group": {
-            "_id": {
-                "productId": "$product_ins._id",
-                "timeBucket": {
-                    "$dateToString": {
-                        "format": chart_date_format,
-                        "date": "$chart_key_raw"
+    {"$addFields": {
+        "chart_key_raw": "$order_date",
+        "chart_value": chart_value_field
+    }},
+    {"$group": {
+        "_id": {
+            "productId": "$product_ins._id",
+            "timeBucket": {
+                "$dateToString": {
+                    "format": chart_date_format,
+                    "date": "$chart_key_raw"
+                }
+            }
+        },
+        "productTitle": {"$first": "$product_ins.product_title"},
+        "asin": {"$first": "$product_ins.product_id"},
+        "sellerSku": {"$first": "$product_ins.sku"},
+        "imageUrl": {"$first": "$product_ins.image_url"},
+        "total_units_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
+        "total_price_sum": {
+            "$sum": {
+                "$multiply": [
+                    "$order_items_ins.Pricing.ItemPrice.Amount",
+                    "$order_items_ins.ProductDetails.QuantityOrdered"
+                ]
+            }
+        },
+        "refund_qty_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityShipped"},
+        "hourly_or_daily_sale": {"$sum": "$chart_value"}
+    }},
+    
+    # Sort by selected metric (units_sold, price, refund, etc.)
+    {"$sort": SON([(sort_field, -1)])},
+
+    # Limit to top 50 product-time buckets (can increase if needed)
+    {"$limit": 50},
+
+    # Group all timeBuckets under each productId
+    {"$group": {
+        "_id": "$_id.productId",
+        "product": {
+            "$first": {
+                "title": "$productTitle",
+                "asin": "$asin",
+                "sellerSku": "$sellerSku",
+                "imageUrl": "$imageUrl"
+            }
+        },
+        "chart": {
+            "$push": {
+                "k": "$_id.timeBucket",
+                "v": "$hourly_or_daily_sale"
+            }
+        },
+        "total_units": {"$sum": "$total_units_sum"},
+        "total_price": {"$sum": "$total_price_sum"},
+        "refund_qty": {"$sum": "$refund_qty_sum"}
+    }},
+
+    # Format chart field as dictionary (k-v pairs)
+    {"$project": {
+        "_id": 1,
+        "product": 1,
+        "chart": {
+            "$arrayToObject": {
+                "$filter": {
+                    "input": "$chart",
+                    "as": "item",
+                    "cond": {
+                        "$and": [
+                            {"$ne": ["$$item.k", None]},
+                            {"$ne": ["$$item.v", None]},
+                            {"$eq": [{"$type": "$$item.k"}, "string"]}
+                        ]
                     }
                 }
-            },
-            "productTitle": {"$first": "$product_ins.product_title"},
-            "asin": {"$first": "$product_ins.product_id"},
-            "sellerSku": {"$first": "$product_ins.sku"},
-            "imageUrl": {"$first": "$product_ins.image_url"},
-            "total_units_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityOrdered"},
-            "total_price_sum": {
-                "$sum": {
-                    "$multiply": [
-                        "$order_items_ins.Pricing.ItemPrice.Amount",
-                        "$order_items_ins.ProductDetails.QuantityOrdered"
-                    ]
-                }
-            },
-            "refund_qty_sum": {"$sum": "$order_items_ins.ProductDetails.QuantityShipped"},
-            "hourly_or_daily_sale": {"$sum": "$chart_value"}
-        }},
-        {"$group": {
-            "_id": "$_id.productId",
-            "product": {
-                "$first": {
-                    "title": "$productTitle",
-                    "asin": "$asin",
-                    "sellerSku": "$sellerSku",
-                    "imageUrl": "$imageUrl"
-                }
-            },
-            "chart": {
-                "$push": {
-                    "k": "$_id.timeBucket",
-                    "v": "$hourly_or_daily_sale"
-                }
-            },
-            "total_units": {"$sum": "$total_units_sum"},
-            "total_price": {"$sum": "$total_price_sum"},
-            "refund_qty": {"$sum": "$refund_qty_sum"}
-        }},
-        {"$project": {
-            "_id": 1,
-            "product": 1,
-            "chart": {
-                "$arrayToObject": {
-                    "$filter": {
-                        "input": "$chart",
-                        "as": "item",
-                        "cond": {
-                            "$and": [
-                                {"$ne": ["$$item.k", None]},
-                                {"$ne": ["$$item.v", None]},
-                                {"$eq": [{"$type": "$$item.k"}, "string"]}
-                            ]
-                        }
-                    }
-                }
-            },
-            "total_units": 1,
-            "total_price": 1,
-            "refund_qty": 1
-        }},
-        {"$sort": SON([(sort_field, -1)])},
-        {"$limit": 11}
+            }
+        },
+        "total_units": 1,
+        "total_price": 1,
+        "refund_qty": 1
+    }},
+
+    # Final sort after chart aggregation
+    {"$sort": SON([(sort_field, -1)])},
+
+    # Limit to top 10 final products
+    {"$limit": 10}
     ])
 
     result = list(Order.objects.aggregate(pipeline))
