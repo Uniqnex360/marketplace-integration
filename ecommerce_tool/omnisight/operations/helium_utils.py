@@ -346,15 +346,18 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     
     if manufacuture_name not in [None, "", []]:
         ids = getproductIdListBasedonManufacture(manufacuture_name, start_date, end_date)
-        match["_id"] = {"$in": ids}
-    elif product_id not in [None, "", []]:
+        match["_id"] = {"$in": ids} if "_id" not in match else {"$in": list(set(match["_id"]["$in"]) & set(ids))}
+
+    if product_id not in [None, "", []]:
         product_id = [ObjectId(pid) for pid in product_id]
         ids = getOrdersListBasedonProductId(product_id, start_date, end_date)
-        match["_id"] = {"$in": ids}
-    elif brand_id not in [None, "", []]:
+        match["_id"] = {"$in": ids} if "_id" not in match else {"$in": list(set(match["_id"]["$in"]) & set(ids))}
+
+    if brand_id not in [None, "", []]:
         brand_id = [ObjectId(bid) for bid in brand_id]
         ids = getproductIdListBasedonbrand(brand_id, start_date, end_date)
-        match["_id"] = {"$in": ids}
+        match["_id"] = {"$in": ids} if "_id" not in match else {"$in": list(set(match["_id"]["$in"]) & set(ids))}
+
     
     pipeline = [
         {
