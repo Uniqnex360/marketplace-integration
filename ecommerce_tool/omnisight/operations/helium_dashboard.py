@@ -984,7 +984,7 @@ def get_top_products(request):
     start_date_str = json_request.get("start_date", None)
     end_date_str = json_request.get("end_date", None)
 
-    timezone_str = 'US/Pacific'
+    timezone_str = json_request.get("timeZone", "US/Pacific")
 
     # Determine start and end dates
     if start_date_str and end_date_str:
@@ -992,15 +992,14 @@ def get_top_products(request):
         naive_from_date = datetime.strptime(start_date_str, '%Y-%m-%d')
         naive_to_date = datetime.strptime(end_date_str, '%Y-%m-%d')
         localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
+        localized_to_date = local_tz.localize(naive_to_date).replace(hour=23, minute=59, second=59)
         start_date = localized_from_date.astimezone(pytz.UTC)
         end_date = localized_to_date.astimezone(pytz.UTC)
-        end_date = end_date.replace(hour=23, minute=59, second=59)
     else:
-        start_date, end_date = get_date_range(preset, timezone_str)
+        start_date, end_date = get_date_range(preset, timezone_str)  # Assume returns UTC datetimes
 
-    if timezone_str != 'UTC':
-        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+    # If get_date_range returns local time, convert to UTC here (optional)
+    # start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
     duration_hours = (end_date - start_date).total_seconds() / 3600
 
@@ -1030,10 +1029,19 @@ def get_top_products(request):
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
     match['order_status'] = {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
 
-    if marketplace_id and marketplace_id != "all" and marketplace_id != "custom":
+    if marketplace_id and marketplace_id not in ["all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
+
     if metric == "refund":
         match['order_status'] = "Refunded"
+
+    # Convert brand_id and product_id to ObjectId lists if needed
+    brand_ids_for_match = []
+    if brand_id:
+        if isinstance(brand_id, str):
+            brand_ids_for_match = [ObjectId(brand_id)]
+        elif isinstance(brand_id, list):
+            brand_ids_for_match = [ObjectId(bid) for bid in brand_id]
 
     product_ids_for_match = []
     if product_id:
@@ -1041,23 +1049,14 @@ def get_top_products(request):
             product_ids_for_match = [ObjectId(product_id)]
         elif isinstance(product_id, list):
             product_ids_for_match = [ObjectId(pid) for pid in product_id]
+
+    # If product_id is provided, filter orders by product IDs (old logic)
+    # This is still valid if product_id is passed
+    if product_ids_for_match:
+        # Assuming getOrdersListBasedonProductId returns list of order _id's containing these products
         ids_from_products = getOrdersListBasedonProductId(product_ids_for_match, start_date, end_date)
         if ids_from_products:
             match["_id"] = {"$in": ids_from_products}
-        else:
-            return {"results": {"items": []}}
-    elif brand_id:
-        if isinstance(brand_id, str):
-            brand_ids_for_match = [ObjectId(brand_id)]
-        elif isinstance(brand_id, list):
-            brand_ids_for_match = [ObjectId(bid) for bid in brand_id]
-        product_ids_from_brands = getproductIdListBasedonbrand(brand_ids_for_match, start_date, end_date)
-        if product_ids_from_brands:
-            ids_from_brands = getOrdersListBasedonProductId(product_ids_from_brands, start_date, end_date)
-            if ids_from_brands:
-                match["_id"] = {"$in": ids_from_brands}
-            else:
-                return {"results": {"items": []}}
         else:
             return {"results": {"items": []}}
 
@@ -1083,6 +1082,17 @@ def get_top_products(request):
             "path": "$product_ins",
             "preserveNullAndEmptyArrays": True
         }},
+    ]
+
+    # Add brand filter inside pipeline if brand_id is provided
+    if brand_ids_for_match:
+        pipeline.append({
+            "$match": {
+                "product_ins.brand_id": {"$in": brand_ids_for_match}
+            }
+        })
+
+    pipeline.extend([
         {"$addFields": {
             "chart_key_raw": "$order_date",
             "chart_value": chart_value_field
@@ -1157,7 +1167,7 @@ def get_top_products(request):
         }},
         {"$sort": SON([(sort_field, -1)])},
         {"$limit": 10}
-    ]
+    ])
 
     result = list(Order.objects.aggregate(pipeline))
     formatted_results = []
@@ -1196,7 +1206,6 @@ def get_top_products(request):
 
     data = {"results": {"items": formatted_results}}
     return data
-
 def getPreviousDateRange(start_date, end_date):
 
     duration = end_date - start_date
