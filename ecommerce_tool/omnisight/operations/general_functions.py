@@ -1052,71 +1052,154 @@ def fetchManualOrderDetails(request):
 
 #-------------------------------------DASH BOARD APIS-------------------------------------------------------------------------------------------------
 def ordersCountForDashboard(request):
-    try:
-        data = dict()
-        
-        # Extract params from query string
-        marketplace_id = request.GET.get('marketplace_id', 'all')  
-        start_date = request.GET.get('start_date')  
-        end_date = request.GET.get('end_date')  
-        timezone_str = request.GET.get('timezone', 'US/Pacific')
-        brand_id_list = request.GET.get('brand_id')  # Added extraction of brand_id_list
-        preset = request.GET.get("preset", "Today")     
-        product_id_list = request.GET.get('product_id')  # Added extraction of product_id_list
+    from django.utils.timezone import now
 
-        # Date logic
-        if start_date and start_date != "":
-            if isinstance(start_date, datetime):
-                start_date = start_date.isoformat()
-            if isinstance(end_date, datetime):
-                end_date = end_date.isoformat()
-            start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
-        else:
-            start_date, end_date = get_date_range(preset, timezone_str)
+    data = dict()
+    marketplace_id = request.GET.get('marketplace_id')
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    preset = request.GET.get("preset", "Today")
+    timezone_str="US/Pacific"
 
-        # Use grossRevenue to get all relevant orders
-        orders = grossRevenue(
-            start_date, end_date, 
-            marketplace_id=marketplace_id, 
-            brand_id=brand_id_list,  # Included brand_id_list in the call
-            timezone=timezone_str,
-            product_id=product_id_list  # Included product_id_list in the call
-        )
+    # Time range
+    if start_date:
+        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
+    else:
+        start_date, end_date = get_date_range(preset, timezone_str)
 
-        # Filter out cancelled/zero orders (should already be handled in grossRevenue, but just in case)
-        orders = [o for o in orders if o.get('order_status') != 'Cancelled' and o.get('order_total', 0) > 0]
+    if timezone_str != 'UTC':
+        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
-        # Total sales
-        data['total_sales'] = sum(o['order_total'] for o in orders)
+    # Shared match
+    match_conditions = {
+        "order_date": {"$gte": start_date, "$lte": end_date},
+        "order_status": {"$ne": "Cancelled"},
+        "order_total": {"$gt": 0}
+    }
 
-        # Total order count
+    # Aggregate Orders and Custom Orders - in parallel
+    order_count, custom_order_count = 0, 0
+    def count_orders(q):
+        pipeline = [
+            {"$match": match_conditions},
+            {"$group": {"_id": None, "count": {"$sum": 1}}}
+        ]
+        res = list(Order.objects.aggregate(*pipeline))
+        q.put(res[0].get("count", 0) if res else 0)
+
+    def count_custom_orders(q):
+        pipeline = [
+            {"$match": match_conditions},
+            {"$group": {"_id": None, "count": {"$sum": 1}}}
+        ]
+        res = list(custom_order.objects.aggregate(*pipeline))
+        q.put(res[0].get("count", 0) if res else 0)
+
+    q1, q2 = Queue(), Queue()
+    t1 = Thread(target=count_orders, args=(q1,))
+    t2 = Thread(target=count_custom_orders, args=(q2,))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+    order_count = q1.get()
+    custom_order_count = q2.get()
+    total_order_count = order_count + custom_order_count
+
+    data['total_order_count'] = {
+        "value": total_order_count,
+        "percentage": "100.0%"
+    }
+
+    # If 'all', gather data per marketplace
+    if marketplace_id == "all":
+        marketplaces = list(Marketplace.objects.only('id', 'name'))
+        results = {}
+        threads = []
+
+        def process_marketplace(mp):
+            pipeline = [
+                {"$match": {**match_conditions, "marketplace_id": mp.id}},
+                {
+                    "$group": {
+                        "_id": None,
+                        "count": {"$sum": 1},
+                        "order_value": {"$sum": "$order_total"}
+                    }
+                }
+            ]
+            res = list(Order.objects.aggregate(*pipeline))
+            count = res[0].get("count", 0) if res else 0
+            order_value = round(res[0].get("order_value", 0), 2) if res else 0
+            percentage = round((count / total_order_count) * 100, 2) if total_order_count else 0
+            results[mp.name] = {
+                "count": count,
+                "percentage": f"{percentage}%",
+                "order_value": order_value
+            }
+
+        for mp in marketplaces:
+            thread = Thread(target=process_marketplace, args=(mp,))
+            thread.start()
+            threads.append(thread)
+
+        for thread in threads:
+            thread.join()
+
+        data.update(results)
+
+    elif marketplace_id != "all" and marketplace_id != "custom":
+        # Single marketplace query
+        mp_id = ObjectId(marketplace_id)
+        pipeline = [
+            {"$match": {**match_conditions, "marketplace_id": mp_id}},
+            {
+                "$group": {
+                    "_id": None,
+                    "count": {"$sum": 1},
+                    "order_value": {"$sum": "$order_total"}
+                }
+            }
+        ]
+        res = list(Order.objects.aggregate(*pipeline))
+        count = res[0].get("count", 0) if res else 0
+        order_value = round(res[0].get("order_value", 0), 2) if res else 0
+        name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
+
+        data[name] = {
+            "value": count,
+            "percentage": "100.0%",
+            "order_value": order_value
+        }
         data['total_order_count'] = {
-            "value": len(orders),
+            "value": count,
             "percentage": "100.0%"
         }
 
-        # Group by day
-        from collections import defaultdict
-        order_days = defaultdict(lambda: {'order_count': 0, 'order_value': 0.0})
-        for o in orders:
-            # If order_date is a string, parse it
-            order_date = o['order_date']
-            if isinstance(order_date, str):
-                order_date = datetime.fromisoformat(order_date)
-            date_key = order_date.strftime('%Y-%m-%d')
-            order_days[date_key]['order_count'] += 1
-            order_days[date_key]['order_value'] += o['order_total']
-        data['order_days'] = [
-            {'date': k, 'order_count': v['order_count'], 'order_value': v['order_value']}
-            for k, v in sorted(order_days.items())
+    elif marketplace_id == "custom":
+        pipeline = [
+            {"$match": match_conditions},
+            {
+                "$group": {
+                    "_id": None,
+                    "count": {"$sum": 1},
+                    "order_value": {"$sum": "$total_price"}
+                }
+            }
         ]
+        res = list(custom_order.objects.aggregate(*pipeline))
+        count = res[0].get("count", 0) if res else 0
+        order_value = round(res[0].get("order_value", 0), 2) if res else 0
+        data['custom'] = {
+            "value": count,
+            "percentage": "100.0%",
+            "order_value": order_value
+        }
+        data['total_order_count'] = {
+            "value": count,
+            "percentage": "100.0%"
+        }
 
-        sanitized_data = sanitize_floats(data)
-        return sanitized_data
+    return sanitize_data(data)
 
-    except Exception as e:
-        return {"error": str(e)}
-    
 def totalSalesAmount(request):
     import json
     data = dict()
