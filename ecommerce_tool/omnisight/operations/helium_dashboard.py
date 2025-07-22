@@ -68,7 +68,6 @@ def sanitize_data(data):
 
 @csrf_exempt
 def get_metrics_by_date_range(request):
-    preset = json_request.get("preset", "Today")
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     target_date_str = json_request.get('target_date')
@@ -267,6 +266,7 @@ def get_metrics_by_date_range(request):
     metrics = sanitize_data(metrics)
 
     return metrics
+
 
 
 # @csrf_exempt
