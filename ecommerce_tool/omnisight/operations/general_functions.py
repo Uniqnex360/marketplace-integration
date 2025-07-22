@@ -1054,17 +1054,16 @@ def fetchManualOrderDetails(request):
 def ordersCountForDashboard(request):
     try:
         data = dict()
-        json_request = JSONParser().parse(request)
         
-        # Extract params
-        marketplace_id = json_request.get('marketplace_id', 'all')  
-        start_date = json_request.get('start_date')  
-        end_date = json_request.get('end_date')  
-        timezone_str = json_request.get('timezone', 'US/Pacific')
-        brand_id_list = json_request.get('brand_id')  # Added extraction of brand_id_list
-        preset = json_request.get("preset", "Today")     
-        product_id_list = json_request.get('product_id')  # Added extraction of product_id_list
-   
+        # Extract params from query string
+        marketplace_id = request.GET.get('marketplace_id', 'all')  
+        start_date = request.GET.get('start_date')  
+        end_date = request.GET.get('end_date')  
+        timezone_str = request.GET.get('timezone', 'US/Pacific')
+        brand_id_list = request.GET.get('brand_id')  # Added extraction of brand_id_list
+        preset = request.GET.get("preset", "Today")     
+        product_id_list = request.GET.get('product_id')  # Added extraction of product_id_list
+
         # Date logic
         if start_date and start_date != "":
             if isinstance(start_date, datetime):
@@ -1117,6 +1116,7 @@ def ordersCountForDashboard(request):
 
     except Exception as e:
         return {"error": str(e)}
+    
 def totalSalesAmount(request):
     import json
     data = dict()
