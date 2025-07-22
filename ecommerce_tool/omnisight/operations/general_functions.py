@@ -1064,17 +1064,9 @@ def ordersCountForDashboard(request):
     preset = request.GET.get("preset", "Today")
     timezone_str = request.GET.get("timezone", "US/Pacific")
     
-    # Handle brand_id[] format
-    brand_id = None
-    for key in request.GET:
-        if key == 'brand_id[]' or key.startswith('brand_id['):
-            brand_id = request.GET.getlist(key)
-            break
+    # Specifically look for brand_id[] parameter
+    brand_ids = request.GET.getlist('brand_id[]')
     
-    # If we didn't find it as an array, try as a single value
-    if not brand_id:
-        brand_id = request.GET.get('brand_id')
-
     # Time range
     if start_date:
         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
@@ -1084,241 +1076,212 @@ def ordersCountForDashboard(request):
     if timezone_str != 'UTC':
         start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
-    # Shared match conditions for regular orders
+    # Basic match conditions
     match_conditions = {
         "order_date": {"$gte": start_date, "$lte": end_date},
         "order_status": {"$ne": "Cancelled"},
         "order_total": {"$gt": 0}
     }
     
-    # Match conditions for custom orders
     custom_match_conditions = {
         "purchase_order_date": {"$gte": start_date, "$lte": end_date},
         "order_status": {"$ne": "Cancelled"},
         "total_price": {"$gt": 0}
     }
 
-    # Initialize counters
-    order_count, custom_order_count = 0, 0
-    order_value, custom_order_value = 0, 0
-    
-    # Handle brand filtering
+    # Process brand filtering
     brand_filter_applied = False
-    if brand_id:
+    if brand_ids:
         try:
             brand_filter_applied = True
-            brand_ids = []
+            # Convert string IDs to ObjectId
+            brand_object_ids = [ObjectId(bid) for bid in brand_ids if bid]
             
-            # Convert to list of ObjectIds
-            if isinstance(brand_id, list):
-                brand_ids = [ObjectId(bid) for bid in brand_id if bid]
-            elif isinstance(brand_id, str):
-                if brand_id.strip():  # Not empty
-                    brand_ids = [ObjectId(brand_id.strip())]
-            
-            if brand_ids:
-                # Get products for these brands
-                products = list(Product.objects.filter(brand_id__in=brand_ids).only('id'))
+            if brand_object_ids:
+                # Get products belonging to these brands
+                products = list(Product.objects.filter(brand_id__in=brand_object_ids).only('id'))
                 product_ids = [p.id for p in products]
                 
                 if product_ids:
-                    # Find orders through OrderItems for regular orders
-                    order_item_query = {"ProductDetails.product_id": {"$in": product_ids}}
-                    order_items = list(OrderItems.objects.filter(__raw__=order_item_query).only('id', 'OrderId'))
+                    # Get order items containing these products
+                    order_items = list(OrderItems.objects.filter(__raw__={
+                        "ProductDetails.product_id": {"$in": product_ids}
+                    }).only('id', 'OrderId'))
                     
-                    # Get both order item IDs and direct order IDs
                     order_item_ids = [oi.id for oi in order_items]
-                    order_ids = [oi.OrderId for oi in order_items if oi.OrderId]
+                    direct_order_ids = [oi.OrderId for oi in order_items if oi.OrderId]
                     
-                    if order_item_ids:
-                        # Filter by order items reference
-                        match_conditions["order_items"] = {"$in": order_item_ids}
+                    if order_item_ids or direct_order_ids:
+                        # Build filter condition
+                        filter_conditions = []
+                        
+                        if order_item_ids:
+                            filter_conditions.append({"order_items": {"$in": order_item_ids}})
+                        
+                        if direct_order_ids:
+                            filter_conditions.append({"purchase_order_id": {"$in": direct_order_ids}})
+                        
+                        if filter_conditions:
+                            if len(filter_conditions) > 1:
+                                match_conditions["$or"] = filter_conditions
+                            else:
+                                match_conditions.update(filter_conditions[0])
+                    else:
+                        # No order items found - force empty result
+                        match_conditions["_id"] = None
                     
-                    if order_ids:
-                        # Also filter by direct order ID match
-                        match_conditions["$or"] = [
-                            {"purchase_order_id": {"$in": order_ids}},
-                            {"order_items": {"$in": order_item_ids}}
-                        ]
-                    
-                    # For custom orders, filter by product_id in ordered_products
+                    # For custom orders
                     custom_match_conditions["ordered_products.product_id"] = {"$in": product_ids}
                 else:
-                    # No products found for these brands - ensure no orders match
+                    # No products for these brands - force empty result
                     match_conditions["_id"] = None
                     custom_match_conditions["_id"] = None
+                    
+                # Store brand names for reference
+                brands = list(Brand.objects.filter(id__in=brand_object_ids).only('id', 'name'))
+                brand_names = [b.name for b in brands]
+                print(f"Filtering by brands: {brand_names}")  # Debug log
+                
         except Exception as e:
-            print(f"Error processing brand filter: {e}")
-            # Continue with unfiltered queries if there's an error
-            brand_filter_applied = False
+            print(f"Error processing brand filter: {str(e)}")
+            # Continue with unfiltered query
 
-    # Aggregate Orders and Custom Orders - in parallel
+    # Parallel data collection for orders and custom orders
     def count_orders(q):
         pipeline = [
             {"$match": match_conditions},
-            {"$group": {"_id": None, "count": {"$sum": 1}, "order_value": {"$sum": "$order_total"}}}
+            {"$group": {
+                "_id": None, 
+                "count": {"$sum": 1}, 
+                "order_value": {"$sum": "$order_total"}
+            }}
         ]
         res = list(Order.objects.aggregate(*pipeline))
-        if res:
-            q.put((res[0].get("count", 0), res[0].get("order_value", 0)))
-        else:
-            q.put((0, 0))
+        q.put((res[0].get("count", 0), res[0].get("order_value", 0)) if res else (0, 0))
 
     def count_custom_orders(q):
         pipeline = [
             {"$match": custom_match_conditions},
-            {"$group": {"_id": None, "count": {"$sum": 1}, "order_value": {"$sum": "$total_price"}}}
+            {"$group": {
+                "_id": None, 
+                "count": {"$sum": 1}, 
+                "order_value": {"$sum": "$total_price"}
+            }}
         ]
         res = list(custom_order.objects.aggregate(*pipeline))
-        if res:
-            q.put((res[0].get("count", 0), res[0].get("order_value", 0)))
-        else:
-            q.put((0, 0))
+        q.put((res[0].get("count", 0), res[0].get("order_value", 0)) if res else (0, 0))
 
     q1, q2 = Queue(), Queue()
-    
     t1 = Thread(target=count_orders, args=(q1,))
     t2 = Thread(target=count_custom_orders, args=(q2,))
-    
     t1.start(); t2.start()
     t1.join(); t2.join()
     
-    order_result = q1.get()
-    custom_result = q2.get()
-    
-    order_count, order_value = order_result
-    custom_order_count, custom_order_value = custom_result
-    
-    total_order_count = order_count + custom_order_count
-    total_order_value = round(order_value + custom_order_value, 2)
+    order_count, order_value = q1.get()
+    custom_count, custom_value = q2.get()
+    total_count = order_count + custom_count
+    total_value = round(order_value + custom_value, 2)
 
-    # If brand filtering is applied, these values represent brand-specific totals
+    # Set total order count (filtered by brand if applicable)
     data['total_order_count'] = {
-        "value": total_order_count,
+        "value": total_count,
         "percentage": "100.0%",
-        "order_value": total_order_value
+        "order_value": total_value
     }
 
-    # Handle marketplace filtering
+    # Handle marketplace breakdown
     if marketplace_id == "all":
         marketplaces = list(Marketplace.objects.only('id', 'name'))
-        results = {}
-        threads = []
-        marketplace_data = {}
-
-        def process_marketplace(mp, results_dict):
+        marketplace_results = {}
+        
+        def process_marketplace(mp, results):
             mp_match = match_conditions.copy()
             mp_match["marketplace_id"] = mp.id
             
             pipeline = [
                 {"$match": mp_match},
-                {
-                    "$group": {
-                        "_id": None,
-                        "count": {"$sum": 1},
-                        "order_value": {"$sum": "$order_total"}
-                    }
-                }
+                {"$group": {
+                    "_id": None,
+                    "count": {"$sum": 1},
+                    "order_value": {"$sum": "$order_total"}
+                }}
             ]
             res = list(Order.objects.aggregate(*pipeline))
             count = res[0].get("count", 0) if res else 0
-            order_value = round(res[0].get("order_value", 0), 2) if res else 0
-            percentage = round((count / total_order_count) * 100, 2) if total_order_count else 0
+            value = round(res[0].get("order_value", 0), 2) if res else 0
+            percentage = round((count / total_count) * 100, 2) if total_count else 0
             
-            results_dict[mp.name] = {
+            results[mp.name] = {
                 "count": count,
                 "percentage": f"{percentage}%",
-                "order_value": order_value
+                "order_value": value
             }
-
+        
+        # Process each marketplace in parallel
+        threads = []
         for mp in marketplaces:
-            thread = Thread(target=process_marketplace, args=(mp, marketplace_data))
+            thread = Thread(target=process_marketplace, args=(mp, marketplace_results))
             thread.start()
             threads.append(thread)
-
+            
         for thread in threads:
             thread.join()
-
-        data.update(marketplace_data)
-
+            
+        # Add marketplace results to main data
+        data.update(marketplace_results)
+        
     elif marketplace_id != "all" and marketplace_id != "custom":
-        # Single marketplace query
+        # Single marketplace
         mp_id = ObjectId(marketplace_id)
         mp_match = match_conditions.copy()
         mp_match["marketplace_id"] = mp_id
         
         pipeline = [
             {"$match": mp_match},
-            {
-                "$group": {
-                    "_id": None,
-                    "count": {"$sum": 1},
-                    "order_value": {"$sum": "$order_total"}
-                }
-            }
+            {"$group": {
+                "_id": None,
+                "count": {"$sum": 1},
+                "order_value": {"$sum": "$order_total"}
+            }}
         ]
         res = list(Order.objects.aggregate(*pipeline))
         count = res[0].get("count", 0) if res else 0
-        order_value = round(res[0].get("order_value", 0), 2) if res else 0
+        value = round(res[0].get("order_value", 0), 2) if res else 0
         
         name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
-
         data[name] = {
             "value": count,
             "percentage": "100.0%",
-            "order_value": order_value
+            "order_value": value
         }
         
-        # For a specific marketplace, the filtered count becomes the total
-        if not brand_filter_applied:
-            data['total_order_count'] = {
-                "value": count,
-                "percentage": "100.0%",
-                "order_value": order_value
-            }
-
     elif marketplace_id == "custom":
+        # Custom orders only
         pipeline = [
             {"$match": custom_match_conditions},
-            {
-                "$group": {
-                    "_id": None,
-                    "count": {"$sum": 1},
-                    "order_value": {"$sum": "$total_price"}
-                }
-            }
+            {"$group": {
+                "_id": None,
+                "count": {"$sum": 1},
+                "order_value": {"$sum": "$total_price"}
+            }}
         ]
         res = list(custom_order.objects.aggregate(*pipeline))
         count = res[0].get("count", 0) if res else 0
-        order_value = round(res[0].get("order_value", 0), 2) if res else 0
+        value = round(res[0].get("order_value", 0), 2) if res else 0
+        
         data['custom'] = {
             "value": count,
             "percentage": "100.0%",
-            "order_value": order_value
+            "order_value": value
         }
-        
-        if not brand_filter_applied:
-            data['total_order_count'] = {
-                "value": count,
-                "percentage": "100.0%",
-                "order_value": order_value
-            }
 
-    # Add brand info if brand filtering was applied
-    if brand_filter_applied and brand_id:
-        try:
-            # Get brand names for display
-            if 'brand_ids' in locals():
-                brands = list(Brand.objects.filter(id__in=brand_ids).only('id', 'name'))
-                data['brand_filter'] = {
-                    "applied": True,
-                    "brand_ids": [str(b.id) for b in brands],
-                    "brand_names": [b.name for b in brands],
-                    "order_count": total_order_count,
-                    "order_value": total_order_value
-                }
-        except Exception as e:
-            data['brand_error'] = str(e)
+    # Add brand filter information
+    if brand_filter_applied and 'brand_object_ids' in locals() and 'brands' in locals():
+        data['brand_filter'] = {
+            "applied": True,
+            "brand_ids": [str(b.id) for b in brands],
+            "brand_names": [b.name for b in brands]
+        }
 
     return sanitize_data(data)
 def totalSalesAmount(request):
