@@ -162,7 +162,7 @@ def get_metrics_by_date_range(request):
         metrics = process_metrics(date_filters, last_8_days_filter, marketplace_id, brand_id,
                                  product_id, manufacturer_name, fulfillment_channel, timezone_str)
 
-        return JsonResponse(metrics)
+        return metrics
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
