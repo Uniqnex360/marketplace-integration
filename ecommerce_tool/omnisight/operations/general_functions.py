@@ -1057,51 +1057,29 @@ def ordersCountForDashboard(request):
     from threading import Thread
     from bson import ObjectId
     import pytz
-    from datetime import datetime
 
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
-    user_timezone = request.GET.get("timezone", "Asia/Calcutta")
     
-    # Always use US/Pacific for internal date processing
-    internal_timezone = "US/Pacific"
+    # Always use US/Pacific for internal processing, regardless of what's passed
+    timezone_str = "US/Pacific"
     
     # Specifically look for brand_id[] parameter
     brand_ids = request.GET.getlist('brand_id[]')
     
-    # Time range handling - always convert to US/Pacific timezone internally
+    # Time range - always use US/Pacific
     if start_date:
-        # First convert to user's local timezone
-        start_date, end_date = convertdateTotimezone(start_date, end_date, user_timezone)
-        
-        # Then ensure we're using US/Pacific internally
-        pacific_tz = pytz.timezone(internal_timezone)
-        
-        # If dates aren't timezone-aware, make them timezone-aware in user timezone first
-        user_tz = pytz.timezone(user_timezone)
-        if not start_date.tzinfo:
-            start_date = user_tz.localize(start_date)
-        if not end_date.tzinfo:
-            end_date = user_tz.localize(end_date)
-            
-        # Convert to Pacific time
-        start_date = start_date.astimezone(pacific_tz)
-        end_date = end_date.astimezone(pacific_tz)
+        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
-        # Always get date range in US/Pacific
-        start_date, end_date = get_date_range(preset, internal_timezone)
-    
-    # For MongoDB queries, convert to UTC
-    start_date_utc, end_date_utc = convertLocalTimeToUTC(start_date, end_date, internal_timezone)
-    
-    # Print for debugging
-    print(f"Date range in Pacific: {start_date} to {end_date}")
-    print(f"Date range in UTC: {start_date_utc} to {end_date_utc}")
+        start_date, end_date = get_date_range(preset, timezone_str)
 
-    # Basic match conditions using UTC times for MongoDB
+    # Convert to UTC for MongoDB queries
+    start_date_utc, end_date_utc = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+
+    # Basic match conditions using UTC times
     match_conditions = {
         "order_date": {"$gte": start_date_utc, "$lte": end_date_utc},
         "order_status": {"$ne": "Cancelled"},
@@ -1115,10 +1093,8 @@ def ordersCountForDashboard(request):
     }
 
     # Process brand filtering
-    brand_filter_applied = False
     if brand_ids:
         try:
-            brand_filter_applied = True
             # Convert string IDs to ObjectId
             brand_object_ids = [ObjectId(bid) for bid in brand_ids if bid]
             
@@ -1161,11 +1137,6 @@ def ordersCountForDashboard(request):
                     # No products for these brands - force empty result
                     match_conditions["_id"] = None
                     custom_match_conditions["_id"] = None
-                    
-                # Store brand names for reference
-                brands = list(Brand.objects.filter(id__in=brand_object_ids).only('id', 'name'))
-                brand_names = [b.name for b in brands]
-                print(f"Filtering by brands: {brand_names}")  # Debug log
                 
         except Exception as e:
             print(f"Error processing brand filter: {str(e)}")
@@ -1299,25 +1270,6 @@ def ordersCountForDashboard(request):
             "percentage": "100.0%",
             "order_value": value
         }
-
-    # Add brand filter information
-    if brand_filter_applied and 'brand_object_ids' in locals() and 'brands' in locals():
-        data['brand_filter'] = {
-            "applied": True,
-            "brand_ids": [str(b.id) for b in brands],
-            "brand_names": [b.name for b in brands],
-            "timezone": internal_timezone
-        }
-
-    # Add timezone info to the response
-    data['timezone_info'] = {
-        "user_timezone": user_timezone,
-        "processing_timezone": internal_timezone,
-        "date_range": {
-            "start": start_date.strftime("%Y-%m-%d %H:%M:%S %Z"),
-            "end": end_date.strftime("%Y-%m-%d %H:%M:%S %Z")
-        }
-    }
 
     return sanitize_data(data)
 def totalSalesAmount(request):
