@@ -1056,35 +1056,60 @@ def ordersCountForDashboard(request):
     from queue import Queue
     from threading import Thread
     from bson import ObjectId
+    import pytz
+    from datetime import datetime
 
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
-    timezone_str = request.GET.get("timezone", "US/Pacific")
+    user_timezone = request.GET.get("timezone", "Asia/Calcutta")
+    
+    # Always use US/Pacific for internal date processing
+    internal_timezone = "US/Pacific"
     
     # Specifically look for brand_id[] parameter
     brand_ids = request.GET.getlist('brand_id[]')
     
-    # Time range
+    # Time range handling - always convert to US/Pacific timezone internally
     if start_date:
-        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
+        # First convert to user's local timezone
+        start_date, end_date = convertdateTotimezone(start_date, end_date, user_timezone)
+        
+        # Then ensure we're using US/Pacific internally
+        pacific_tz = pytz.timezone(internal_timezone)
+        
+        # If dates aren't timezone-aware, make them timezone-aware in user timezone first
+        user_tz = pytz.timezone(user_timezone)
+        if not start_date.tzinfo:
+            start_date = user_tz.localize(start_date)
+        if not end_date.tzinfo:
+            end_date = user_tz.localize(end_date)
+            
+        # Convert to Pacific time
+        start_date = start_date.astimezone(pacific_tz)
+        end_date = end_date.astimezone(pacific_tz)
     else:
-        start_date, end_date = get_date_range(preset, timezone_str)
+        # Always get date range in US/Pacific
+        start_date, end_date = get_date_range(preset, internal_timezone)
+    
+    # For MongoDB queries, convert to UTC
+    start_date_utc, end_date_utc = convertLocalTimeToUTC(start_date, end_date, internal_timezone)
+    
+    # Print for debugging
+    print(f"Date range in Pacific: {start_date} to {end_date}")
+    print(f"Date range in UTC: {start_date_utc} to {end_date_utc}")
 
-    if timezone_str != 'UTC':
-        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
-
-    # Basic match conditions
+    # Basic match conditions using UTC times for MongoDB
     match_conditions = {
-        "order_date": {"$gte": start_date, "$lte": end_date},
+        "order_date": {"$gte": start_date_utc, "$lte": end_date_utc},
         "order_status": {"$ne": "Cancelled"},
         "order_total": {"$gt": 0}
     }
     
     custom_match_conditions = {
-        "purchase_order_date": {"$gte": start_date, "$lte": end_date},
+        "purchase_order_date": {"$gte": start_date_utc, "$lte": end_date_utc},
         "order_status": {"$ne": "Cancelled"},
         "total_price": {"$gt": 0}
     }
@@ -1280,8 +1305,19 @@ def ordersCountForDashboard(request):
         data['brand_filter'] = {
             "applied": True,
             "brand_ids": [str(b.id) for b in brands],
-            "brand_names": [b.name for b in brands]
+            "brand_names": [b.name for b in brands],
+            "timezone": internal_timezone
         }
+
+    # Add timezone info to the response
+    data['timezone_info'] = {
+        "user_timezone": user_timezone,
+        "processing_timezone": internal_timezone,
+        "date_range": {
+            "start": start_date.strftime("%Y-%m-%d %H:%M:%S %Z"),
+            "end": end_date.strftime("%Y-%m-%d %H:%M:%S %Z")
+        }
+    }
 
     return sanitize_data(data)
 def totalSalesAmount(request):
