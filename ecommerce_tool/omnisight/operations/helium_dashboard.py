@@ -1764,51 +1764,7 @@ def clean_json_floats(obj):
         return [clean_json_floats(i) for i in obj]
     return obj
 
-def get_batch_sales_data(start_date, end_date, product_ids):
-    """
-    Batch fetch sales data for multiple products at once
-    Returns dict with product_id as key and aggregated sales data as value
-    """
-    # This assumes you have a sales collection/model - adjust according to your schema
-    sales_pipeline = [
-        {
-            "$match": {
-                "product_id": {"$in": product_ids},
-                "date": {"$gte": start_date, "$lte": end_date}
-            }
-        },
-        {
-            "$group": {
-                "_id": "$product_id",
-                "total_quantity": {"$sum": "$quantity"},
-                "total_price": {"$sum": "$price"}
-            }
-        }
-    ]
-    
-    # Replace 'Sales' with your actual sales model/collection
-    sales_data = {}
-    try:
-        # Adjust this line according to your sales model
-        results = list(Product.objects.aggregate(*sales_pipeline))
-        for result in results:
-            sales_data[result['_id']] = {
-                'total_quantity': result['total_quantity'],
-                'total_price': result['total_price']
-            }
-    except Exception as e:
-        # Fallback to individual calls if batch fails
-        for pid in product_ids:
-            try:
-                individual_sales = getdaywiseproductssold(start_date, end_date, pid, False)
-                total_qty = sum(s.get('total_quantity', 0) for s in individual_sales)
-                total_price = sum(s.get('total_price', 0) for s in individual_sales)
-                sales_data[pid] = {'total_quantity': total_qty, 'total_price': total_price}
-            except:
-                sales_data[pid] = {'total_quantity': 0, 'total_price': 0}
-    
-    return sales_data
-########################----
+
 ########################--------------------------------------------------------------------------------------------------------##########
 
 @csrf_exempt
@@ -2059,11 +2015,12 @@ def exportPeriodWiseCSV(request):
 
 
 @csrf_exempt
-def  getPeriodWiseDataCustom(request):
+def getPeriodWiseDataCustom(request):
     import pytz
     from datetime import datetime, timedelta
     from rest_framework.parsers import JSONParser
     from django.http import JsonResponse
+    from concurrent.futures import ThreadPoolExecutor
 
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2075,8 +2032,7 @@ def  getPeriodWiseDataCustom(request):
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
-    timezone_str="US/Pacific"
-
+    timezone_str = "US/Pacific"
 
     preset = json_request.get("preset")
     start_date = json_request.get("start_date")
@@ -2113,37 +2069,30 @@ def  getPeriodWiseDataCustom(request):
     last7_start, last7_end = get_date_range("Last 7 days", timezone_str)
     last7_prev_start = today_start - timedelta(days=14)
     last7_prev_end = last7_start - timedelta(seconds=1)
+    
+    # Calculate day before yesterday for comparison with yesterday
+    day_before_yesterday_start = yesterday_start - timedelta(days=1)
+    day_before_yesterday_end = yesterday_end - timedelta(days=1)
 
-    # Helper to generate period response
-    def period_response(label, cur_from, cur_to, prev_from, prev_to):
-        def format_metrics(metric):
-            current_value = sanitize_data(current[metric])
-            previous_value = sanitize_data(previous[metric])
+    # Helper to format metrics for response
+    def format_metrics_response(current, previous):
+        def format_metric(metric):
+            current_value = sanitize_data(current.get(metric, 0))
+            previous_value = sanitize_data(previous.get(metric, 0))
             delta = round(current_value - previous_value, 2)
             return {
                 "current": current_value,
                 "previous": previous_value,
                 "delta": delta
             }
-        with ThreadPoolExecutor (max_workers=2) as executor:
-            future_current=executor.submit(calculate_metricss,cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
-            future_previous=executor.submit(calculate_metricss,prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str, False, use_threads=True)
-            current=future_current.result()
-            previous=future_previous.result()
-        date_ranges = {
-            "current": {"from": to_utc_format(cur_from)},
-            "previous": {"from": to_utc_format(prev_from)}
-        }
-
-        date_ranges["current"]["to"] = to_utc_format(cur_to)
-        date_ranges["previous"]["to"] = to_utc_format(prev_to)
-
+        
         summary_metrics = [
             "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds", "skuCount",
             "sessions", "pageViews", "unitSessionPercentage", "margin", "roi", "orders"
         ]
-        summary = {metric: format_metrics(metric) for metric in summary_metrics}
-
+        
+        summary = {metric: format_metric(metric) for metric in summary_metrics}
+        
         def net_profit_calc(metrics):
             return {
                 "gross": sanitize_data(metrics.get("grossRevenue", 0)),
@@ -2159,9 +2108,8 @@ def  getPeriodWiseDataCustom(request):
                 "product_cost": sanitize_data(metrics.get("product_cost", 0)),
                 "shipping_cost": sanitize_data(metrics.get("shipping_cost", 0)),
             }
-
+        
         return {
-            "dateRanges": date_ranges,
             "summary": summary,
             "netProfitCalculation": {
                 "current": net_profit_calc(current),
@@ -2169,15 +2117,114 @@ def  getPeriodWiseDataCustom(request):
             }
         }
 
+    # Helper to create period response
+    def create_period_response(label, cur_from, cur_to, prev_from, prev_to, current_metrics, previous_metrics):
+        date_ranges = {
+            "current": {"from": to_utc_format(cur_from), "to": to_utc_format(cur_to)},
+            "previous": {"from": to_utc_format(prev_from), "to": to_utc_format(prev_to)}
+        }
+        
+        metrics_response = format_metrics_response(current_metrics, previous_metrics)
+        
+        return {
+            "dateRanges": date_ranges,
+            **metrics_response  # Unpacks summary and netProfitCalculation
+        }
+
+    # Run all calculations in parallel using ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        # Submit all 8 calculations at once
+        future_today_current = executor.submit(
+            calculate_metricss, 
+            today_start, today_end, 
+            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            timezone_str, False, True
+        )
+        
+        future_today_previous = executor.submit(
+            calculate_metricss, 
+            yesterday_start, yesterday_end, 
+            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            timezone_str, False, True
+        )
+        
+        future_yesterday_current = executor.submit(
+            calculate_metricss, 
+            yesterday_start, yesterday_end, 
+            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            timezone_str, False, True
+        )
+        
+        future_yesterday_previous = executor.submit(
+            calculate_metricss, 
+            day_before_yesterday_start, day_before_yesterday_end, 
+            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            timezone_str, False, True
+        )
+        
+        future_last7_current = executor.submit(
+            calculate_metricss, 
+            last7_start, last7_end, 
+            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            timezone_str, False, True
+        )
+        
+        future_last7_previous = executor.submit(
+            calculate_metricss, 
+            last7_prev_start, last7_prev_end, 
+            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            timezone_str, False, True
+        )
+        
+        future_custom_current = executor.submit(
+            calculate_metricss, 
+            from_date, to_date, 
+            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            timezone_str, False, True
+        )
+        
+        future_custom_previous = executor.submit(
+            calculate_metricss, 
+            prev_from, prev_to, 
+            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
+            timezone_str, False, True
+        )
+        
+        # Get results from all futures
+        today_current = future_today_current.result()
+        today_previous = future_today_previous.result()
+        yesterday_current = future_yesterday_current.result()
+        yesterday_previous = future_yesterday_previous.result()
+        last7_current = future_last7_current.result()
+        last7_previous = future_last7_previous.result()
+        custom_current = future_custom_current.result()
+        custom_previous = future_custom_previous.result()
+
+    # Assemble the final response with all period data
     response_data = {
-        "today": period_response("Today", today_start, today_end, yesterday_start, yesterday_end),
-        "yesterday": period_response("Yesterday", yesterday_start, yesterday_end, yesterday_start - timedelta(days=1), yesterday_end - timedelta(days=1)),
-        "last7Days": period_response("Last 7 Days", last7_start, last7_end, last7_prev_start, last7_prev_end),
-        "custom": period_response(preset, from_date, to_date, prev_from, prev_to),
+        "today": create_period_response(
+            "Today", today_start, today_end, yesterday_start, yesterday_end,
+            today_current, today_previous
+        ),
+        
+        "yesterday": create_period_response(
+            "Yesterday", yesterday_start, yesterday_end, 
+            day_before_yesterday_start, day_before_yesterday_end,
+            yesterday_current, yesterday_previous
+        ),
+        
+        "last7Days": create_period_response(
+            "Last 7 Days", last7_start, last7_end, last7_prev_start, last7_prev_end,
+            last7_current, last7_previous
+        ),
+        
+        "custom": create_period_response(
+            preset, from_date, to_date, prev_from, prev_to,
+            custom_current, custom_previous
+        ),
     }
 
     return JsonResponse(response_data, safe=False)
-
 
 @csrf_exempt
 
@@ -5341,6 +5388,7 @@ def getBrandListforfilter(request):
     marketplace_id = request.GET.get('marketplace_id')
     search_query = request.GET.get('search_query')
     skip = int(request.GET.get('skip', 1))
+    product_ids=request.GET.get('product_id[]')
     
     # Build the base query
     query = {}

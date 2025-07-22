@@ -246,7 +246,6 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     match['order_status'] = {"$ne": "Cancelled"}
     match['order_total'] = {"$gt": 0}
     
-    # Rest of your existing code...
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id not in [None, "", "all", "custom"]:

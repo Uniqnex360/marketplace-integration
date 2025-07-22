@@ -1,3 +1,4 @@
+from __future__ import annotations
 from mongoengine import Document, StringField, FloatField, IntField, BooleanField, DictField, ListField, EmbeddedDocument, EmbeddedDocumentField,ReferenceField, DateTimeField
 from mongoengine.errors import ValidationError
 from datetime import datetime
