@@ -74,98 +74,243 @@ def sanitize_data(data):
 
 @csrf_exempt
 def get_metrics_by_date_range(request):
-    try:
-        # Parse request
-        json_request = JSONParser().parse(request)
-        preset = json_request.get("preset", "Today")
-        timezone_str = "US/Pacific"
+    json_request = JSONParser().parse(request)
+    preset = json_request.get("preset", "Today")
+    marketplace_id = json_request.get('marketplace_id', None)
+    target_date_str = json_request.get('target_date')
+    brand_id = json_request.get('brand_id', None)
+    product_id = json_request.get('product_id', None)
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
+    manufacturer_name = json_request.get('manufacturer_name', [])
+    fulfillment_channel = json_request.get('fulfillment_channel', None)
+    timezone_str = "US/Pacific"
 
-        # Get parameters with proper defaults
-        marketplace_id = json_request.get('marketplace_id')
-        target_date_str = json_request.get('target_date')
-        brand_id = json_request.get('brand_id')
-        product_id = json_request.get('product_id')
-        start_date = json_request.get("start_date")
-        end_date = json_request.get("end_date")
-        manufacturer_name = json_request.get('manufacturer_name', [])
-        fulfillment_channel = json_request.get('fulfillment_channel')
+    # Initialize date variables
+    local_tz = pytz.timezone(timezone_str)
+    current_time = datetime.now(local_tz)
 
-        # Initialize date variables
-        current_date = datetime.now(pytz.timezone(timezone_str))
-        start_date_obj = None
-        end_date_obj = None
+    # Handle date range based on preset and provided dates
+    if start_date and end_date:  # If custom dates are provided
+        start_date = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=local_tz)
+        end_date = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=local_tz)
+    else:  # Use preset to determine date range
+        if preset == "Today":
+            start_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_date = current_time.replace(hour=23, minute=59, second=59, microsecond=0)
+        elif preset == "Yesterday":
+            yesterday = current_time - timedelta(days=1)
+            start_date = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_date = yesterday.replace(hour=23, minute=59, second=59, microsecond=0)
+        elif preset == "Last 7 Days":
+            end_date = current_time.replace(hour=23, minute=59, second=59, microsecond=0)
+            start_date = end_date - timedelta(days=6)
+        elif preset == "Last 30 Days":
+            end_date = current_time.replace(hour=23, minute=59, second=59, microsecond=0)
+            start_date = end_date - timedelta(days=29)
+        elif preset == "This Month":
+            start_date = current_time.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_date = current_time.replace(hour=23, minute=59, second=59, microsecond=0)
+        elif preset == "Last Month":
+            first_day_current_month = current_time.replace(day=1)
+            start_date = (first_day_current_month - timedelta(days=1)).replace(day=1)
+            end_date = first_day_current_month - timedelta(days=1)
+        else:  # Default to Today if preset is not recognized
+            start_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_date = current_time.replace(hour=23, minute=59, second=59, microsecond=0)
 
-        # Handle date range based on preset and provided dates
-        if start_date and end_date:  # If custom dates are provided
-            start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=pytz.timezone(timezone_str))
-            end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=pytz.timezone(timezone_str))
-        else:  # Use preset to determine date range
-            if preset == "Today":
-                start_date_obj = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
-                end_date_obj = current_date.replace(hour=23, minute=59, second=59, microsecond=0)
-            elif preset == "Yesterday":
-                yesterday = current_date - timedelta(days=1)
-                start_date_obj = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-                end_date_obj = yesterday.replace(hour=23, minute=59, second=59, microsecond=0)
-            elif preset == "Last 7 Days":
-                end_date_obj = current_date.replace(hour=23, minute=59, second=59, microsecond=0)
-                start_date_obj = end_date_obj - timedelta(days=6)
-            elif preset == "Last 30 Days":
-                end_date_obj = current_date.replace(hour=23, minute=59, second=59, microsecond=0)
-                start_date_obj = end_date_obj - timedelta(days=29)
-            elif preset == "This Month":
-                start_date_obj = current_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                end_date_obj = current_date.replace(hour=23, minute=59, second=59, microsecond=0)
-            elif preset == "Last Month":
-                first_day_current_month = current_date.replace(day=1)
-                start_date_obj = (first_day_current_month - timedelta(days=1)).replace(day=1)
-                end_date_obj = first_day_current_month - timedelta(days=1)
-            else:  # Default to Today if preset is not recognized
-                start_date_obj = current_date.replace(hour=0, minute=0, second=0, microsecond=0)
-                end_date_obj = current_date.replace(hour=23, minute=59, second=59, microsecond=0)
+    # If target_date is provided, adjust the dates to match that day
+    if target_date_str:
+        target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
+        target_date_obj = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=local_tz)
 
-        # If target_date is provided, adjust the dates to match that day
-        if target_date_str:
-            target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
-            target_date_obj = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=pytz.timezone(timezone_str))
+        # Calculate time difference between current date and target date
+        time_diff = current_time - target_date_obj
 
-            # Calculate time difference between current date and target date
-            time_diff = current_date - target_date_obj
+        # Adjust the calculated dates by the same time difference
+        start_date = start_date + time_diff
+        end_date = end_date + time_diff
 
-            # Adjust the calculated dates by the same time difference
-            start_date_obj = start_date_obj + time_diff
-            end_date_obj = end_date_obj + time_diff
+    # Define date filters
+    date_filters = {
+        "targeted": {
+            "start": start_date,
+            "end": end_date
+        },
+        "previous": {
+            "start": start_date - timedelta(days=1),
+            "end": end_date - timedelta(days=1)
+        }
+    }
 
-        # Define date filters
-        date_filters = {
-            "targeted": {
-                "start": start_date_obj,
-                "end": end_date_obj
-            },
-            "previous": {
-                "start": start_date_obj - timedelta(days=1),
-                "end": end_date_obj - timedelta(days=1)
-            }
+    # Define the last 8 days filter
+    last_8_days_filter = {}
+    for i in range(8):
+        day = end_date - timedelta(days=8-i)
+        day_key = day.strftime("%B %d, %Y").lower()
+        last_8_days_filter[day_key] = {
+            "start": day.replace(hour=0, minute=0, second=0, microsecond=0),
+            "end": day.replace(hour=23, minute=59, second=59, microsecond=0)
         }
 
-        # Define the last 8 days filter
-        last_8_days_filter = {}
-        for i in range(8):
-            day = end_date_obj - timedelta(days=8-i)
-            day_key = day.strftime("%B %d, %Y").lower()
-            last_8_days_filter[day_key] = {
-                "start": day.replace(hour=0, minute=0, second=0, microsecond=0),
-                "end": day.replace(hour=23, minute=59, second=59, microsecond=0)
-            }
+    # Process metrics (keeping all your existing processing logic)
+    metrics = {}
+    graph_data = {}
 
-        # Process metrics
-        metrics = process_metrics(date_filters, last_8_days_filter, marketplace_id, brand_id,
+    def process_date_range(key, date_range, results):
+        gross_revenue = 0
+        result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id,
+                            product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        if result != []:
+            for ins in result:
+                gross_revenue += ins['order_total']
+        results[key] = {
+            "gross_revenue": round(gross_revenue, 2),
+        }
+
+    results = {}
+    threads = []
+    for key, date_range in last_8_days_filter.items():
+        thread = threading.Thread(target=process_date_range, args=(key, date_range, results))
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    # Ensure the results are in the same order as the keys in last_8_days_filter
+    graph_data = {key: results[key] for key in last_8_days_filter.keys()}
+    metrics["graph_data"] = graph_data
+
+    # Process targeted and previous periods (keeping your existing logic)
+    for key, date_range in date_filters.items():
+        gross_revenue = 0
+        total_cogs = 0
+        refund = 0
+        margin = 0
+        net_profit = 0
+        total_units = 0
+        total_orders = 0
+        tax_price = 0
+        temp_other_price = 0
+        vendor_funding = 0
+
+        raw_result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id,
                                  product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        result = [r for r in raw_result if r.get('order_status') != 'Cancelled' and r.get('order_total') > 0]
 
-        return metrics
+        refund_ins = refundOrder(date_range["start"], date_range["end"], marketplace_id, brand_id,
+                               product_id, manufacturer_name, fulfillment_channel)
+        if refund_ins != []:
+            for ins in refund_ins:
+                refund += len(ins['order_items'])
 
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+        total_orders = len(result)
+        if result != []:
+            for ins in result:
+                tax_price = 0
+                gross_revenue += ins['order_total']
+                total_units += ins['items_order_quantity']
+                for j in ins['order_items']:
+                    pipeline = [
+                        {"$match": {"_id": j}},
+                        {
+                            "$lookup": {
+                                "from": "product",
+                                "localField": "ProductDetails.product_id",
+                                "foreignField": "_id",
+                                "as": "product_ins"
+                            }
+                        },
+                        {
+                            "$unwind": {
+                                "path": "$product_ins",
+                                "preserveNullAndEmptyArrays": True
+                            }
+                        },
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                                "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+                                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                                "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                            }
+                        }
+                    ]
+
+                    item_result = list(OrderItems.objects.aggregate(*pipeline))
+                    if item_result != []:
+                        tax_price += item_result[0]['tax_price']
+                        temp_other_price += item_result[0]['price']
+                        if ins['marketplace_name'] == "Amazon":
+                            total_cogs += item_result[0]['total_cogs']
+                        else:
+                            total_cogs += item_result[0]['w_total_cogs']
+                        vendor_funding += item_result[0]['vendor_funding']
+
+            net_profit = (temp_other_price - total_cogs) + vendor_funding
+            margin = (net_profit / gross_revenue) * 100 if gross_revenue != 0 else 0
+
+        metrics[key] = {
+            "gross_revenue": round(gross_revenue, 2),
+            "total_cogs": round(total_cogs, 2),
+            "refund": round(refund, 2),
+            "margin": round(margin, 2),
+            "net_profit": round(net_profit, 2),
+            "total_orders": round(total_orders, 2),
+            "total_units": round(total_units, 2)
+        }
+
+    # Calculate differences
+    difference = {
+        "gross_revenue": round(metrics["targeted"]["gross_revenue"] - metrics["previous"]["gross_revenue"], 2),
+        "total_cogs": round(metrics["targeted"]["total_cogs"] - metrics["previous"]["total_cogs"], 2),
+        "refund": round(metrics["targeted"]["refund"] - metrics["previous"]["refund"], 2),
+        "margin": round(metrics["targeted"]["margin"] - metrics["previous"]["margin"], 2),
+        "net_profit": round(metrics["targeted"]["net_profit"] - metrics["previous"]["net_profit"], 2),
+        "total_orders": round(metrics["targeted"]["total_orders"] - metrics["previous"]["total_orders"], 2),
+        "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"], 2),
+    }
+
+    # Apply chooseMatrix filters
+    name = "Today Snapshot"
+    item_pipeline = [{"$match": {"name": name}}]
+    item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
+
+    if item_result:
+        item_result = item_result[0]
+        if not item_result['select_all']:
+            for field in ['gross_revenue', 'units_sold', 'refund_quantity',
+                         'refund_amount', 'net_profit', 'profit_margin', 'orders']:
+                if not item_result.get(field, True):
+                    if field == 'gross_revenue':
+                        metrics['targeted'].pop('gross_revenue', None)
+                        metrics['previous'].pop('gross_revenue', None)
+                    elif field == 'units_sold':
+                        metrics['targeted'].pop('total_units', None)
+                        metrics['previous'].pop('total_units', None)
+                    elif field == 'total_cogs':
+                        metrics['targeted'].pop('total_cogs', None)
+                        metrics['previous'].pop('total_cogs', None)
+                    elif field == 'orders':
+                        metrics['targeted'].pop('total_orders', None)
+                        metrics['previous'].pop('total_orders', None)
+                    elif field == 'refund_quantity':
+                        metrics['targeted'].pop('refund', None)
+                        metrics['previous'].pop('refund', None)
+                    elif field == 'profit_margin':
+                        metrics['targeted'].pop('margin', None)
+                        metrics['previous'].pop('margin', None)
+
+    metrics["difference"] = difference
+
+    # Sanitize the metrics before returning
+    metrics = sanitize_data(metrics)
+
+    return metrics
 
 def process_metrics(date_filters: Dict, last_8_days_filter: Dict, marketplace_id: str, brand_id: str,
                    product_id: str, manufacturer_name: List[str], fulfillment_channel: str,
