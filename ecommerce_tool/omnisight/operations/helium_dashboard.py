@@ -161,9 +161,11 @@ def get_metrics_by_date_range(request):
         gross_revenue = 0
         result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id,
                             product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        if result != []:
-            for ins in result:
-                gross_revenue += ins['order_total']
+        if result :
+            for r in result:
+                if r.get('order_status')!='Cancelled' and r.get('order_total')>0:
+
+                    gross_revenue += r['order_total']
         results[key] = {
             "gross_revenue": round(gross_revenue, 2),
         }
