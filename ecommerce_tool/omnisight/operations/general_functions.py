@@ -1056,7 +1056,6 @@ def ordersCountForDashboard(request):
     from queue import Queue
     from threading import Thread
     from bson import ObjectId
-    import pytz
 
     data = dict()
     marketplace_id = request.GET.get('marketplace_id')
@@ -1064,108 +1063,187 @@ def ordersCountForDashboard(request):
     end_date = request.GET.get('end_date')
     preset = request.GET.get("preset", "Today")
     
-    # Always use US/Pacific for internal processing, regardless of what's passed
+    # Handle brand filtering - collect ALL brand IDs from both formats
+    brand_ids = []
+    
+    # Get brand_id[] format (multiple brands)
+    array_brand_ids = request.GET.getlist('brand_id[]')
+    if array_brand_ids:
+        brand_ids.extend(array_brand_ids)
+    
+    # Also check for single brand_id parameter
+    single_brand_id = request.GET.get('brand_id')
+    if single_brand_id and single_brand_id not in brand_ids:
+        brand_ids.append(single_brand_id)
+    
+    # Handle product filtering - both formats
+    product_ids = request.GET.getlist('product_id[]')  # Handle array format
+    product_id = request.GET.get('product_id', None)  # Handle single format
+    
+    # Combine both formats for products
+    if product_ids:
+        product_ids = [ObjectId(pid) for pid in product_ids]
+    elif product_id:
+        product_ids = [ObjectId(product_id)]
+    else:
+        product_ids = None
+        
+    # Always use US/Pacific for date handling
     timezone_str = "US/Pacific"
-    
-    # Specifically look for brand_id[] parameter
-    brand_ids = request.GET.getlist('brand_id[]')
-    
-    # Time range - always use US/Pacific
+
+    # Time range
     if start_date:
         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
         start_date, end_date = get_date_range(preset, timezone_str)
 
-    # Convert to UTC for MongoDB queries
-    start_date_utc, end_date_utc = convertLocalTimeToUTC(start_date, end_date, timezone_str)
+    if timezone_str != 'UTC':
+        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone_str)
 
-    # Basic match conditions using UTC times
+    # Shared match conditions
     match_conditions = {
-        "order_date": {"$gte": start_date_utc, "$lte": end_date_utc},
+        "order_date": {"$gte": start_date, "$lte": end_date},
         "order_status": {"$ne": "Cancelled"},
         "order_total": {"$gt": 0}
     }
     
+    # Match conditions for custom orders
     custom_match_conditions = {
-        "purchase_order_date": {"$gte": start_date_utc, "$lte": end_date_utc},
+        "purchase_order_date": {"$gte": start_date, "$lte": end_date},
         "order_status": {"$ne": "Cancelled"},
         "total_price": {"$gt": 0}
     }
 
-    # Process brand filtering
+    # Process brand filtering - MULTIPLE BRANDS
     if brand_ids:
         try:
-            # Convert string IDs to ObjectId
+            # Convert to ObjectIds
             brand_object_ids = [ObjectId(bid) for bid in brand_ids if bid]
             
             if brand_object_ids:
-                # Get products belonging to these brands
+                # Get products for ALL these brands (products from ANY of the brands)
                 products = list(Product.objects.filter(brand_id__in=brand_object_ids).only('id'))
-                product_ids = [p.id for p in products]
+                product_ids_from_brands = [p.id for p in products]
                 
-                if product_ids:
-                    # Get order items containing these products
-                    order_items = list(OrderItems.objects.filter(__raw__={
-                        "ProductDetails.product_id": {"$in": product_ids}
-                    }).only('id', 'OrderId'))
-                    
-                    order_item_ids = [oi.id for oi in order_items]
-                    direct_order_ids = [oi.OrderId for oi in order_items if oi.OrderId]
-                    
-                    if order_item_ids or direct_order_ids:
-                        # Build filter condition
-                        filter_conditions = []
-                        
-                        if order_item_ids:
-                            filter_conditions.append({"order_items": {"$in": order_item_ids}})
-                        
-                        if direct_order_ids:
-                            filter_conditions.append({"purchase_order_id": {"$in": direct_order_ids}})
-                        
-                        if filter_conditions:
-                            if len(filter_conditions) > 1:
-                                match_conditions["$or"] = filter_conditions
-                            else:
-                                match_conditions.update(filter_conditions[0])
+                if product_ids_from_brands:
+                    # If we already have product filters, combine them
+                    if product_ids:
+                        # Only keep products that are both in the brands AND in the original product filter
+                        product_ids = [pid for pid in product_ids if pid in product_ids_from_brands]
+                        if not product_ids:  # If no overlap, force empty results
+                            match_conditions["_id"] = None
+                            custom_match_conditions["_id"] = None
                     else:
-                        # No order items found - force empty result
-                        match_conditions["_id"] = None
-                    
-                    # For custom orders
-                    custom_match_conditions["ordered_products.product_id"] = {"$in": product_ids}
+                        # Just use the brands' products
+                        product_ids = product_ids_from_brands
                 else:
-                    # No products for these brands - force empty result
+                    # No products for these brands - force empty results
                     match_conditions["_id"] = None
                     custom_match_conditions["_id"] = None
-                
         except Exception as e:
-            print(f"Error processing brand filter: {str(e)}")
-            # Continue with unfiltered query
+            print(f"Error processing brand filters: {str(e)}")
 
-    # Parallel data collection for orders and custom orders
+    # Build aggregation pipeline for product filtering
+    def build_pipeline_with_product_filter(base_match_conditions):
+        pipeline = [{"$match": base_match_conditions}]
+        
+        if product_ids:
+            # Join with order_items and filter by product_id
+            pipeline.extend([
+                {
+                    "$lookup": {
+                        "from": "order_items",
+                        "localField": "order_items",
+                        "foreignField": "_id",
+                        "as": "order_items_details"
+                    }
+                },
+                {"$unwind": "$order_items_details"},
+                {
+                    "$match": {
+                        "order_items_details.ProductDetails.product_id": {"$in": product_ids}
+                    }
+                },
+                # Group back to get unique orders (in case multiple items match)
+                {
+                    "$group": {
+                        "_id": "$_id",
+                        "order_total": {"$first": "$order_total"},
+                        "order_date": {"$first": "$order_date"},
+                        "order_status": {"$first": "$order_status"},
+                        "marketplace_id": {"$first": "$marketplace_id"}
+                    }
+                }
+            ])
+        
+        return pipeline
+
+    # Aggregate Orders and Custom Orders - in parallel
+    order_count, custom_order_count = 0, 0
+    order_value, custom_order_value = 0, 0
+    
     def count_orders(q):
-        pipeline = [
-            {"$match": match_conditions},
-            {"$group": {
+        pipeline = build_pipeline_with_product_filter(match_conditions)
+        pipeline.append({
+            "$group": {
                 "_id": None, 
-                "count": {"$sum": 1}, 
+                "count": {"$sum": 1},
                 "order_value": {"$sum": "$order_total"}
-            }}
-        ]
+            }
+        })
+        
         res = list(Order.objects.aggregate(*pipeline))
-        q.put((res[0].get("count", 0), res[0].get("order_value", 0)) if res else (0, 0))
+        if res:
+            q.put((res[0].get("count", 0), res[0].get("order_value", 0)))
+        else:
+            q.put((0, 0))
 
     def count_custom_orders(q):
-        pipeline = [
-            {"$match": custom_match_conditions},
-            {"$group": {
-                "_id": None, 
-                "count": {"$sum": 1}, 
-                "order_value": {"$sum": "$total_price"}
-            }}
-        ]
+        # Custom orders might have different structure - adjust as needed
+        custom_match = custom_match_conditions.copy()
+        
+        # For custom orders, we might need different field names
+        if product_ids:
+            pipeline = [
+                {"$match": custom_match},
+                # For custom orders we need to filter by product_id in ordered_products
+                {"$unwind": "$ordered_products"},
+                {
+                    "$match": {
+                        "ordered_products.product_id": {"$in": product_ids}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$_id",
+                        "total_price": {"$first": "$total_price"}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": None, 
+                        "count": {"$sum": 1},
+                        "order_value": {"$sum": "$total_price"}
+                    }
+                }
+            ]
+        else:
+            pipeline = [
+                {"$match": custom_match},
+                {
+                    "$group": {
+                        "_id": None, 
+                        "count": {"$sum": 1},
+                        "order_value": {"$sum": "$total_price"}
+                    }
+                }
+            ]
+        
         res = list(custom_order.objects.aggregate(*pipeline))
-        q.put((res[0].get("count", 0), res[0].get("order_value", 0)) if res else (0, 0))
+        if res:
+            q.put((res[0].get("count", 0), res[0].get("order_value", 0)))
+        else:
+            q.put((0, 0))
 
     q1, q2 = Queue(), Queue()
     t1 = Thread(target=count_orders, args=(q1,))
@@ -1173,102 +1251,143 @@ def ordersCountForDashboard(request):
     t1.start(); t2.start()
     t1.join(); t2.join()
     
-    order_count, order_value = q1.get()
-    custom_count, custom_value = q2.get()
-    total_count = order_count + custom_count
-    total_value = round(order_value + custom_value, 2)
+    order_result = q1.get()
+    custom_result = q2.get()
+    
+    order_count, order_value = order_result
+    custom_order_count, custom_order_value = custom_result
+    
+    total_order_count = order_count + custom_order_count
+    total_order_value = round(order_value + custom_order_value, 2)
 
-    # Set total order count (filtered by brand if applicable)
     data['total_order_count'] = {
-        "value": total_count,
+        "value": total_order_count,
         "percentage": "100.0%",
-        "order_value": total_value
+        "order_value": total_order_value
     }
 
-    # Handle marketplace breakdown
+    # If 'all', gather data per marketplace
     if marketplace_id == "all":
         marketplaces = list(Marketplace.objects.only('id', 'name'))
-        marketplace_results = {}
-        
-        def process_marketplace(mp, results):
-            mp_match = match_conditions.copy()
-            mp_match["marketplace_id"] = mp.id
+        results = {}
+        threads = []
+
+        def process_marketplace(mp):
+            mp_match_conditions = match_conditions.copy()
+            mp_match_conditions["marketplace_id"] = mp.id
             
-            pipeline = [
-                {"$match": mp_match},
-                {"$group": {
+            pipeline = build_pipeline_with_product_filter(mp_match_conditions)
+            pipeline.append({
+                "$group": {
                     "_id": None,
                     "count": {"$sum": 1},
                     "order_value": {"$sum": "$order_total"}
-                }}
-            ]
+                }
+            })
+            
             res = list(Order.objects.aggregate(*pipeline))
             count = res[0].get("count", 0) if res else 0
-            value = round(res[0].get("order_value", 0), 2) if res else 0
-            percentage = round((count / total_count) * 100, 2) if total_count else 0
+            order_value = round(res[0].get("order_value", 0), 2) if res else 0
+            percentage = round((count / total_order_count) * 100, 2) if total_order_count else 0
             
             results[mp.name] = {
                 "count": count,
                 "percentage": f"{percentage}%",
-                "order_value": value
+                "order_value": order_value
             }
-        
-        # Process each marketplace in parallel
-        threads = []
+
         for mp in marketplaces:
-            thread = Thread(target=process_marketplace, args=(mp, marketplace_results))
+            thread = Thread(target=process_marketplace, args=(mp,))
             thread.start()
             threads.append(thread)
-            
+
         for thread in threads:
             thread.join()
-            
-        # Add marketplace results to main data
-        data.update(marketplace_results)
-        
+
+        data.update(results)
+
     elif marketplace_id != "all" and marketplace_id != "custom":
-        # Single marketplace
+        # Single marketplace query
         mp_id = ObjectId(marketplace_id)
-        mp_match = match_conditions.copy()
-        mp_match["marketplace_id"] = mp_id
+        mp_match_conditions = match_conditions.copy()
+        mp_match_conditions["marketplace_id"] = mp_id
         
-        pipeline = [
-            {"$match": mp_match},
-            {"$group": {
+        pipeline = build_pipeline_with_product_filter(mp_match_conditions)
+        pipeline.append({
+            "$group": {
                 "_id": None,
                 "count": {"$sum": 1},
                 "order_value": {"$sum": "$order_total"}
-            }}
-        ]
+            }
+        })
+        
         res = list(Order.objects.aggregate(*pipeline))
         count = res[0].get("count", 0) if res else 0
-        value = round(res[0].get("order_value", 0), 2) if res else 0
-        
+        order_value = round(res[0].get("order_value", 0), 2) if res else 0
         name = DatabaseModel.get_document(Marketplace.objects, {"id": marketplace_id}, ['name']).name
+
         data[name] = {
             "value": count,
             "percentage": "100.0%",
-            "order_value": value
+            "order_value": order_value
         }
-        
+        data['total_order_count'] = {
+            "value": count,
+            "percentage": "100.0%",
+            "order_value": order_value
+        }
+
     elif marketplace_id == "custom":
-        # Custom orders only
-        pipeline = [
-            {"$match": custom_match_conditions},
-            {"$group": {
-                "_id": None,
-                "count": {"$sum": 1},
-                "order_value": {"$sum": "$total_price"}
-            }}
-        ]
+        # Custom orders handling
+        custom_match = custom_match_conditions.copy()
+        
+        if product_ids:
+            pipeline = [
+                {"$match": custom_match},
+                {"$unwind": "$ordered_products"},
+                {
+                    "$match": {
+                        "ordered_products.product_id": {"$in": product_ids}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": "$_id",
+                        "total_price": {"$first": "$total_price"}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": None,
+                        "count": {"$sum": 1},
+                        "order_value": {"$sum": "$total_price"}
+                    }
+                }
+            ]
+        else:
+            pipeline = [
+                {"$match": custom_match},
+                {
+                    "$group": {
+                        "_id": None,
+                        "count": {"$sum": 1},
+                        "order_value": {"$sum": "$total_price"}
+                    }
+                }
+            ]
+        
         res = list(custom_order.objects.aggregate(*pipeline))
         count = res[0].get("count", 0) if res else 0
-        value = round(res[0].get("order_value", 0), 2) if res else 0
-        
+        order_value = round(res[0].get("order_value", 0), 2) if res else 0
         data['custom'] = {
             "value": count,
             "percentage": "100.0%",
-            "order_value": value
+            "order_value": order_value
+        }
+        data['total_order_count'] = {
+            "value": count,
+            "percentage": "100.0%",
+            "order_value": order_value
         }
 
     return sanitize_data(data)
