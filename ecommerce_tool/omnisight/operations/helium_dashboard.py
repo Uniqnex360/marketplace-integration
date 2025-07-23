@@ -2046,11 +2046,13 @@ def getPeriodWiseDataCustom(request):
 
     # Create naive datetime objects
         naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+
     
     # Localize to the specified timezone
         localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date.replace(hour=23, minute=59, second=59))  # <-- move time set here
+        localized_to_date = local_tz.localize(naive_to_date)
+  
     
     # Convert to UTC
         from_date = localized_from_date.astimezone(pytz.UTC)
