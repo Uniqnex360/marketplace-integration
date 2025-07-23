@@ -2049,12 +2049,15 @@ def getPeriodWiseDataCustom(request):
     from_date_local = None
     to_date_local = None
 
-    # Define the fixed timezone for preset ranges like 'Today', 'Yesterday'.
-    preset_timezone_str = "US/Pacific" 
+    # --- FIX FOR UnboundLocalError ---
+    # Define timezones BEFORE the conditional logic.
+    preset_timezone_str = "US/Pacific"
+    # Initialize user_timezone_str with a safe default. It will be overwritten in the custom path.
+    user_timezone_str = preset_timezone_str 
 
     if start_date_str and end_date_str:
         # This block handles the "custom" date range scenario.
-        # Use the timezone from the request. Fallback to UTC if not provided.
+        # Now, we overwrite the default with the user-provided timezone.
         user_timezone_str = json_request.get('timezone', 'UTC')
         try:
             user_tz = pytz.timezone(user_timezone_str)
@@ -2067,11 +2070,10 @@ def getPeriodWiseDataCustom(request):
         end_dt_naive = datetime.strptime(end_date_str, '%Y-%m-%d')
 
         # Make the naive datetimes timezone-aware using the user's provided timezone.
-        # 'from_date_local' and 'to_date_local' will be used for the response to the frontend.
         from_date_local = user_tz.localize(start_dt_naive.replace(hour=0, minute=0, second=0))
         to_date_local = user_tz.localize(end_dt_naive.replace(hour=23, minute=59, second=59))
         
-        # Convert the localized start and end times to UTC for all backend calculations (database queries).
+        # Convert to UTC for all backend calculations (database queries).
         from_date_utc = from_date_local.astimezone(pytz.utc)
         to_date_utc = to_date_local.astimezone(pytz.utc)
         
@@ -2081,13 +2083,12 @@ def getPeriodWiseDataCustom(request):
         prev_from_utc = prev_to_utc - duration
 
     else:
-        # This block handles preset ranges like "Today", "Last 7 days", etc. (Original Logic)
+        # This block handles preset ranges.
         from_date_utc, to_date_utc = get_date_range(preset, preset_timezone_str)
         duration = to_date_utc - from_date_utc
-        # Using the original logic for the previous period for presets.
         prev_from_utc, prev_to_utc = from_date_utc - duration, to_date_utc - duration
 
-    # --- Prepare date ranges for preset cards (Today, Yesterday, Last 7 Days) ---
+    # --- Prepare date ranges for preset cards ---
     today_start, today_end = get_date_range("Today", preset_timezone_str)
     yesterday_start, yesterday_end = get_date_range("Yesterday", preset_timezone_str)
     last7_start, last7_end = get_date_range("Last 7 days", preset_timezone_str)
@@ -2096,8 +2097,8 @@ def getPeriodWiseDataCustom(request):
     day_before_yesterday_start = yesterday_start - timedelta(days=1)
     day_before_yesterday_end = yesterday_end - timedelta(days=1)
     last7_duration = last7_end - last7_start
-    last7_prev_end = last7_start - timedelta(seconds=1)  # Renamed from last7_prev_to
-    last7_prev_start = last7_prev_end - last7_duration #
+    last7_prev_end = last7_start - timedelta(seconds=1)
+    last7_prev_start = last7_prev_end - last7_duration
     
     # Helper to format metrics for the final JSON response.
     def format_metrics_response(current, previous):
@@ -2105,41 +2106,26 @@ def getPeriodWiseDataCustom(request):
             current_value = sanitize_data(current.get(metric, 0))
             previous_value = sanitize_data(previous.get(metric, 0))
             delta = round(current_value - previous_value, 2)
-            return {
-                "current": current_value,
-                "previous": previous_value,
-                "delta": delta
-            }
+            return { "current": current_value, "previous": previous_value, "delta": delta }
         
         summary_metrics = [
             "grossRevenue", "netProfit", "expenses", "unitsSold", "refunds", "skuCount",
             "sessions", "pageViews", "unitSessionPercentage", "margin", "roi", "orders"
         ]
-        
         summary = {metric: format_metric(metric) for metric in summary_metrics}
         
         def net_profit_calc(metrics):
             return {
-                "gross": sanitize_data(metrics.get("grossRevenue", 0)),
-                "totalCosts": sanitize_data(metrics.get("expenses", 0)),
-                "productRefunds": sanitize_data(metrics.get("refunds", 0)),
-                "totalTax": sanitize_data(metrics.get("tax_price", 0)),
-                "totalTaxWithheld": 0,
-                "ppcProductCost": 0,
-                "ppcBrandsCost": 0,
-                "ppcDisplayCost": 0,
-                "ppcStCost": 0,
-                "cogs": sanitize_data(metrics.get("total_cogs", 0)),
-                "product_cost": sanitize_data(metrics.get("product_cost", 0)),
+                "gross": sanitize_data(metrics.get("grossRevenue", 0)), "totalCosts": sanitize_data(metrics.get("expenses", 0)),
+                "productRefunds": sanitize_data(metrics.get("refunds", 0)), "totalTax": sanitize_data(metrics.get("tax_price", 0)),
+                "totalTaxWithheld": 0, "ppcProductCost": 0, "ppcBrandsCost": 0, "ppcDisplayCost": 0, "ppcStCost": 0,
+                "cogs": sanitize_data(metrics.get("total_cogs", 0)), "product_cost": sanitize_data(metrics.get("product_cost", 0)),
                 "shipping_cost": sanitize_data(metrics.get("shipping_cost", 0)),
             }
         
         return {
             "summary": summary,
-            "netProfitCalculation": {
-                "current": net_profit_calc(current),
-                "previous": net_profit_calc(previous),
-            }
+            "netProfitCalculation": { "current": net_profit_calc(current), "previous": net_profit_calc(previous) }
         }
 
     # Helper to assemble a full period block for the response.
@@ -2148,72 +2134,22 @@ def getPeriodWiseDataCustom(request):
             "current": {"from": to_utc_format(cur_from), "to": to_utc_format(cur_to)},
             "previous": {"from": to_utc_format(prev_from), "to": to_utc_format(prev_to)}
         }
-        
         metrics_response = format_metrics_response(current_metrics, previous_metrics)
-        
-        return {
-            "dateRanges": date_ranges,
-            **metrics_response  # Unpacks summary and netProfitCalculation
-        }
+        return { "dateRanges": date_ranges, **metrics_response }
 
     # Run all metric calculations in parallel for performance.
     with ThreadPoolExecutor(max_workers=8) as executor:
-        # Submit all 8 calculation tasks
-        future_today_current = executor.submit(
-            calculate_metricss, 
-            today_start, today_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            preset_timezone_str, False, True
-        )
+        # Submit preset calculation tasks
+        future_today_current = executor.submit(calculate_metricss, today_start, today_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, preset_timezone_str, False, True)
+        future_today_previous = executor.submit(calculate_metricss, yesterday_start, yesterday_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, preset_timezone_str, False, True)
+        future_yesterday_current = executor.submit(calculate_metricss, yesterday_start, yesterday_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, preset_timezone_str, False, True)
+        future_yesterday_previous = executor.submit(calculate_metricss, day_before_yesterday_start, day_before_yesterday_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, preset_timezone_str, False, True)
+        future_last7_current = executor.submit(calculate_metricss, last7_start, last7_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, preset_timezone_str, False, True)
+        future_last7_previous = executor.submit(calculate_metricss, last7_prev_start, last7_prev_end, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, preset_timezone_str, False, True)
         
-        future_today_previous = executor.submit(
-            calculate_metricss, 
-            yesterday_start, yesterday_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            preset_timezone_str, False, True
-        )
-        
-        future_yesterday_current = executor.submit(
-            calculate_metricss, 
-            yesterday_start, yesterday_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            preset_timezone_str, False, True
-        )
-        
-        future_yesterday_previous = executor.submit(
-            calculate_metricss, 
-            day_before_yesterday_start, day_before_yesterday_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            preset_timezone_str, False, True
-        )
-        
-        future_last7_current = executor.submit(
-            calculate_metricss, 
-            last7_start, last7_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            preset_timezone_str, False, True
-        )
-        
-        future_last7_previous = executor.submit(
-            calculate_metricss, 
-            last7_prev_start, last7_prev_end, 
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            preset_timezone_str, False, True
-        )
-        
-        future_custom_current = executor.submit(
-            calculate_metricss, 
-            from_date_utc, to_date_utc, # Use UTC times for DB query
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            user_timezone_str, False, True
-        )
-        
-        future_custom_previous = executor.submit(
-            calculate_metricss, 
-            prev_from_utc, prev_to_utc, # Use UTC times for DB query
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,
-            user_timezone_str, False, True
-        )
+        # Submit custom calculation tasks (uses dates determined by the if/else block)
+        future_custom_current = executor.submit(calculate_metricss, from_date_utc, to_date_utc, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, user_timezone_str, False, True)
+        future_custom_previous = executor.submit(calculate_metricss, prev_from_utc, prev_to_utc, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, user_timezone_str, False, True)
         
         # Retrieve results from all completed tasks
         today_current = future_today_current.result()
@@ -2227,31 +2163,10 @@ def getPeriodWiseDataCustom(request):
 
     # Assemble the final JSON response with all the data.
     response_data = {
-        "today": create_period_response(
-            "Today", today_start, today_end, yesterday_start, yesterday_end,
-            today_current, today_previous
-        ),
-        
-        "yesterday": create_period_response(
-            "Yesterday", yesterday_start, yesterday_end, 
-            day_before_yesterday_start, day_before_yesterday_end,
-            yesterday_current, yesterday_previous
-        ),
-        
-        "last7Days": create_period_response(
-            "Last 7 Days", last7_start, last7_end, last7_prev_start, last7_prev_end,
-            last7_current, last7_previous
-        ),
-        
-        "custom": create_period_response(
-            "Custom",
-            # FINAL FIX: For display purposes, use the original LOCAL datetimes.
-            # to_utc_format() will correctly convert them to a UTC string that
-            # reflects the correct date, regardless of timezone.
-            from_date_local, to_date_local, 
-            prev_from_utc, prev_to_utc, # Previous period can remain UTC as it's not a direct user input
-            custom_current, custom_previous
-        ),
+        "today": create_period_response("Today", today_start, today_end, yesterday_start, yesterday_end, today_current, today_previous),
+        "yesterday": create_period_response("Yesterday", yesterday_start, yesterday_end, day_before_yesterday_start, day_before_yesterday_end, yesterday_current, yesterday_previous),
+        "last7Days": create_period_response("Last 7 Days", last7_start, last7_end, last7_prev_start, last7_prev_end, last7_current, last7_previous),
+        "custom": create_period_response("Custom", from_date_local if from_date_local else from_date_utc, to_date_local if to_date_local else to_date_utc, prev_from_utc, prev_to_utc, custom_current, custom_previous),
     }
 
     return JsonResponse(response_data, safe=False)
