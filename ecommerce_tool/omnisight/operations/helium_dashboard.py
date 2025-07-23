@@ -8,7 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime,timedelta
 from bson.son import SON
 from bson import ObjectId
-
+import numpy as np
 import time
 from collections import defaultdict
 from bson import ObjectId
@@ -1487,9 +1487,8 @@ def get_parent_products(match, page, page_size, start_date, end_date,
 
 
 def get_individual_products(match, page, page_size, start_date, end_date, 
-                                       today_start_date, today_end_date, sort_by, sort_by_value):
+                            today_start_date, today_end_date, sort_by, sort_by_value):
     
-    # Database fields that can be sorted in MongoDB
     db_sortable_fields = {
         'price': 'price',
         'stock': 'quantity',
@@ -1499,20 +1498,29 @@ def get_individual_products(match, page, page_size, start_date, end_date,
         'parent_sku': 'sku'
     }
     
-    # Calculated fields that need Python sorting
     calculated_fields = {
         'salesForToday', 'unitsSoldForToday', 'grossRevenue', 'netProfit', 
         'margin', 'unitsSoldForPeriod', 'grossRevenueforPeriod', 
         'netProfitforPeriod', 'marginforPeriod'
     }
     
-    # OPTIMIZATION 1: Single aggregation pipeline with all operations
+    # Main pipeline starts here
     pipeline = []
     
     if match:
         pipeline.append({"$match": match})
     
-    # OPTIMIZATION 2: Combined lookup and projection in single stage
+    # OPTIMIZATION 1: Early $project to reduce data size
+    pipeline.append({
+        "$project": {
+            "product_id": 1, "sku": 1, "price": 1, "quantity": 1, "marketplace_id": 1,
+            "total_cogs": 1, "w_total_cogs": 1, "referral_fee": 1, "a_shipping_cost": 1,
+            "walmart_fee": 1, "w_shiping_cost": 1, "fullfillment_by_channel": 1,
+            "image_url": 1, "product_title": 1, "listing_quality_score": 1,
+            "category": 1, "vendor_funding": 1
+        }
+    })
+    
     pipeline.extend([
         {
             "$lookup": {
@@ -1543,65 +1551,61 @@ def get_individual_products(match, page, page_size, start_date, end_date,
         }
     ])
 
-    # Handle sorting and pagination
+    # Handle sorting
     if sort_by and sort_by in db_sortable_fields:
-        # OPTIMIZATION 3: Database-level sorting and pagination
         pipeline.append({"$sort": {db_sortable_fields[sort_by]: int(sort_by_value)}})
-        
-        # Get count and paginated results
-        count_pipeline = pipeline + [{"$count": "total"}]
-        
-        pipeline.extend([
-            {"$skip": (page - 1) * page_size},
-            {"$limit": page_size}
-        ])
-        
-        # Execute count query
-        total_result = list(Product.objects.aggregate(*count_pipeline))
-        total_products = total_result[0]["total"] if total_result else 0
-        
-    else:
-        # For calculated fields or no sorting, get all products
-        count_pipeline = pipeline + [{"$count": "total"}]
-        total_result = list(Product.objects.aggregate(*count_pipeline))
-        total_products = total_result[0]["total"] if total_result else 0
-
-    # OPTIMIZATION 4: Unified projection stage
-    pipeline.append({
-        "$project": {
-            "_id": 0,
-            "id": {"$toString": "$_id"},
-            "product_id": {"$ifNull": ["$product_id", "N/A"]},
-            "parent_sku": {"$ifNull": ["$sku", "N/A"]},
-            "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
-            "title": {"$ifNull": ["$product_title", "N/A"]},
-            "marketplace": {"$ifNull": ["$marketplace_ins.name", "N/A"]},
-            "fulfillmentChannel": {
-                "$cond": {
-                    "if": {"$eq": ["$fullfillment_by_channel", True]},
-                    "then": "FBA",
-                    "else": "FBM"
+    
+    # OPTIMIZATION 2: Unified $facet for count + pagination
+    facet_stage = {
+        "$facet": {
+            "metadata": [{"$count": "total"}],
+            "data": [
+                {"$skip": (page - 1) * page_size},
+                {"$limit": page_size},
+                {
+                    "$project": {
+                        "_id": 0,
+                        "id": {"$toString": "$_id"},
+                        "product_id": {"$ifNull": ["$product_id", "N/A"]},
+                        "parent_sku": {"$ifNull": ["$sku", "N/A"]},
+                        "imageUrl": {"$ifNull": ["$image_url", "N/A"]},
+                        "title": {"$ifNull": ["$product_title", "N/A"]},
+                        "marketplace": {"$ifNull": ["$marketplace_ins.name", "N/A"]},
+                        "fulfillmentChannel": {
+                            "$cond": {
+                                "if": {"$eq": ["$fullfillment_by_channel", True]},
+                                "then": "FBA",
+                                "else": "FBM"
+                            }
+                        },
+                        "price": {"$round": [{"$ifNull": ["$price", 0]}, 2]},
+                        "stock": {"$ifNull": ["$quantity", 0]},
+                        "listingScore": {"$ifNull": ["$listing_quality_score", 0]},
+                        "cogs": {"$round": ["$calculated_cogs", 2]},
+                        "category": {"$ifNull": ["$category", "N/A"]},
+                        "vendor_funding": {"$ifNull": ["$vendor_funding", 0]},
+                        "totalchannelFees": {"$round": ["$calculated_fees", 2]}
+                    }
                 }
-            },
-            "price": {"$round": [{"$ifNull": ["$price", 0]}, 2]},
-            "stock": {"$ifNull": ["$quantity", 0]},
-            "listingScore": {"$ifNull": ["$listing_quality_score", 0]},
-            "cogs": {"$round": ["$calculated_cogs", 2]},
-            "category": {"$ifNull": ["$category", "N/A"]},
-            "vendor_funding": {"$ifNull": ["$vendor_funding", 0]},
-            "totalchannelFees": {"$round": ["$calculated_fees", 2]}
+            ]
         }
-    })
+    }
+    pipeline.append(facet_stage)
 
     # Execute pipeline
-    products = list(Product.objects.aggregate(*pipeline))
+    result = list(Product.objects.aggregate(*pipeline))
+    total_products = result[0]["metadata"][0]["total"] if result[0]["metadata"] else 0
+    products = result[0]["data"]
 
-    # OPTIMIZATION 5: Batch fetch sales data for all products
+    # OPTIMIZATION 3: Batch fetch sales data (NO CHANGES HERE)
     product_ids = [p["id"] for p in products]
     sales_data = batch_get_sales_data_optimized(product_ids, start_date, end_date, today_start_date, today_end_date)
 
-    # OPTIMIZATION 6: Vectorized processing of sales data
-    for product in products:
+    # OPTIMIZATION 4: Vectorized processing of sales data
+    cogs = np.array([p["cogs"] for p in products])
+    vendor_funding = np.array([p["vendor_funding"] for p in products])
+
+    for i, product in enumerate(products):
         product_id = product["id"]
         product_sales = sales_data.get(product_id, {
             "today": {"revenue": 0, "units": 0},
@@ -1609,28 +1613,23 @@ def get_individual_products(match, page, page_size, start_date, end_date,
             "compare": {"revenue": 0, "units": 0}
         })
 
-        # Calculate all metrics at once
         today_revenue = product_sales["today"]["revenue"]
         period_revenue = product_sales["period"]["revenue"]
         period_units = product_sales["period"]["units"]
         compare_revenue = product_sales["compare"]["revenue"]
         compare_units = product_sales["compare"]["units"]
-        
-        cogs = product["cogs"]
-        vendor_funding = product["vendor_funding"]
-        
-        # Net profit calculations
-        net_profit = (period_revenue - (cogs * period_units)) + (vendor_funding * period_units)
-        compare_profit = (compare_revenue - (cogs * compare_units)) + (vendor_funding * compare_units)
-        
-        # Bulk update product dict
+
+        # Calculate net profit and margin
+        net_profit = (period_revenue - (cogs[i] * period_units)) + (vendor_funding[i] * period_units)
+        compare_profit = (compare_revenue - (cogs[i] * compare_units)) + (vendor_funding[i] * compare_units)
+
         product.update({
             "salesForToday": round(today_revenue, 2),
-            "unitsSoldForToday": period_units,
+            "unitsSoldForToday": round(period_units, 2),
             "grossRevenue": round(period_revenue, 2),
             "netProfit": round(net_profit, 2),
             "margin": round((net_profit / period_revenue) * 100 if period_revenue > 0 else 0, 2),
-            "unitsSoldForPeriod": compare_units - period_units,
+            "unitsSoldForPeriod": round(compare_units - period_units, 2),
             "grossRevenueforPeriod": round(compare_revenue - period_revenue, 2),
             "netProfitforPeriod": round(compare_profit - net_profit, 2),
             "marginforPeriod": round(((compare_profit / compare_revenue) * 100 if compare_revenue > 0 else 0) - 
@@ -1641,15 +1640,10 @@ def get_individual_products(match, page, page_size, start_date, end_date,
             "refundsAmountforPeriod": 0
         })
 
-    # Sort by calculated fields if needed
+    # Sort by calculated fields if needed (Python sort as last resort)
     if sort_by and sort_by in calculated_fields:
         reverse_sort = sort_by_value == -1
         products.sort(key=lambda x: x.get(sort_by, 0), reverse=reverse_sort)
-        
-        # Apply pagination after sorting for calculated fields
-        start_index = (page - 1) * page_size
-        end_index = start_index + page_size
-        products = products[start_index:end_index]
 
     response_data = {
         "total_products": total_products,
