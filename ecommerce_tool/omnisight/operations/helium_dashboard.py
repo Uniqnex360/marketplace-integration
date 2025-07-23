@@ -76,9 +76,56 @@ def get_metrics_by_date_range(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str="US/Pacific"
+    preset = json_request.get("preset", "Today")
+    now=datetime.now(pytz.timezone(timezone_str))
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
+    today=now.date()
+    weekday=today.weekday()
     
+    if preset=='Today':
+        target_date=today
+    elif preset=='Yesterday':
+        target_date=today-timedelta(days=1)
+    elif preset=='Last 7 days':
+        target_date=today-timedelta(days=7)
+    elif preset=='Last 14 days':
+        target_date=today-timedelta(days=14)
+    elif preset=="Last 30 days":
+        target_date=today-timedelta(days=30)
+    elif preset=="Last 60 days":
+        target_date=today-timedelta(days=60)
+    elif preset=="Last 60 days":
+        target_date=today-timedelta(days=90)
+    elif preset=="This week":
+        target_date=today-timedelta(days=weekday)
+    elif preset=="Last Week":
+        target_date=today-timedelta(days=weekday+7)
+    elif preset=="This Month":
+        target_date=today.replace(day=1)
+    elif preset=="Last Month":
+        first_day_this_month=today.replace(day=1)
+        target_date=(first_day_this_month-timedelta(days=1)).replace(day=1)
+    elif preset=='This Quarter':
+        month=today.month
+        quarter_start_month=3*((month-1)//3)+1
+        target_date=today.replace(month=quarter_start_month,day=1)
+    elif preset=='Last Quarter':
+        month=today.month
+        quarter_start_month=3*((month-1)//3)+1
+        first_day_quarter=today.replace(month=quarter_start_month,day=1)
+        last_day_last_quarter=first_day_quarter-timedelta(days=1)
+        target_date=last_day_last_quarter.replace(days=1)
+    elif preset=='This Year':
+        target_date=today.replace(month=1,day=1)
+    elif preset=='Last Year':
+        target_date=today.replace(year=today.year-1,month=1,day=1)
+    elif start_date and end_date:
+        target_date=datetime.strptime(start_date, "%d/%m/%y").date()
+    else :
+        raise ValueError("Invalid preset or date range provided")
     # Parse target_date_str to extract the date
-    target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
+    # target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
 
     # Get current time and combine it with the target_date
     local_tz = pytz.timezone(timezone_str)
@@ -102,7 +149,13 @@ def get_metrics_by_date_range(request):
             "end": datetime(previous_date.year, previous_date.month, previous_date.day, 23, 59, 59)
         }
     }
-
+    if start_date and end_date:
+        start_date_dt=datetime.strptime(start_date, "%d/%m/%Y")
+        end_date_dt=datetime.strftime(end_date,"%d/%m/%Y")
+        date_filters['targeted']['start']=start_date_dt
+        date_filters['targeted']['end']=end_date_dt.replace(hour=23,minute=59,second=59)
+        date_filters['previous']['start']=start_date_dt-timedelta(days=1)
+        date_filters['previous']['end']=end_date_dt-timedelta(days=1)
     # Define the last 8 days filter as a dictionary with each day's range
     last_8_days_filter = {}
     for i in range(1, 9):
