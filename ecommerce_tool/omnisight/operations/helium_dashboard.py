@@ -2046,7 +2046,7 @@ def getPeriodWiseDataCustom(request):
 
     # Create naive datetime objects
         naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
-        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+        naive_to_date = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=2)
 
     
     # Localize to the specified timezone
