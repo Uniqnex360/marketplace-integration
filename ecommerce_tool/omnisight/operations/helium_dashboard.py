@@ -95,9 +95,9 @@ def get_metrics_by_date_range(request):
         target_date=today-timedelta(days=30)
     elif preset=="Last 60 days":
         target_date=today-timedelta(days=60)
-    elif preset=="Last 60 days":
+    elif preset=="Last 90 days":
         target_date=today-timedelta(days=90)
-    elif preset=="This week":
+    elif preset=="This Week":
         target_date=today-timedelta(days=weekday)
     elif preset=="Last Week":
         target_date=today-timedelta(days=weekday+7)
