@@ -2047,29 +2047,27 @@ def getPeriodWiseDataCustom(request):
     end_date = json_request.get("end_date")
 
     if start_date:
-        # Convert string dates to datetime in the specified timezone
+    # Convert string dates to datetime in the specified timezone
         local_tz = pytz.timezone(timezone_str)
-        
-        # Create naive datetime objects
+
+    # Create naive datetime objects
         naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
         naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Localize to the specified timezone
+    
+    # Localize to the specified timezone
         localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date)
-        
-        # Convert to UTC
+        localized_to_date = local_tz.localize(naive_to_date.replace(hour=23, minute=59, second=59))  # <-- move time set here
+    
+    # Convert to UTC
         from_date = localized_from_date.astimezone(pytz.UTC)
         to_date = localized_to_date.astimezone(pytz.UTC)
-        
-        # For end date, include the entire day (up to 23:59:59)
-        to_date = to_date.replace(hour=23, minute=59, second=59)
     else:
         from_date, to_date = get_date_range(preset, timezone_str)
 
-    # Compute previous period
+# Compute previous period
     duration = to_date - from_date
     prev_from, prev_to = from_date - duration, to_date - duration
+
 
     # Get base periods
     today_start, today_end = get_date_range("Today", timezone_str)
