@@ -2041,20 +2041,17 @@ def getPeriodWiseDataCustom(request):
     end_date = json_request.get("end_date")
 
     if start_date:
-    # Convert string dates to datetime in the specified timezone
         local_tz = pytz.timezone(timezone_str)
-
-    # Create naive datetime objects
         naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
         naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
-    
-    # Localize to the specified timezone
         localized_from_date = local_tz.localize(naive_from_date)
-        localized_to_date = local_tz.localize(naive_to_date.replace(hour=23, minute=59, second=59))  # <-- move time set here
-    
-    # Convert to UTC
+    # Set end_date to 23:59:59 in the local timezone, but ensure it doesn't shift to the next day in UTC
+        localized_to_date = local_tz.localize(naive_to_date.replace(hour=23, minute=59, second=59))
         from_date = localized_from_date.astimezone(pytz.UTC)
         to_date = localized_to_date.astimezone(pytz.UTC)
+    # If to_date in UTC shifts to the next day, adjust it back to the same calendar day
+        if to_date.date() > naive_to_date.date():
+            to_date = to_date.replace(hour=23, minute=59, second=59) - timedelta(days=1)
     else:
         from_date, to_date = get_date_range(preset, timezone_str)
 
