@@ -2041,17 +2041,20 @@ def getPeriodWiseDataCustom(request):
     end_date = json_request.get("end_date")
 
     if start_date:
+    # Convert string dates to datetime in the specified timezone
         local_tz = pytz.timezone(timezone_str)
+
+    # Create naive datetime objects
         naive_from_date = datetime.strptime(start_date, '%Y-%m-%d')
         naive_to_date = datetime.strptime(end_date, '%Y-%m-%d')
+    
+    # Localize to the specified timezone
         localized_from_date = local_tz.localize(naive_from_date)
-    # Set end_date to 23:59:59 in the local timezone, but ensure it doesn't shift to the next day in UTC
-        localized_to_date = local_tz.localize(naive_to_date.replace(hour=23, minute=59, second=59))
+        localized_to_date = local_tz.localize(naive_to_date.replace(hour=23, minute=59, second=59))  # <-- move time set here
+    
+    # Convert to UTC
         from_date = localized_from_date.astimezone(pytz.UTC)
         to_date = localized_to_date.astimezone(pytz.UTC)
-    # If to_date in UTC shifts to the next day, adjust it back to the same calendar day
-        if to_date.date() > naive_to_date.date():
-            to_date = to_date.replace(hour=23, minute=59, second=59) - timedelta(days=1)
     else:
         from_date, to_date = get_date_range(preset, timezone_str)
 
@@ -2113,12 +2116,15 @@ def getPeriodWiseDataCustom(request):
                 "previous": net_profit_calc(previous),
             }
         }
+    def to_local_date_string(dt, tz_str):
+        local_tz = pytz.timezone(tz_str)
+        return dt.astimezone(local_tz).strftime("%Y-%m-%d")
 
     # Helper to create period response
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to, current_metrics, previous_metrics):
         date_ranges = {
-            "current": {"from": to_utc_format(cur_from), "to": to_utc_format(cur_to)},
-            "previous": {"from": to_utc_format(prev_from), "to": to_utc_format(prev_to)}
+            "current": {"from": to_utc_format(cur_from), "to": to_utc_format(cur_to),"from_local":to_local_date_string(cur_from,timezone_str),'to_local':to_local_date_string(cur_to,timezone_str)},
+            "previous": {"from": to_utc_format(prev_from), "to": to_utc_format(prev_to,),"from_local":to_local_date_string(prev_from,timezone_str),'to_local':to_local_date_string(prev_to,timezone_str)}
         }
         
         metrics_response = format_metrics_response(current_metrics, previous_metrics)
