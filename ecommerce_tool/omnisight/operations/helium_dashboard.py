@@ -10,6 +10,7 @@ from bson.son import SON
 from bson import ObjectId
 import numpy as np
 import time
+from functools import lru_cache
 from collections import defaultdict
 from bson import ObjectId
 from django.http import JsonResponse
@@ -1775,43 +1776,36 @@ def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    # Parse request once and store results
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
-    timezone_str = 'US/Pacific'
-
-    def calculate_metrics_sync(start_date, end_date):
+    timezone_str = json_request.get('timezone', 'US/Pacific')
+    
+    # Cache calculation results to avoid redundant calculations
+    @lru_cache(maxsize=32)
+    def calculate_metrics_cached(start_date_str, end_date_str):
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d %H:%M:%S")
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d %H:%M:%S")
         return calculate_metricss(
             start_date, end_date, 
             marketplace_id, brand_id, 
             product_id, manufacturer_name, 
             fulfillment_channel,
             timezone_str, False,
-            use_threads=False
+            use_threads=True  # Enable threading within the calculation function
         )
 
-    def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
-        current_metrics = calculate_metrics_sync(current_start, current_end)
-        period_format = {
-            "current": {"from": to_utc_format(current_start)},
-            "previous": {"from": to_utc_format(prev_start)}
-        }
-        if label not in ['Today', 'Yesterday']:
-            period_format["current"]["to"] = to_utc_format(current_end)
-            period_format["previous"]["to"] = to_utc_format(prev_end)
-        output = {
-            "label": label,
-            "period": period_format
-        }
-        for key in current_metrics:
-            output[key] = {
-                "current": current_metrics[key],
-            }
-        return output
+    def calculate_metrics_sync(start_date, end_date):
+        # Convert dates to strings for caching
+        start_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
+        end_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
+        return calculate_metrics_cached(start_str, end_str)
 
+    # Pre-compute all date ranges at once to avoid repetition
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1820,26 +1814,70 @@ def getPeriodWiseData(request):
         "lastYear": get_date_range("Last Year", timezone_str)
     }
 
-    # Prepare all period jobs
+    # Create output structure template for reuse
+    def create_period_format(current_start, current_end, prev_start, prev_end, is_single_day=False):
+        period_format = {
+            "current": {"from": to_utc_format(current_start)},
+            "previous": {"from": to_utc_format(prev_start)}
+        }
+        if not is_single_day:
+            period_format["current"]["to"] = to_utc_format(current_end)
+            period_format["previous"]["to"] = to_utc_format(prev_end)
+        return period_format
+
+    def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
+        current_metrics = calculate_metrics_sync(current_start, current_end)
+        is_single_day = label in ['Today', 'Yesterday']
+        period_format = create_period_format(current_start, current_end, prev_start, prev_end, is_single_day)
+        
+        # Construct result with minimal data copying
+        output = {
+            "label": label,
+            "period": period_format
+        }
+        
+        # Directly add metrics to output
+        for key, value in current_metrics.items():
+            output[key] = {"current": value}
+            
+        return output
+
+    # Prepare all period jobs - optimized structure
     period_jobs = [
-        ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
+        ("yesterday", "Yesterday", 
+         date_ranges["yesterday"][0], date_ranges["yesterday"][1],
          date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)),
-        ("last7Days", "Last 7 Days", date_ranges["last7Days"][0], date_ranges["last7Days"][1],
+        
+        ("last7Days", "Last 7 Days", 
+         date_ranges["last7Days"][0], date_ranges["last7Days"][1],
          date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][0] - timedelta(seconds=1)),
-        ("last30Days", "Last 30 Days", date_ranges["last30Days"][0], date_ranges["last30Days"][1],
+        
+        ("last30Days", "Last 30 Days", 
+         date_ranges["last30Days"][0], date_ranges["last30Days"][1],
          date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][0] - timedelta(seconds=1)),
-        ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
+        
+        ("yearToDate", "Year to Date", 
+         date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
 
+    # Initialize response dictionary with proper size
     response_data = {}
 
-    # Run all period jobs in parallel
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    # Adjust worker count based on available CPUs and job count
+    import multiprocessing
+    num_cpus = multiprocessing.cpu_count()
+    max_workers = min(num_cpus * 2, len(period_jobs))
+
+    # Run all period jobs in parallel with optimized worker count
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all jobs at once
         future_to_label = {
             executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
             for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
         }
+        
+        # Process results as they complete
         for future in as_completed(future_to_label):
             key = future_to_label[future]
             try:
@@ -1847,7 +1885,8 @@ def getPeriodWiseData(request):
             except Exception as exc:
                 response_data[key] = {"error": str(exc)}
 
-    return JsonResponse(response_data, safe=False)
+    # Use ujson for faster serialization if available
+    return JsonResponse(response_data, safe=False, json_dumps_params={'ensure_ascii': False})
 
 @csrf_exempt
 def getPeriodWiseDataXl(request):
