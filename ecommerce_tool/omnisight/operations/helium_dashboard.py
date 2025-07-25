@@ -1829,7 +1829,7 @@ def format_period_metrics(label, current_start, current_end, prev_start, prev_en
 
     return output
 
-
+@csrf_exempt
 def getPeriodWiseData(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
