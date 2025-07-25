@@ -47,8 +47,7 @@ CORS_ALLOW_CREDENTIALS = True
 # ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3000"
-     "http://34.195.154.218",
+    "http://localhost:3000",
     "http://34.195.154.218",
     "http://192.168.30.191:4200",
     "https://b2bop.netlify.app"
@@ -137,16 +136,48 @@ WSGI_APPLICATION = 'ecommerce_tool.wsgi.application'
 #     }
 # }
 
-# MongoDB connection settings for mongoengine
+# MongoDB connection settings for mongoengine WITH CONNECTION POOLING
 from mongoengine import connect
 
+# Enhanced MongoDB connection with connection pooling
 connect(
     db=os.getenv('DATABASE_NAME'),
     # username=os.getenv('DATABASE_USER'),
     # password=os.getenv('DATABASE_PASSWORD'),
     host=os.getenv('DATABASE_HOST'),
-    # alias='default'
+    # alias='default',
+    
+    # CONNECTION POOLING SETTINGS
+    maxPoolSize=50,              # Maximum connections in pool (default: 100)
+    minPoolSize=5,               # Minimum connections to maintain (default: 0)
+    maxIdleTimeMS=30000,         # Close idle connections after 30 seconds
+    waitQueueTimeoutMS=5000,     # Wait 5 seconds for available connection
+    connectTimeoutMS=20000,      # Connection timeout (20 seconds)
+    socketTimeoutMS=20000,       # Socket timeout (20 seconds)
+    serverSelectionTimeoutMS=20000,  # Server selection timeout
+    
+    # ADDITIONAL PERFORMANCE SETTINGS
+    retryWrites=True,            # Enable retryable writes
+    w='majority',                # Write concern (optional)
+    readPreference='primary',    # Read preference (optional)
+    
+    # SSL/TLS settings (uncomment if using SSL)
+    # ssl=True,
+    # ssl_cert_reqs=ssl.CERT_NONE,  # For development only
 )
+
+# Alternative method using connection string with pooling parameters
+# connect(
+#     host=f"{os.getenv('DATABASE_HOST')}/{os.getenv('DATABASE_NAME')}?"
+#          f"maxPoolSize=50&"
+#          f"minPoolSize=5&"
+#          f"maxIdleTimeMS=30000&"
+#          f"waitQueueTimeoutMS=5000&"
+#          f"connectTimeoutMS=20000&"
+#          f"socketTimeoutMS=20000&"
+#          f"serverSelectionTimeoutMS=20000&"
+#          f"retryWrites=true"
+# )
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
@@ -224,8 +255,23 @@ SELLERCLOUD_PASSWORD = os.getenv('SELLERCLOUD_PASSWORD')
 SELLERCLOUD_COMPANY_ID = os.getenv('SELLERCLOUD_COMPANY_ID')  # Replace with your actual company ID
 SELLERCLOUD_SERVER_ID = os.getenv('SELLERCLOUD_SERVER_ID')  # Replace with your actual server ID
 
-# Celery Configuration
+# Celery Configuration - ALSO OPTIMIZED WITH CONNECTION POOLING
 CELERY_BROKER_URL = 'redis://:foobaredUniqnex@127.0.0.1:6379/0'
+
+# Redis connection pooling for Celery
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_POOL_LIMIT = 10  # Maximum connections to Redis
 
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
+
+# Optional: MongoDB connection monitoring (for debugging)
+import logging
+logging.basicConfig()
+logging.getLogger('mongoengine').setLevel(logging.INFO)
+
+# Environment-specific connection pool settings
+if not DEBUG:  # Production settings
+    # Increase pool size for production
+    # You can override these in production by calling connect() again
+    pass
