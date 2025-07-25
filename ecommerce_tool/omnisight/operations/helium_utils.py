@@ -4,9 +4,6 @@ from datetime import datetime,timedelta
 from dateutil.relativedelta import relativedelta
 from ecommerce_tool.crud import DatabaseModel
 import threading
-import math
-import logging
-logger = logging.getLogger(__name__)
 import pandas as pd
 from pytz import timezone
 
@@ -243,9 +240,9 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     
     match = dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = {"$ne": "Cancelled"}
-    match['order_total'] = {"$gt": 0}
+    match['order_status'] = {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
     
+    # Rest of your existing code...
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id not in [None, "", "all", "custom"]:
@@ -416,7 +413,19 @@ def AnnualizedRevenueAPIView(target_date):
 
 
 def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
-   
+    """
+    Fetch total quantity and price of a product sold between start_date and end_date,
+    grouped by day or hour based on is_hourly flag.
+ 
+    Args:
+        start_date (datetime): Start date/time for filtering orders.
+        end_date (datetime): End date/time for filtering orders.
+        product_id (str): The product ID to filter by.
+        is_hourly (bool): If True, group by hour; else group by day.
+ 
+    Returns:
+        list: List of dicts with keys 'date', 'total_quantity', and 'total_price'.
+    """
     date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
 
     pipeline = [
@@ -497,19 +506,7 @@ def pageViewsandSessionCount(start_date,end_date,product_id):
     return views_list
 
 
-def create_empty_bucket_data(time_key):
-    """Return a valid empty data structure for a time bucket"""
-    return {
-        "gross_revenue": 0.0,
-        "net_profit": 0.0,
-        "profit_margin": 0.0,
-        "orders": 0,
-        "units_sold": 0,
-        "refund_amount": 0.0,
-        "refund_quantity": 0,
-        "current_date": time_key
-    }
-    
+
 def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, product_id=None, 
                   manufacturer_name=None, fulfillment_channel=None, timezone="UTC"):
     import pytz
@@ -656,34 +653,30 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
             gross_revenue += order.order_total
             total_units += order.items_order_quantity if order.items_order_quantity else 0
             for item in order.order_items:
-                order_items_pipeline = [
-                    {"$match": {"order_id": order.id}},
+                pipeline = [
+                    {"$match": {"_id": item.id}},
                     {"$lookup": {
                         "from": "product",
                         "localField": "ProductDetails.product_id",
                         "foreignField": "_id",
                         "as": "product_ins"
-            }},
-            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-            {"$project": {
-                "_id": 1,
-                "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
-                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-            }}
-        ]
-                try:
-                    items_result = list(OrderItems.objects.aggregate(*order_items_pipeline))
-                    for item_data in items_result:
-                        temp_other_price += float(item_data.get('price', 0))
-                        total_cogs += float(item_data.get('total_cogs', 0) if order.marketplace_id.name == "Amazon" else item_data.get('w_total_cogs', 0))
-                        vendor_funding += float(item_data.get('vendor_funding', 0))
-                except Exception as e:
-                    logger.error(f"Error processing order items for order {order.id}: {str(e)}")
-                    continue
+                    }},
+                    {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+                    {"$project": {
+                        "_id": 0,
+                        "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                        "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+                        "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                        "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                        "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                    }}
+                ]
+                result = list(OrderItems.objects.aggregate(*pipeline))
+                if result:
+                    temp_other_price += result[0]['price']
+                    total_cogs += result[0]['total_cogs'] if order.marketplace_id.name == "Amazon" else result[0]['w_total_cogs']
+                    vendor_funding += result[0]['vendor_funding']
 
         # Calculate metrics
         net_profit = (temp_other_price - total_cogs) + vendor_funding
@@ -1117,7 +1110,6 @@ def get_top_movers(yesterday_data, previous_day_data):
             "netProfit" : item['netProfit'],
             "totalCogs" : round(item['totalCogs'],2),
             "netProfit" : item['netProfit'],
-            "m_name": item.get("m_name", ""),
             'yesterday_units': yesterday_units,
             'previous_units': prev_units,
             'change_in_units': change,
