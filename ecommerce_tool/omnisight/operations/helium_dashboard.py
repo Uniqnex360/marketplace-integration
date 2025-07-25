@@ -5831,7 +5831,7 @@ def InsightsProductWise(request):
 #     sort_by_value = int(json_request.get('sort_by_value', 1)) if json_request.get('sort_by_value') else 1
 #     parent_search = json_request.get('parent_search')
 #     sku_search = json_request.get('sku_search')
-#     search_query = json_request.get('search_query')
+#     search_query = json_request.get('search_query')``
 
 #     # Date handling
 #     if start_date and start_date != "":
