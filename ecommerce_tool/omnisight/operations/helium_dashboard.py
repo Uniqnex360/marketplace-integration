@@ -115,13 +115,13 @@ def get_metrics_by_date_range(request):
     # Use the full custom range for the graph
         graph_days_filter = {}
         current_day = start_date_dt
-    while current_day <= end_date_dt:
-        day_key = current_day.strftime("%B %d, %Y").lower()
-        graph_days_filter[day_key] = {
+        while current_day <= end_date_dt:
+            day_key = current_day.strftime("%B %d, %Y").lower()
+            graph_days_filter[day_key] = {
             "start": datetime(current_day.year, current_day.month, current_day.day),
             "end": datetime(current_day.year, current_day.month, current_day.day, 23, 59, 59)
-        }
-        current_day += timedelta(days=1)
+            }
+            current_day += timedelta(days=1)
     else:
     # Use the last 8 days ending at target_date (your existing logic)
         eight_days_ago = target_date - timedelta(days=8)
