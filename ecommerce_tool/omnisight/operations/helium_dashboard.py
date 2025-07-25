@@ -6,10 +6,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dateutil.relativedelta import relativedelta
 from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime,timedelta
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from bson.son import SON
 from bson import ObjectId
 import numpy as np
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
 from collections import defaultdict
 from bson import ObjectId
@@ -1772,13 +1772,65 @@ def clean_json_floats(obj):
 ########################--------------------------------------------------------------------------------------------------------##########
 
 @csrf_exempt
-# Optional: Uncomment if you want to cache results
+
+# Optional: for caching
 # from django.core.cache import cache
 
-def getPeriodWiseData(request):
-    def to_utc_format(dt):
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+def to_utc_format(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def calculate_metrics_sync(start_date, end_date, marketplace_id, brand_id, product_id,
+                           manufacturer_name, fulfillment_channel, timezone_str):
+    # Optional: Add caching here if needed
+    # cache_key = f"metrics:{marketplace_id}:{start_date}:{end_date}"
+    # cached = cache.get(cache_key)
+    # if cached:
+    #     return cached
+    result = calculate_metricss(
+        start_date, end_date,
+        marketplace_id, brand_id,
+        product_id, manufacturer_name,
+        fulfillment_channel,
+        timezone_str, False,
+        use_threads=False
+    )
+    # cache.set(cache_key, result, timeout=60)
+    return result
+
+
+def format_period_metrics(label, current_start, current_end, prev_start, prev_end,
+                          marketplace_id, brand_id, product_id, manufacturer_name,
+                          fulfillment_channel, timezone_str):
+    current_metrics = calculate_metrics_sync(
+        current_start, current_end,
+        marketplace_id, brand_id,
+        product_id, manufacturer_name,
+        fulfillment_channel, timezone_str
+    )
+
+    period_format = {
+        "current": {"from": to_utc_format(current_start)},
+        "previous": {"from": to_utc_format(prev_start)}
+    }
+
+    if label not in ['Today', 'Yesterday']:
+        period_format["current"]["to"] = to_utc_format(current_end)
+        period_format["previous"]["to"] = to_utc_format(prev_end)
+
+    output = {
+        "label": label,
+        "period": period_format
+    }
+
+    for key in current_metrics:
+        output[key] = {"current": current_metrics[key]}
+
+    return output
+
+
+def getPeriodWiseData(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
@@ -1787,43 +1839,6 @@ def getPeriodWiseData(request):
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = 'US/Pacific'
 
-    def calculate_metrics_sync(start_date, end_date):
-        # Optional: Use caching for expensive calls
-        cache_key = f"metrics:{marketplace_id}:{start_date}:{end_date}"
-        cached = cache.get(cache_key)
-        if cached:
-            return cached
-        result = calculate_metricss(
-            start_date, end_date,
-            marketplace_id, brand_id,
-            product_id, manufacturer_name,
-            fulfillment_channel,
-            timezone_str, False,
-            use_threads=False
-        )
-        # cache.set(cache_key, result, timeout=60)
-        return result
-
-    def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
-        current_metrics = calculate_metrics_sync(current_start, current_end)
-        period_format = {
-            "current": {"from": to_utc_format(current_start)},
-            "previous": {"from": to_utc_format(prev_start)}
-        }
-        if label not in ['Today', 'Yesterday']:
-            period_format["current"]["to"] = to_utc_format(current_end)
-            period_format["previous"]["to"] = to_utc_format(prev_end)
-        output = {
-            "label": label,
-            "period": period_format
-        }
-        for key in current_metrics:
-            output[key] = {
-                "current": current_metrics[key],
-            }
-        return output
-
-    # Precompute and cache date ranges
     labels = {
         "yesterday": "Yesterday",
         "last7Days": "Last 7 days",
@@ -1857,10 +1872,14 @@ def getPeriodWiseData(request):
 
     response_data = {}
 
-    # Use ProcessPoolExecutor for better performance on CPU-bound code
     with ProcessPoolExecutor(max_workers=4) as executor:
         future_to_key = {
-            executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
+            executor.submit(
+                format_period_metrics,
+                label, cur_start, cur_end, prev_start, prev_end,
+                marketplace_id, brand_id, product_id,
+                manufacturer_name, fulfillment_channel, timezone_str
+            ): key
             for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
         }
 
