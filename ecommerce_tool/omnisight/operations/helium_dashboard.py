@@ -138,7 +138,7 @@ def get_metrics_by_date_range(request):
 
     # Run 8-day graph in parallel
     results = {}
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=16) as executor:
         future_to_key = {
             executor.submit(process_date_range, key, date_range): key
             for key, date_range in last_8_days_filter.items()
