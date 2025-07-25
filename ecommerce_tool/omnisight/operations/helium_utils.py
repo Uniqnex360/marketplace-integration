@@ -656,30 +656,34 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
             gross_revenue += order.order_total
             total_units += order.items_order_quantity if order.items_order_quantity else 0
             for item in order.order_items:
-                pipeline = [
-                    {"$match": {"_id": item.id}},
+                order_items_pipeline = [
+                    {"$match": {"order_id": order.id}},
                     {"$lookup": {
                         "from": "product",
                         "localField": "ProductDetails.product_id",
                         "foreignField": "_id",
                         "as": "product_ins"
-                    }},
-                    {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                    {"$project": {
-                        "_id": 0,
-                        "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                        "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
-                        "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                        "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                        "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                    }}
-                ]
-                result = list(OrderItems.objects.aggregate(*pipeline))
-                if result:
-                    temp_other_price += result[0]['price']
-                    total_cogs += result[0]['total_cogs'] if order.marketplace_id.name == "Amazon" else result[0]['w_total_cogs']
-                    vendor_funding += result[0]['vendor_funding']
+            }},
+            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+            {"$project": {
+                "_id": 1,
+                "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+            }}
+        ]
+                try:
+                    items_result = list(OrderItems.objects.aggregate(*order_items_pipeline))
+                    for item_data in items_result:
+                        temp_other_price += float(item_data.get('price', 0))
+                        total_cogs += float(item_data.get('total_cogs', 0) if order.marketplace_id.name == "Amazon" else item_data.get('w_total_cogs', 0))
+                        vendor_funding += float(item_data.get('vendor_funding', 0))
+                except Exception as e:
+                    logger.error(f"Error processing order items for order {order.id}: {str(e)}")
+                    continue
 
         # Calculate metrics
         net_profit = (temp_other_price - total_cogs) + vendor_funding
