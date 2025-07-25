@@ -1344,6 +1344,8 @@ def get_products_with_pagination(request):
         match["$or"] = [
             {"product_title": {"$regex": search_query, "$options": "i"}},
             {"sku": {"$regex": search_query, "$options": "i"}},
+            {'asin':{"$regex":search_query,"$options":'i'}},
+            {'product_id':{"$regex":search_query,"$options":'i'}}
         ]
 
     if parent:
