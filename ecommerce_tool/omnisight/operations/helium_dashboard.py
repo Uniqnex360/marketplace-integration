@@ -1835,7 +1835,7 @@ def getPeriodWiseData(request):
     response_data = {}
 
     # Run all period jobs in parallel
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         future_to_label = {
             executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
             for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
