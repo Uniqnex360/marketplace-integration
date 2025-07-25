@@ -113,11 +113,25 @@ def get_metrics_by_date_range(request):
     }
     
     # Define the last 8 days filter as a dictionary with each day's range
-    last_8_days_filter = {}
-    for i in range(1, 9):
-        day = eight_days_ago + timedelta(days=i)
-        day_key = day.strftime("%B %d, %Y").lower()
-        last_8_days_filter[day_key] = {
+    if start_date_str and end_date_str:
+    # Use the full custom range for the graph
+        graph_days_filter = {}
+        current_day = start_date_dt
+        while current_day <= end_date_dt:
+            day_key = current_day.strftime("%B %d, %Y").lower()
+            graph_days_filter[day_key] = {
+                "start": datetime(current_day.year, current_day.month, current_day.day),
+                "end": datetime(current_day.year, current_day.month, current_day.day, 23, 59, 59)
+        }
+        current_day += timedelta(days=1)
+    else:
+    # Use the last 8 days ending at target_date (your existing logic)
+        eight_days_ago = target_date - timedelta(days=8)
+        graph_days_filter = {}
+        for i in range(1, 9):
+            day = eight_days_ago + timedelta(days=i)
+            day_key = day.strftime("%B %d, %Y").lower()
+            graph_days_filter[day_key] = {
             "start": datetime(day.year, day.month, day.day),
             "end": datetime(day.year, day.month, day.day, 23, 59, 59)
         }
@@ -184,7 +198,7 @@ def get_metrics_by_date_range(request):
     # Process graph data with threading (keeping original approach for graph data)
     results = {}
     threads = []
-    for key, date_range in last_8_days_filter.items():
+    for key, date_range in graph_days_filter.items():
         thread = threading.Thread(target=process_date_range_optimized, args=(key, date_range, results))
         threads.append(thread)
         thread.start()
@@ -193,7 +207,7 @@ def get_metrics_by_date_range(request):
         thread.join()
     
     # Ensure the results are in the same order as the keys in last_8_days_filter
-    graph_data = {key: results[key] for key in last_8_days_filter.keys()}
+    graph_data = {key: results[key] for key in graph_days_filter.keys()}
     metrics["graph_data"] = graph_data
     
     # Process main metrics with batch optimization
