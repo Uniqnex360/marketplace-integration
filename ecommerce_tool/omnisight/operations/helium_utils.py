@@ -653,20 +653,9 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
 
         # Process each order in the bucket
         for order in bucket_orders:
-            gross_revenue += float(order.order_total or 0)
-            total_units += int(order.items_order_quantity or 0)
-            order_items = []
-            try:
-                order_items=list(order.order_items)
-            except(TypeError,ValueError) as e:
-                logger.warning(f'Failed to access order_items {order.id}')
-            try:
-                order_items=OrderItems.objects(order_id=order.id)
-            except Exception as query_error:
-                logger.error(f"Failed to query items for order{order.id}")
-                errors_count+=1
-                continue
-            for item in order_items:
+            gross_revenue += order.order_total
+            total_units += order.items_order_quantity if order.items_order_quantity else 0
+            for item in order.order_items:
                 pipeline = [
                     {"$match": {"_id": item.id}},
                     {"$lookup": {
