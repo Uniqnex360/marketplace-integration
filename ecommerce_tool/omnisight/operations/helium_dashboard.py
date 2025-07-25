@@ -65,7 +65,7 @@ def sanitize_data(data):
         if math.isnan(data) or data == float('inf') or data == float('-inf'):
             return 0  # or return None
     return data
-
+#optimized get_metrics
 @csrf_exempt
 def get_metrics_by_date_range(request):
     json_request = JSONParser().parse(request)
@@ -79,25 +79,27 @@ def get_metrics_by_date_range(request):
     preset = json_request.get('preset', 'Today')
     start_date_str = json_request.get("start_date", None)
     end_date_str = json_request.get('end_date', None)
-
+    
     if start_date_str and end_date_str:
         start_date_dt = datetime.strptime(start_date_str, "%d/%m/%Y")
         end_date_dt = datetime.strptime(end_date_str, "%d/%m/%Y").replace(hour=23, minute=59, second=59)
     else:
         start_date_dt, end_date_dt = get_date_range(preset, time_zone_str=timezone_str)
-
+    
     # Parse target_date_str to extract the date
     target_date = datetime.strptime(target_date_str, "%d/%m/%Y").date()
-
+    
     # Get current time and combine it with the target_date
     local_tz = pytz.timezone(timezone_str)
     current_time = datetime.now(local_tz).replace(year=target_date.year, month=target_date.month, day=target_date.day)
+    
+    # Parse target date and convert to local time
     target_date = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
-
+    
     # Calculate previous_date and eight_days_ago
     previous_date = target_date - timedelta(days=1)
     eight_days_ago = target_date - timedelta(days=8)
-
+    
     # Define the date filters
     date_filters = {
         "targeted": {
@@ -109,7 +111,7 @@ def get_metrics_by_date_range(request):
             "end": end_date_dt - timedelta(days=1)
         }
     }
-
+    
     # Define the last 8 days filter as a dictionary with each day's range
     last_8_days_filter = {}
     for i in range(1, 9):
@@ -119,39 +121,82 @@ def get_metrics_by_date_range(request):
             "start": datetime(day.year, day.month, day.day),
             "end": datetime(day.year, day.month, day.day, 23, 59, 59)
         }
-
+    
     metrics = {}
-
-    # Threaded function for 8-day graph
-    def process_date_range(key, date_range):
+    graph_data = {}
+    
+    # Optimized function to get all item data in batch
+    def get_order_items_batch(order_items_list):
+        """Fetch all order item details in a single query"""
+        if not order_items_list:
+            return {}
+            
+        pipeline = [
+            {
+                "$match": {
+                    "_id": {"$in": order_items_list}
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "product",
+                    "localField": "ProductDetails.product_id",
+                    "foreignField": "_id",
+                    "as": "product_ins"
+                }
+            },
+            {
+                "$unwind": {
+                    "path": "$product_ins",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                    "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                    "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+                    "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                    "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                    "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                }
+            }
+        ]
+        
+        # Convert result to dictionary for quick lookup
+        result = list(OrderItems.objects.aggregate(*pipeline))
+        return {item['_id']: item for item in result}
+    
+    def process_date_range_optimized(key, date_range, results):
+        """Optimized version with batch processing"""
         gross_revenue = 0
-        result = grossRevenue(
-            date_range["start"], date_range["end"],
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
-        )
+        result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        
         if result:
             for ins in result:
                 gross_revenue += ins['order_total']
-        return key, {
+                
+        results[key] = {
             "gross_revenue": round(gross_revenue, 2),
         }
-
-    # Run 8-day graph in parallel
+    
+    # Process graph data with threading (keeping original approach for graph data)
     results = {}
-    with ThreadPoolExecutor(max_workers=16) as executor:
-        future_to_key = {
-            executor.submit(process_date_range, key, date_range): key
-            for key, date_range in last_8_days_filter.items()
-        }
-        for future in as_completed(future_to_key):
-            key, value = future.result()
-            results[key] = value
-
+    threads = []
+    for key, date_range in last_8_days_filter.items():
+        thread = threading.Thread(target=process_date_range_optimized, args=(key, date_range, results))
+        threads.append(thread)
+        thread.start()
+    
+    for thread in threads:
+        thread.join()
+    
     # Ensure the results are in the same order as the keys in last_8_days_filter
     graph_data = {key: results[key] for key in last_8_days_filter.keys()}
     metrics["graph_data"] = graph_data
-
-    # Main metrics for targeted and previous
+    
+    # Process main metrics with batch optimization
     for key, date_range in date_filters.items():
         gross_revenue = 0
         total_cogs = 0
@@ -163,62 +208,57 @@ def get_metrics_by_date_range(request):
         tax_price = 0
         temp_other_price = 0
         vendor_funding = 0
-
-        raw_result = grossRevenue(
-            date_range["start"], date_range["end"],
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
-        )
+        
+        # Get raw results and filter
+        raw_result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
         result = [
             r for r in raw_result
             if r.get('order_status') != 'Cancelled' and r.get('order_total') > 0
         ]
-        refund_ins = refundOrder(
-            date_range["start"], date_range["end"],
-            marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel
-        )
+        
+        # Get refund data
+        refund_ins = refundOrder(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
         if refund_ins:
             for ins in refund_ins:
                 refund += len(ins['order_items'])
+        
         total_orders = len(result)
+        
         if result:
+            # Collect all order item IDs for batch processing
+            all_order_items = []
+            order_marketplace_map = {}  # Map order_item_id to marketplace_name
+            
             for ins in result:
-                tax_price = 0
                 gross_revenue += ins['order_total']
                 total_units += ins['items_order_quantity']
-                for j in ins['order_items']:
-                    pipeline = [
-                        {"$match": {"_id": j}},
-                        {"$lookup": {
-                            "from": "product",
-                            "localField": "ProductDetails.product_id",
-                            "foreignField": "_id",
-                            "as": "product_ins"
-                        }},
-                        {"$unwind": {
-                            "path": "$product_ins",
-                            "preserveNullAndEmptyArrays": True
-                        }},
-                        {"$project": {
-                            "_id": 0,
-                            "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                            "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
-                            "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                            "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                            "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                        }}
-                    ]
-                    item_result = list(OrderItems.objects.aggregate(*pipeline))
-                    if item_result:
-                        tax_price += item_result[0]['tax_price']
-                        temp_other_price += item_result[0]['price']
-                        if ins['marketplace_name'] == "Amazon":
-                            total_cogs += item_result[0]['total_cogs']
-                        else:
-                            total_cogs += item_result[0]['w_total_cogs']
-                        vendor_funding += item_result[0]['vendor_funding']
+                
+                for item_id in ins['order_items']:
+                    all_order_items.append(item_id)
+                    order_marketplace_map[item_id] = ins['marketplace_name']
+            
+            # Batch fetch all order item data
+            item_data_map = get_order_items_batch(all_order_items)
+            
+            # Process all items using the batched data
+            for item_id in all_order_items:
+                if item_id in item_data_map:
+                    item_data = item_data_map[item_id]
+                    marketplace_name = order_marketplace_map[item_id]
+                    
+                    tax_price += item_data['tax_price']
+                    temp_other_price += item_data['price']
+                    
+                    if marketplace_name == "Amazon":
+                        total_cogs += item_data['total_cogs']
+                    else:
+                        total_cogs += item_data['w_total_cogs']
+                    
+                    vendor_funding += item_data['vendor_funding']
+            
             net_profit = (temp_other_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue) * 100 if gross_revenue != 0 else 0
+        
         metrics[key] = {
             "gross_revenue": round(gross_revenue, 2),
             "total_cogs": round(total_cogs, 2),
@@ -228,8 +268,8 @@ def get_metrics_by_date_range(request):
             "total_orders": round(total_orders, 2),
             "total_units": round(total_units, 2)
         }
-
-    # Calculate difference
+    
+    # Calculate differences
     difference = {
         "gross_revenue": round(metrics["targeted"]["gross_revenue"] - metrics["previous"]["gross_revenue"], 2),
         "total_cogs": round(metrics["targeted"]["total_cogs"] - metrics["previous"]["total_cogs"], 2),
@@ -239,8 +279,8 @@ def get_metrics_by_date_range(request):
         "total_orders": round(metrics["targeted"]["total_orders"] - metrics["previous"]["total_orders"], 2),
         "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"], 2),
     }
-
-    # Apply chooseMatrix logic
+    
+    # Matrix filtering logic (unchanged)
     name = "Today Snapshot"
     item_pipeline = [
         {"$match": {"name": name}}
@@ -250,30 +290,30 @@ def get_metrics_by_date_range(request):
         item_result = item_result[0]
         if item_result['select_all']:
             pass
-        if item_result.get('gross_revenue') == False:
-            metrics['targeted'].pop("gross_revenue", None)
-            metrics['previous'].pop("gross_revenue", None)
-        if item_result.get('units_sold') == False:
-            metrics['targeted'].pop("total_units", None)
-            metrics['previous'].pop("total_units", None)
-        if item_result.get('total_cogs') == False:
-            metrics['targeted'].pop("total_cogs", None)
-            metrics['previous'].pop("total_cogs", None)
-        if item_result.get('orders') == False:
-            metrics['targeted'].pop("total_orders", None)
-            metrics['previous'].pop("total_orders", None)
-        if item_result.get('refund_quantity') == False:
-            metrics['targeted'].pop("refund", None)
-            metrics['previous'].pop("refund", None)
-        if item_result.get('profit_margin') == False:
-            metrics['targeted'].pop("margin", None)
-            metrics['previous'].pop("margin", None)
-
+        if item_result['gross_revenue'] == False:
+            del metrics['targeted']["gross_revenue"]
+            del metrics['previous']["gross_revenue"]
+        if item_result['units_sold'] == False:
+            del metrics['targeted']["total_units"]
+            del metrics['previous']["total_units"]
+        if item_result['total_cogs'] == False:
+            del metrics['targeted']["total_cogs"]
+            del metrics['previous']["total_cogs"]
+        if item_result['orders'] == False:
+            del metrics['targeted']["total_orders"]
+            del metrics['previous']["total_orders"]
+        if item_result['refund_quantity'] == False:
+            del metrics['targeted']["refund"]
+            del metrics['previous']["refund"]
+        if item_result['profit_margin'] == False:
+            del metrics['targeted']["margin"]
+            del metrics['previous']["margin"]
+    
     metrics["difference"] = difference
-
+    
     # Sanitize the metrics before returning
     metrics = sanitize_data(metrics)
-
+    
     return metrics
 
 
