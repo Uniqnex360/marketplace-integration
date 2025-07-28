@@ -1,3 +1,4 @@
+from __future__ import annotations
 from omnisight.models import Product, Order,pageview_session_count,OrderItems,Marketplace
 from bson import ObjectId
 from datetime import datetime,timedelta
@@ -226,7 +227,6 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     if timezone != 'UTC':
         start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
     
-    # Remove timezone info for MongoDB query (assuming your MongoDB driver expects naive UTC)
     start_date = start_date.replace(tzinfo=None)
     end_date = end_date.replace(tzinfo=None)
     
@@ -243,7 +243,7 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     
     match = dict()
     match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = {"$ne": "Cancelled"}
+    match['order_status'] = {"$nin": ["Canceled", "Cancelled"]}
     match['order_total'] = {"$gt": 0}
     
     if fulfillment_channel:
@@ -288,6 +288,10 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     for order_ins in order_list:
         for marketplace in marketplace_list:
             order_ins['marketplace_name'] = marketplace['name']
+        tax=order_ins.get('TaxAmount',0.0)
+        if isinstance(tax,dict):
+            tax=tax.get('Amount',0.0)
+        order_ins['order_total']=round(order_ins.get('order_total',0.0)-tax,2)
     
     return order_list
 

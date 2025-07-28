@@ -1103,14 +1103,14 @@ def ordersCountForDashboard(request):
     # Shared match conditions
     match_conditions = {
         "order_date": {"$gte": start_date, "$lte": end_date},
-        "order_status": {"$ne": "Cancelled"},
+         "order_status": {"$nin": ["Canceled", "Cancelled"]},
         "order_total": {"$gt": 0}
     }
     
     # Match conditions for custom orders
     custom_match_conditions = {
         "purchase_order_date": {"$gte": start_date, "$lte": end_date},
-        "order_status": {"$ne": "Cancelled"},
+         "order_status": {"$nin": ["Canceled", "Cancelled"]},
         "total_price": {"$gt": 0}
     }
 
@@ -1481,7 +1481,7 @@ def salesAnalytics(request):
         )
 
         # Filter out cancelled/zero orders (should already be handled in grossRevenue, but just in case)
-        orders = [o for o in orders if o.get('order_status') != 'Cancelled' and o.get('order_total', 0) > 0]
+        orders = [o for o in orders if o.get('order_status') not in ['Cancelled','Canceled'] and o.get('order_total', 0) > 0]
 
         # Total sales
         data['total_sales'] = sum(o['order_total'] for o in orders)
