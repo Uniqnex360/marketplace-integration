@@ -21,7 +21,7 @@ from omnisight.operations.general_functions import getMarketplaceList, getProduc
 
 # from omnisight.operations.amazon_operations import updateAmazonProductsBasedonAsins, updateOrdersItemsDetailsAmazon, syncRecentAmazonOrders,ShipStationShippingCostAPIView
 
-from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist,InsightsProductWise,getCitywiseSales,exportCitywiseSalesExcel,downloadCitywiseSalesCSV,obtainManufactureNames, getBrandListforfilter,productsDetailsPageSummary,productsSalesOverview, productsListingQualityScore, productsTrafficandConversions, getProfitAndLossDetailsForProduct, profitlosschartForProduct, getrevenuedetailsForProduct, getInventryLogForProductdaywise, getProductInformation, updatedRevenueWidgetAPIView, updateProductDetails, productUnitProfitability, productNetprofit, cogsGraph, priceGraph
+from omnisight.operations.helium_dashboard import get_metrics_by_date_range, LatestOrdersTodayAPIView, RevenueWidgetAPIView, get_top_products, getPeriodWiseData, getPeriodWiseDataCustom, getPeriodWiseDataXl, exportPeriodWiseCSV, allMarketplaceData, allMarketplaceDataxl, downloadMarketplaceDataCSV,downloadOrders, getProductPerformanceSummary, downloadProductPerformanceSummary, downloadProductPerformanceCSV, get_products_with_pagination,profit_loss_chart,getProfitAndLossDetails,profitLossExportXl,profitLossChartCsv,ListingOptimizationView,obtainChooseMatrix,updateChooseMatrix,InsightsDashboardView, getSKUlist,getproductIdlist,InsightsProductWise,getCitywiseSales,exportCitywiseSalesExcel,downloadCitywiseSalesCSV,obtainManufactureNames, getBrandListforfilter,productsDetailsPageSummary,productsSalesOverview, productsListingQualityScore, productsTrafficandConversions, getProfitAndLossDetailsForProduct, profitlosschartForProduct, getrevenuedetailsForProduct, getInventryLogForProductdaywise, getProductInformation, updatedRevenueWidgetAPIView, updateProductDetails, productUnitProfitability, productNetprofit, cogsGraph, priceGraph
 
 
 
@@ -51,6 +51,7 @@ urlpatterns = [
     path('getBrandList/',getBrandList,name="getBrandList"),
     path('fetchProductDetails/',fetchProductDetails,name="fetchProductDetails"),
     path('fetchAllorders/',fetchAllorders,name="fetchAllorders"),
+    path('downloadOrders/',downloadOrders,name='downloadOrders'),
     path('fetchOrderDetails/',fetchOrderDetails,name='fetchOrderDetails'),
     path('getOrdersBasedOnProduct/',getOrdersBasedOnProduct,name='getOrdersBasedOnProduct'),
     path("getProductVariant/",getProductVariant,name="getProductVariant"),
