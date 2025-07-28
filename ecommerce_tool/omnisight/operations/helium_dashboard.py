@@ -1147,10 +1147,10 @@ def get_top_products(request):
     }},
     
     # Sort by selected metric (units_sold, price, refund, etc.)
-    {"$sort": SON([(sort_field, -1)])},
+    # {"$sort": SON([(sort_field, -1)])},
 
-    # Limit to top 50 product-time buckets (can increase if needed)
-    {"$limit": 50},
+    # # Limit to top 50 product-time buckets (can increase if needed)
+    # {"$limit": 50},
 
     # Group all timeBuckets under each productId
     {"$group": {
