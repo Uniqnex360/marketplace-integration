@@ -1146,11 +1146,11 @@ def get_top_products(request):
         "hourly_or_daily_sale": {"$sum": "$chart_value"}
     }},
     
-    # # Sort by selected metric (units_sold, price, refund, etc.)
-    # {"$sort": SON([(sort_field, -1)])},
+    # Sort by selected metric (units_sold, price, refund, etc.)
+    {"$sort": SON([(sort_field, -1)])},
 
-    # # Limit to top 50 product-time buckets (can increase if needed)
-    # {"$limit": 50},
+    # Limit to top 50 product-time buckets (can increase if needed)
+    {"$limit": 50},
 
     # Group all timeBuckets under each productId
     {"$group": {
@@ -1237,7 +1237,8 @@ def get_top_products(request):
         if chart:
             product_dict["chart"] = chart
 
-        if product_dict.get('product') or product_dict.get('name'):
+        title=product_dict.get('product',"").strip()
+        if title:
             formatted_results.append(product_dict)
 
     data = {"results": {"items": formatted_results}}
