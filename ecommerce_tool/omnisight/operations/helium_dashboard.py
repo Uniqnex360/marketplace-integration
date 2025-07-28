@@ -1202,7 +1202,7 @@ def get_top_products(request):
     {"$sort": SON([(sort_field, -1)])},
 
     # Limit to top 10 final products
-    {"$limit": 10}
+    {"$limit": 11}
     ])
 
     result = list(Order.objects.aggregate(pipeline))
