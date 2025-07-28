@@ -7247,6 +7247,8 @@ async def get_all_orders_by_brand_and_date(brands, start_date, end_date, include
 @csrf_exempt
 def downloadOrders(request):
     import json
+    print("🔍 Raw body:", request.body)
+
     data = json.loads(request.body)
     brands = data.get('brands', [])
     start_date = data.get('start_date')
