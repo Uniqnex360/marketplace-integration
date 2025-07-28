@@ -11,7 +11,7 @@ from bson.son import SON
 from bson import ObjectId
 import numpy as np
 import time
-
+import asyncio
 from collections import defaultdict
 from bson import ObjectId
 from django.http import JsonResponse
@@ -7254,7 +7254,7 @@ def downloadOrders(request):
     start_date = data.get('start_date')
     end_date = data.get("end_date")
     file_format = data.get("format", 'csv')
-    orders = get_orders_by_brand_and_date(brands, start_date, end_date)  # Make this sync for Django
+    orders =  asyncio.run(get_orders_by_brand_and_date(brands, start_date, end_date)) # Make this sync for Django
     if not orders:
         return JsonResponse({'error': "No orders for the given filters"})
     df = pd.DataFrame(orders)
