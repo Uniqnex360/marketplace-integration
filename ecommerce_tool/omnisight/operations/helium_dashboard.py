@@ -65,7 +65,6 @@ def sanitize_data(data):
         if math.isnan(data) or data == float('inf') or data == float('-inf'):
             return 0  # or return None
     return data
-#optimized get_metrics
 @csrf_exempt
 def get_metrics_by_date_range(request):
     json_request = JSONParser().parse(request)
@@ -147,19 +146,77 @@ def get_metrics_by_date_range(request):
             "gross_revenue": round(gross_revenue, 2),
         }
 
+    # OPTIMIZATION 1: Use ThreadPoolExecutor for better thread management
+    from concurrent.futures import ThreadPoolExecutor
+    
     results = {}
-    threads = []
-    for key, date_range in graph_days_filter.items():
-        thread = threading.Thread(target=process_date_range, args=(key, date_range, results))
-        threads.append(thread)
-        thread.start()
-
-    for thread in threads:
-        thread.join()
+    with ThreadPoolExecutor(max_workers=min(len(graph_days_filter), 10)) as executor:
+        futures = {executor.submit(process_date_range, key, date_range, results): key 
+                  for key, date_range in graph_days_filter.items()}
+        
+        for future in futures:
+            future.result()  # Wait for completion
 
     # Ensure the results are in the same order as the keys in last_8_days_filter
     graph_data = {key: results[key] for key in graph_days_filter.keys()}
     metrics["graph_data"] = graph_data
+    
+    # OPTIMIZATION 2: Pre-fetch all order items data in bulk
+    all_order_item_ids = set()
+    all_raw_results = {}
+    
+    for key, date_range in date_filters.items():
+        raw_result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        result=[
+            r for r in raw_result
+            if r.get('order_status')!='Cancelled' and r.get('order_total')>0
+        ]
+        all_raw_results[key] = result
+        
+        # Collect all order item IDs
+        for ins in result:
+            all_order_item_ids.update(ins['order_items'])
+    
+    # OPTIMIZATION 3: Single bulk query for all order items
+    bulk_pipeline = [
+        {
+            "$match": {
+                "_id": {"$in": list(all_order_item_ids)}
+            }
+        },
+        {
+            "$lookup": {
+                "from": "product",
+                "localField": "ProductDetails.product_id",
+                "foreignField": "_id",
+                "as": "product_ins"
+            }
+        },
+        {
+        "$unwind": {
+            "path": "$product_ins",
+            "preserveNullAndEmptyArrays": True
+        }
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+            }
+        }
+    ]
+    
+    # Create lookup dictionary for O(1) access
+    order_items_lookup = {}
+    bulk_results = list(OrderItems.objects.aggregate(*bulk_pipeline))
+    for item in bulk_results:
+        order_items_lookup[item['_id']] = item
+    
     for key, date_range in date_filters.items():
         gross_revenue = 0
         total_cogs = 0
@@ -172,11 +229,8 @@ def get_metrics_by_date_range(request):
         temp_other_price = 0
         vendor_funding = 0
 
-        raw_result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
-        result=[
-            r for r in raw_result
-            if r.get('order_status')!='Cancelled' and r.get('order_total')>0
-        ]
+        result = all_raw_results[key]
+        
         refund_ins = refundOrder(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
         if refund_ins != []:
             for ins in refund_ins:
@@ -187,50 +241,19 @@ def get_metrics_by_date_range(request):
                 tax_price = 0
                 gross_revenue += ins['order_total']
                 total_units += ins['items_order_quantity']
-                for j in ins['order_items']:                    
-                    pipeline = [
-                        {
-                            "$match": {
-                                "_id": j
-                            }
-                        },
-                        {
-                            "$lookup": {
-                                "from": "product",
-                                "localField": "ProductDetails.product_id",
-                                "foreignField": "_id",
-                                "as": "product_ins"
-                            }
-                        },
-                        {
-                        "$unwind": {
-                            "path": "$product_ins",
-                            "preserveNullAndEmptyArrays": True
-                        }
-                        },
-                        {
-                            "$project": {
-                                "_id": 0,
-                                "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                                "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
-                                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                                "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                            }
-                        }
-                    ]
                 
-                    item_result = list(OrderItems.objects.aggregate(*pipeline))
-                    if item_result != []:
-                        tax_price += item_result[0]['tax_price']
-                        temp_other_price += item_result[0]['price']
+                # OPTIMIZATION 4: Use pre-fetched data instead of individual queries
+                for j in ins['order_items']:
+                    item_result = order_items_lookup.get(j)
+                    if item_result:
+                        tax_price += item_result['tax_price']
+                        temp_other_price += item_result['price']
                         if ins['marketplace_name'] == "Amazon":
-                            total_cogs += item_result[0]['total_cogs']
+                            total_cogs += item_result['total_cogs']
                         else:
-                            total_cogs += item_result[0]['w_total_cogs']
+                            total_cogs += item_result['w_total_cogs']
                         
-                        vendor_funding += item_result[0]['vendor_funding']
+                        vendor_funding += item_result['vendor_funding']
             net_profit = (temp_other_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue) * 100 if gross_revenue != 0 else 0
         metrics[key] = {
