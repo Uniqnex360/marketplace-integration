@@ -234,17 +234,17 @@ import requests
 import pandas as pd
 from datetime import datetime
 import pytz
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from ecommerce_tool.settings import (
     AMAZON_API_KEY,
     AMAZON_SECRET_KEY,
     REFRESH_TOKEN,
     MARKETPLACE_ID
 )
-# Note: For product reports like listings, timezone might not be as critical
-# as for orders, but keeping pacific timezone for consistency if needed elsewhere.
+
 pacific = pytz.timezone("US/Pacific")
 
-# Step 1: Get access token (Already defined, reuse)
+# Existing functions (get_amazon_access_token, create_report, poll_report, download_report, load_report_to_dataframe)
 def get_amazon_access_token():
     url = "https://api.amazon.com/auth/o2/token"
     payload = {
@@ -263,8 +263,6 @@ def get_amazon_access_token():
         print(f"❌ Failed to get access token: {e}")
         return None
 
-# Step 2: Request report generation (Make it generic or create a new one for products)
-# We'll adapt the existing create_order_report for general use
 def create_report(access_token, report_type, marketplace_ids, data_start_time=None, data_end_time=None):
     url = "https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports"
     headers = {
@@ -288,7 +286,6 @@ def create_report(access_token, report_type, marketplace_ids, data_start_time=No
         print(f"❌ Failed to create report of type {report_type}: {e}")
         return None
 
-# Step 3: Poll until report is done (Already defined, reuse)
 def poll_report(access_token, report_id):
     url = f"https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports/{report_id}"
     headers = {"x-amz-access-token": access_token}
@@ -304,13 +301,11 @@ def poll_report(access_token, report_id):
             elif status in ["CANCELLED", "FATAL"]:
                 print(f"❌ Report generation failed with status: {status}. Response: {response.json()}")
                 return None
-            time.sleep(30) # Wait 30 seconds before polling again
+            time.sleep(30)
         except Exception as e:
             print(f"❌ Error polling report {report_id}: {e}")
-            return None # Exit if there's an error during polling
+            return None
 
-
-# Step 4: Download the report file (CORRECTED)
 def download_report(access_token, document_id, output_filename):
     url = f"https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/documents/{document_id}"
     headers = {"x-amz-access-token": access_token}
@@ -323,24 +318,21 @@ def download_report(access_token, document_id, output_filename):
         file_response = requests.get(download_url)
         file_response.raise_for_status()
 
-        # --- CORRECTED LINES BELOW ---
-        content = file_response.content # Access as attribute, not method
+        content = file_response.content
         if doc_info.get('compressionAlgorithm') == 'GZIP':
             print("Detected GZIP compression, decompressing...")
-            content = gzip.decompress(content) # Use decompress, not compress
+            content = gzip.decompress(content)
 
         with open(output_filename, "wb") as f:
-            f.write(content) # Write the potentially decompressed content
-        print(f"✅ Report downloaded and decompressed to {output_filename}") # Updated message
+            f.write(content)
+        print(f"✅ Report downloaded and decompressed to {output_filename}")
         return output_filename
     except Exception as e:
         print(f"❌ Failed to download report document {document_id}: {e}")
         return None
 
-# Optional: Load to pandas DataFrame (MODIFIED - added encoding)
 def load_report_to_dataframe(file_path):
     try:
-        # List of encodings to try in order of preference
         encodings_to_try = ['utf-8', 'latin-1', 'windows-1252', 'iso-8859-1', 'cp1252']
         
         df = None
@@ -371,68 +363,95 @@ def load_report_to_dataframe(file_path):
         print(f"❌ Failed to load report to DataFrame from {file_path}: {e}")
         return None
 
-# Main execution for orders (Existing function, slightly refactored to use create_report)
-def get_amazon_orders_report(start_date: datetime, end_date: datetime):
+# NEW: Function to get product category information using Catalog Items API
+def get_product_category(access_token, asin, marketplace_id):
+    """
+    Get product category information for a specific ASIN using Catalog Items API
+    """
+    url = f"https://sellingpartnerapi-na.amazon.com/catalog/2022-04-01/items/{asin}"
+    headers = {
+        "x-amz-access-token": access_token,
+        "Content-Type": "application/json"
+    }
+    params = {
+        "marketplaceIds": marketplace_id,
+        "includedData": "attributes,categories,productTypes"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Extract category information
+            categories = []
+            product_types = []
+            
+            # Get categories if available
+            if "categories" in data:
+                for category in data["categories"]:
+                    if "displayName" in category:
+                        categories.append(category["displayName"])
+            
+            # Get product types if available
+            if "productTypes" in data:
+                for pt in data["productTypes"]:
+                    if "displayName" in pt:
+                        product_types.append(pt["displayName"])
+            
+            return {
+                "categories": " | ".join(categories) if categories else "",
+                "product_types": " | ".join(product_types) if product_types else "",
+                "primary_category": categories[0] if categories else ""
+            }
+    except Exception as e:
+        print(f"❌ Error getting category for ASIN {asin}: {e}")
+    
+    return {
+        "categories": "",
+        "product_types": "",
+        "primary_category": ""
+    }
+
+# NEW: Function to get categories for multiple products with rate limiting
+def get_categories_for_products(access_token, asins, marketplace_id, max_workers=5):
+    """
+    Get category information for multiple ASINs with threading and rate limiting
+    """
+    print(f"🔍 Fetching category information for {len(asins)} products...")
+    
+    category_data = {}
+    
+    def fetch_category(asin):
+        time.sleep(0.5)  # Rate limiting - 2 requests per second
+        return asin, get_product_category(access_token, asin, marketplace_id)
+    
+    # Use ThreadPoolExecutor for parallel requests (with rate limiting)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_asin = {executor.submit(fetch_category, asin): asin for asin in asins}
+        
+        completed = 0
+        for future in as_completed(future_to_asin):
+            asin, category_info = future.result()
+            category_data[asin] = category_info
+            completed += 1
+            
+            if completed % 10 == 0:  # Progress update every 10 items
+                print(f"📈 Progress: {completed}/{len(asins)} products processed")
+    
+    print(f"✅ Category data fetched for {len(category_data)} products")
+    return category_data
+
+# ENHANCED: Main execution for products with categories
+def get_amazon_products_report_with_categories():
     access_token = get_amazon_access_token()
     if not access_token:
         return None
 
-    # Ensure dates are UTC and in ISO 8601 format
-    # Note: If start_date and end_date are already localized, ensure they are converted to UTC
-    # before calling strftime for consistency with Amazon's API
-    if start_date.tzinfo is None: # Assuming dates from frontend are naive local
-        start_date = pacific.localize(start_date).astimezone(pytz.utc)
-    else:
-        start_date = start_date.astimezone(pytz.utc)
-
-    if end_date.tzinfo is None: # Assuming dates from frontend are naive local
-        end_date = pacific.localize(end_date).astimezone(pytz.utc)
-    else:
-        end_date = end_date.astimezone(pytz.utc)
-
-    iso_start = start_date.strftime('%Y-%m-%dT%H:%M:%SZ')
-    iso_end = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
-
-    print(f"📦 Requesting Amazon orders report from {iso_start} to {iso_end}")
-    report_id = create_report(
-        access_token,
-        "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
-        [MARKETPLACE_ID],
-        iso_start,
-        iso_end
-    )
-    if not report_id:
-        return None
-
-    document_id = poll_report(access_token, report_id)
-    if not document_id:
-        return None
-
-    filename = f"amazon_orders_{start_date.strftime('%Y-%m-%d')}.tsv"
-    downloaded_path = download_report(access_token, document_id, filename)
-
-    if downloaded_path:
-        df = load_report_to_dataframe(downloaded_path)
-        if df is not None:
-            # Optional: save as Excel
-            excel_filename = downloaded_path.replace(".tsv", ".xlsx")
-            df.to_excel(excel_filename, index=False)
-            print(f"📁 Excel saved: {excel_filename}")
-            return df
-    return None
-
-# NEW: Main execution for products
-def get_amazon_products_report():
-    access_token = get_amazon_access_token()
-    if not access_token:
-        return None
-
-    # Report type for all active listings. There are other product reports too.
-    # E.g., _GET_FLAT_FILE_OPEN_LISTINGS_DATA_ or _GET_FBA_MYI_ALL_INVENTORY_DATA_
+    # First, get the basic product listing report
     report_type = "GET_MERCHANT_LISTINGS_ALL_DATA"
-
     print(f"📦 Requesting Amazon products report ({report_type})")
-    # Product listing reports usually don't require dataStartTime/dataEndTime
+    
     report_id = create_report(access_token, report_type, [MARKETPLACE_ID])
     if not report_id:
         return None
@@ -441,27 +460,126 @@ def get_amazon_products_report():
     if not document_id:
         return None
 
-    # Use a timestamp for the filename for product reports as they are snapshots
     filename = f"amazon_products_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.tsv"
     downloaded_path = download_report(access_token, document_id, filename)
 
-    if downloaded_path:
-        df = load_report_to_dataframe(downloaded_path)
-        if df is not None:
-            # Save as Excel
-            excel_filename = downloaded_path.replace(".tsv", ".xlsx")
-            df.to_excel(excel_filename, index=False)
-            print(f"📁 Excel saved: {excel_filename}")
-            return df
+    if not downloaded_path:
+        return None
+
+    df = load_report_to_dataframe(downloaded_path)
+    if df is None:
+        return None
+
+    # Check if ASIN column exists (it might be named differently)
+    asin_column = None
+    possible_asin_columns = ['asin', 'ASIN', 'asin1', 'ASIN1', 'item-name']
+    
+    for col in possible_asin_columns:
+        if col in df.columns:
+            asin_column = col
+            break
+    
+    if not asin_column:
+        print("❌ Could not find ASIN column in the report. Available columns:")
+        print(df.columns.tolist())
+        print("📋 Saving report without category information...")
+    else:
+        print(f"✅ Found ASIN column: {asin_column}")
+        
+        # Get unique ASINs (remove any empty/null values)
+        unique_asins = df[asin_column].dropna().unique()
+        unique_asins = [asin for asin in unique_asins if asin and str(asin).strip()]
+        
+        if len(unique_asins) > 0:
+            print(f"🎯 Found {len(unique_asins)} unique ASINs to process")
+            
+            # Get category information for all ASINs
+            category_data = get_categories_for_products(access_token, unique_asins, MARKETPLACE_ID)
+            
+            # Add category columns to the dataframe
+            df['primary_category'] = df[asin_column].map(lambda x: category_data.get(x, {}).get('primary_category', ''))
+            df['all_categories'] = df[asin_column].map(lambda x: category_data.get(x, {}).get('categories', ''))
+            df['product_types'] = df[asin_column].map(lambda x: category_data.get(x, {}).get('product_types', ''))
+            
+            print("✅ Category information added to the dataframe")
+        else:
+            print("❌ No valid ASINs found in the report")
+
+    # Save as Excel
+    excel_filename = downloaded_path.replace(".tsv", ".xlsx")
+    df.to_excel(excel_filename, index=False)
+    print(f"📁 Excel saved with category information: {excel_filename}")
+    
+    return df
+
+# ALTERNATIVE: Use a different report type that might include more category info
+def get_amazon_products_report_alternative():
+    """
+    Try alternative report types that might include category information
+    """
+    access_token = get_amazon_access_token()
+    if not access_token:
+        return None
+
+    # Try different report types
+    report_types_to_try = [
+        "GET_MERCHANT_LISTINGS_DATA",  # Might have more detailed info
+        "GET_FLAT_FILE_OPEN_LISTINGS_DATA",  # Alternative listing report
+        "GET_FBA_MYI_ALL_INVENTORY_DATA"  # FBA inventory report (if using FBA)
+    ]
+    
+    for report_type in report_types_to_try:
+        print(f"📦 Trying report type: {report_type}")
+        
+        report_id = create_report(access_token, report_type, [MARKETPLACE_ID])
+        if report_id:
+            document_id = poll_report(access_token, report_id)
+            if document_id:
+                filename = f"amazon_products_{report_type}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.tsv"
+                downloaded_path = download_report(access_token, document_id, filename)
+                
+                if downloaded_path:
+                    df = load_report_to_dataframe(downloaded_path)
+                    if df is not None:
+                        print(f"✅ Successfully got report with {report_type}")
+                        print("Available columns:", df.columns.tolist())
+                        
+                        # Save as Excel
+                        excel_filename = downloaded_path.replace(".tsv", ".xlsx")
+                        df.to_excel(excel_filename, index=False)
+                        print(f"📁 Excel saved: {excel_filename}")
+                        return df
+        
+        print(f"❌ Failed to get report with {report_type}, trying next...")
+    
+    print("❌ All alternative report types failed")
     return None
 
 
 if __name__ == "__main__":
-    print("--- Fetching Amazon Products Report Example ---")
-    products_df = get_amazon_products_report()
+    print("--- Fetching Amazon Products Report with Categories ---")
+    
+    # Choose which method to use:
+    
+    # Method 1: Get basic report + fetch categories via API (Recommended)
+    products_df = get_amazon_products_report_with_categories()
+    
+    # Method 2: Try alternative report types (Uncomment to try)
+    # products_df = get_amazon_products_report_alternative()
+    
     if products_df is not None:
-        print("\nFirst 5 rows of Products DataFrame:")
+        print(f"\n📊 Final DataFrame shape: {products_df.shape}")
+        print("\nColumn names:")
+        print(products_df.columns.tolist())
+        print("\nFirst 5 rows:")
         print(products_df.head())
-    else:
-        print("\nFailed to get Amazon products report.")
         
+        # Show category information if available
+        category_columns = [col for col in products_df.columns if 'category' in col.lower()]
+        if category_columns:
+            print(f"\n🏷️  Category columns: {category_columns}")
+            print("Sample category data:")
+            for col in category_columns:
+                print(f"{col}: {products_df[col].value_counts().head()}")
+    else:
+        print("\n❌ Failed to get Amazon products report with categories.")

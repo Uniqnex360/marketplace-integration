@@ -2977,95 +2977,148 @@ def profit_loss_chart(request):
     timezone = 'US/Pacific'
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
+    
     if start_date != None and start_date != "":
         from_date, to_date = convertdateTotimezone(start_date,end_date,timezone)
     else:
         from_date, to_date = get_date_range(preset,timezone)
+    
     def get_month_range(year, month):
         start_date = datetime(year, month, 1)
         last_day = monthrange(year, month)[1]
         end_date = datetime(year, month, last_day, 23, 59, 59)
         return start_date, end_date
-    def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone):
+    
+    def calculate_metrics_optimized(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone):
+        # Get all orders for the date range
+        result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
+        
+        if not result:
+            return {
+                "grossRevenue": 0,
+                "expenses": 0,
+                "netProfit": 0,
+                "roi": 0,
+                "unitsSold": 0,
+                "refunds": 0,
+                "skuCount": 0,
+                "margin": 0,
+                "tax_price": 0,
+                "total_cogs": 0,
+                "product_cost": 0,
+                "productCategories": {},
+                "productCompleteness": {"complete": 0, "incomplete": 0}
+            }
+        
+        # Collect all order item IDs in one go
+        all_item_ids = []
+        order_data = {}
+        
+        for order in result:
+            order_total = order.get("order_total", 0)
+            marketplace_name = order.get('marketplace_name', '')
+            units = order.get('items_order_quantity', 0)
+            
+            order_data[order.get('_id')] = {
+                'order_total': order_total,
+                'marketplace_name': marketplace_name,
+                'units': units
+            }
+            
+            all_item_ids.extend(order.get("order_items", []))
+        
+        # Single aggregation query to get all item data at once
+        item_pipeline = [
+            {"$match": {"_id": {"$in": all_item_ids}}},
+            {
+                "$lookup": {
+                    "from": "product",
+                    "localField": "ProductDetails.product_id",
+                    "foreignField": "_id",
+                    "as": "product_ins"
+                }
+            },
+            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+            {
+                "$project": {
+                    "_id": 1,
+                    "price": "$Pricing.ItemPrice.Amount",
+                    "tax_price": "$Pricing.ItemTax.Amount",
+                    "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                    "sku": "$product_ins.sku",
+                    "category": "$product_ins.category",
+                    "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                    "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                    "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                }
+            }
+        ]
+        
+        # Execute single query for all items
+        all_items = list(OrderItems.objects.aggregate(*item_pipeline))
+        item_lookup = {str(item['_id']): item for item in all_items}
+        
+        # Initialize counters
         gross_revenue_amt = 0
         total_cogs = 0
-        refund = 0
-        net_profit = 0
-        margin = 0
+        temp_price = 0
+        tax_price = 0
+        vendor_funding = 0
         total_units = 0
         sku_set = set()
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
-        order_total = 0
-        tax_price = 0
-        temp_price = 0
-        vendor_funding = 0
-        result = grossRevenue(start_date, end_date,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone)
+        
+        # Process orders using pre-fetched data
         for order in result:
             gross_revenue_amt += order.get("order_total", 0)
-            order_total = order.get("order_total", 0)
-            total_units +=order['items_order_quantity']
+            total_units += order.get('items_order_quantity', 0)
+            marketplace_name = order.get('marketplace_name', '')
+            
             for item_id in order.get("order_items", []):
-                item_pipeline = [
-                    {"$match": {"_id": item_id}},
-                    {
-                        "$lookup": {
-                            "from": "product",
-                            "localField": "ProductDetails.product_id",
-                            "foreignField": "_id",
-                            "as": "product_ins"
-                        }
-                    },
-                    {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-                    {
-                        "$project": {
-                            "price": "$Pricing.ItemPrice.Amount",
-                            "tax_price": "$Pricing.ItemTax.Amount",
-                            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                            "sku": "$product_ins.sku",
-                            "category": "$product_ins.category",
-                            "total_cogs" : {"$ifNull":["$product_ins.total_cogs",0]},
-                            "w_total_cogs" : {"$ifNull":["$product_ins.w_total_cogs",0]},
-                            "vendor_funding" : {"$ifNull":["$product_ins.vendor_funding",0]},
-                        }
-                    }
-                ]
-                item_result = list(OrderItems.objects.aggregate(*item_pipeline))
-                if item_result:
-                    item = item_result[0]
+                item = item_lookup.get(str(item_id))
+                if item:
                     temp_price += item.get("price", 0)
                     tax_price += item.get("tax_price", 0)
-                    if order['marketplace_name'] == "Amazon":
-                        total_cogs += item.get("total_cogs", 0) 
+                    
+                    if marketplace_name == "Amazon":
+                        total_cogs += item.get("total_cogs", 0)
                     else:
                         total_cogs += item.get("w_total_cogs", 0)
+                    
                     vendor_funding += item.get("vendor_funding", 0)
+                    
                     sku = item.get("sku")
                     if sku:
                         sku_set.add(sku)
+                    
                     category = item.get("category", "Unknown")
                     product_categories[category] = product_categories.get(category, 0) + 1
+                    
                     if item.get("price") and item.get("total_cogs") and sku:
                         product_completeness["complete"] += 1
                     else:
                         product_completeness["incomplete"] += 1
+        
         net_profit = (temp_price - total_cogs) + vendor_funding
         margin = (net_profit / gross_revenue_amt * 100) if gross_revenue_amt else 0
+        
         return {
             "grossRevenue": round(gross_revenue_amt, 2),
-            "expenses": round((total_cogs) , 2),
+            "expenses": round(total_cogs, 2),
             "netProfit": round(net_profit, 2),
-            "roi": round((net_profit / (total_cogs)) * 100, 2) if (total_cogs) else 0,
+            "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs else 0,
             "unitsSold": total_units,
-            "refunds": refund,
+            "refunds": 0,  # refund was always 0 in original code
             "skuCount": len(sku_set),
             "margin": round(margin, 2),
             "tax_price": tax_price,
             "total_cogs": total_cogs,
-            "product_cost": order_total,
+            "product_cost": gross_revenue_amt,  # using gross_revenue_amt as it was order_total
             "productCategories": product_categories,
             "productCompleteness": product_completeness
         }
+
     def generate_month_keys(start_year, start_month, end_year, end_month):
         months = []
         current = datetime(start_year, start_month, 1)
@@ -3075,24 +3128,59 @@ def profit_loss_chart(request):
             current += timedelta(days=32)
             current = current.replace(day=1)
         return months
+
+    # Pre-calculate interval configuration
     metrics = ["grossRevenue", "estimatedPayout", "expenses", "netProfit", "units", "ppcSales"]
     values = {metric: {} for metric in metrics}
+    
     hourly_presets = ["Today", "Yesterday"]
-    daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", "Last 60 days", "Last 90 days","Last Month","This Quarter","Last Quarter","Last Year"]
+    daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", 
+                    "Last 60 days", "Last 90 days", "Last Month", "This Quarter", "Last Quarter", "Last Year"]
+    
     if preset in hourly_presets:
-        interval_keys = [(from_date + timedelta(hours=i)).strftime("%Y-%m-%d %H:00:00") 
-                         for i in range(0, int((to_date - from_date).total_seconds() // 3600) + 1)]
+        # Get current Pacific Time
+        from pytz import timezone as pytz_timezone
+        pacific_tz = pytz_timezone('US/Pacific')
+        current_pacific_time = datetime.now(pacific_tz)
+        
+        # Calculate total hours but limit to current hour for today/yesterday
+        total_hours = int((to_date - from_date).total_seconds() // 3600) + 1
+        
+        # For hourly intervals, don't go beyond current Pacific hour
+        interval_keys = []
+        for i in range(total_hours):
+            interval_time = from_date + timedelta(hours=i)
+            
+            # Convert interval time to Pacific timezone for comparison
+            if interval_time.tzinfo is None:
+                interval_time_pacific = pacific_tz.localize(interval_time)
+            else:
+                interval_time_pacific = interval_time.astimezone(pacific_tz)
+            
+            # Only include intervals up to current Pacific hour
+            if interval_time_pacific.replace(minute=0, second=0, microsecond=0) <= current_pacific_time.replace(minute=0, second=0, microsecond=0):
+                interval_keys.append(interval_time.strftime("%Y-%m-%d %H:00:00"))
+            else:
+                break
+                
         interval_type = "hour"
     elif preset in daily_presets:
         interval_keys = [(from_date + timedelta(days=i)).strftime("%Y-%m-%d 00:00:00") 
                          for i in range((to_date - from_date).days + 1)]
         interval_type = "day"
     else:
-        interval_keys = generate_month_keys(
-            from_date.year, from_date.month,
-            to_date.year, to_date.month
-        )
-        interval_type = "month"
+        if start_date and start_date != '':
+            interval_keys = [(from_date + timedelta(days=i)).strftime("%Y-%m-%d 00:00:00")
+                            for i in range((to_date - from_date).days + 1)]
+            interval_type = 'day'   
+        else:
+            interval_keys = generate_month_keys(
+                from_date.year, from_date.month,
+                to_date.year, to_date.month
+            )
+            interval_type = "month"
+
+    # Process intervals with optimized function
     for key in interval_keys:
         if interval_type == "hour":
             start = datetime.strptime(key, "%Y-%m-%d %H:00:00")
@@ -3100,17 +3188,23 @@ def profit_loss_chart(request):
         elif interval_type == "day":
             start = datetime.strptime(key, "%Y-%m-%d 00:00:00")
             end = start + timedelta(days=1) - timedelta(seconds=1)
-        else:
+        else:  # month
             year, month = int(key[:4]), int(key[5:7])
             start, end = get_month_range(year, month)
-        data = calculate_metrics(start, end,marketplace_id,brand_id,product_id,manufacturer_name,fulfillment_channel,timezone)
+
+        data = calculate_metrics_optimized(start, end, marketplace_id, brand_id, product_id, 
+                                         manufacturer_name, fulfillment_channel, timezone)
+        
         values["grossRevenue"][key] = data["grossRevenue"]
         values["expenses"][key] = data["expenses"]
         values["netProfit"][key] = data["netProfit"]
         values["units"][key] = data["unitsSold"]
+
+    # Ensure all metrics have all keys (fill missing with 0)
     for metric in metrics:
         for key in interval_keys:
             values[metric].setdefault(key, 0)
+
     graph = [{"metric": metric, "values": values[metric]} for metric in metrics]
     return JsonResponse({"graph": graph}, safe=False)
 @csrf_exempt
