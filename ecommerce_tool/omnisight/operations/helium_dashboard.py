@@ -222,6 +222,7 @@ def get_metrics_by_date_range(request):
             margin = (net_profit / gross_revenue) * 100 if gross_revenue != 0 else 0
         metrics[key] = {
             "gross_revenue": round(gross_revenue, 2),
+            "total_tax":round(tax_price,2),
             "total_cogs": round(total_cogs, 2),
             "refund": round(refund, 2),
             "margin": round(margin, 2),
@@ -234,6 +235,7 @@ def get_metrics_by_date_range(request):
         "total_cogs": round(metrics["targeted"]["total_cogs"] - metrics["previous"]["total_cogs"], 2),
         "refund": round(metrics["targeted"]["refund"] - metrics["previous"]["refund"], 2),
         "margin": round(metrics["targeted"]["margin"] - metrics["previous"]["margin"], 2),
+        "total_tax":round(metrics['targeted']['total_tax']-metrics['previous']['total_tax'],2),
         "net_profit": round(metrics["targeted"]["net_profit"] - metrics["previous"]["net_profit"], 2),
         "total_orders": round(metrics["targeted"]["total_orders"] - metrics["previous"]["total_orders"], 2),
         "total_units": round(metrics["targeted"]["total_units"] - metrics["previous"]["total_units"], 2),
