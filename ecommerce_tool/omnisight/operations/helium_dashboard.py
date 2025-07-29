@@ -819,16 +819,7 @@ def getPreviousDateRange(start_date, end_date):
     previous_start_date = start_date - duration - timedelta(days=1)
     previous_end_date = start_date - timedelta(days=1)
     return previous_start_date.strftime("%Y-%m-%d"), previous_end_date.strftime("%Y-%m-%d")
-ALLOWED_SORT_FIELDS = {
-    "cogs", "shipping_cost", "page_views", "refund", "sessions",
-    "listing_quality_score", "channel_fee", "fullfillment_by_channel_fee",
-    "vendor_funding", "vendor_discount", "product_cost", "referral_fee",
-    "a_shipping_cost", "total_cogs", "w_product_cost", "walmart_fee",
-    "w_shiping_cost", "w_total_cogs", "pack_size", "created_at", "updated_at",
-    "product_created_date", "producted_last_updated_date", "brand_name", "category", 
-    "manufacturer_name", "price_start", "price_end", "stock", "sku_count", 
-    "totalchannelFees", "netProfit", "grossRevenue", "unitsSoldForToday", "salesForToday"
-}
+
 @csrf_exempt
 def get_products_with_pagination(request):
     json_request = JSONParser().parse(request)
