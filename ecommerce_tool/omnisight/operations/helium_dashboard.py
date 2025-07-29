@@ -1290,7 +1290,7 @@ def getPeriodWiseData(request):
          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
     response_data = {}
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         future_to_label = {
             executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
             for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
@@ -3131,8 +3131,31 @@ def profit_loss_chart(request):
                     "Last 60 days", "Last 90 days", "Last Month", "This Quarter", "Last Quarter", "Last Year"]
     
     if preset in hourly_presets:
-        interval_keys = [(from_date + timedelta(hours=i)).strftime("%Y-%m-%d %H:00:00") 
-                         for i in range(0, int((to_date - from_date).total_seconds() // 3600) + 1)]
+        # Get current Pacific Time
+        from pytz import timezone as pytz_timezone
+        pacific_tz = pytz_timezone('US/Pacific')
+        current_pacific_time = datetime.now(pacific_tz)
+        
+        # Calculate total hours but limit to current hour for today/yesterday
+        total_hours = int((to_date - from_date).total_seconds() // 3600) + 1
+        
+        # For hourly intervals, don't go beyond current Pacific hour
+        interval_keys = []
+        for i in range(total_hours):
+            interval_time = from_date + timedelta(hours=i)
+            
+            # Convert interval time to Pacific timezone for comparison
+            if interval_time.tzinfo is None:
+                interval_time_pacific = pacific_tz.localize(interval_time)
+            else:
+                interval_time_pacific = interval_time.astimezone(pacific_tz)
+            
+            # Only include intervals up to current Pacific hour
+            if interval_time_pacific.replace(minute=0, second=0, microsecond=0) <= current_pacific_time.replace(minute=0, second=0, microsecond=0):
+                interval_keys.append(interval_time.strftime("%Y-%m-%d %H:00:00"))
+            else:
+                break
+                
         interval_type = "hour"
     elif preset in daily_presets:
         interval_keys = [(from_date + timedelta(days=i)).strftime("%Y-%m-%d 00:00:00") 
