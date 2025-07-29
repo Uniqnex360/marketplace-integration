@@ -1290,7 +1290,7 @@ def getPeriodWiseData(request):
          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
     response_data = {}
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         future_to_label = {
             executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
             for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
@@ -2958,6 +2958,7 @@ def getProfitAndLossDetails(request):
     return JsonResponse(response_data, safe=False)
 
 @csrf_exempt
+#profit loss has been updated on july 29
 def profit_loss_chart(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
