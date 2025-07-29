@@ -3136,34 +3136,40 @@ def profit_loss_chart(request):
     hourly_presets = ["Today", "Yesterday"]
     daily_presets = ["This Week", "Last Week", "Last 7 days", "Last 14 days", "Last 30 days", 
                     "Last 60 days", "Last 90 days", "Last Month", "This Quarter", "Last Quarter", "Last Year"]
-    
-    if preset in hourly_presets:
-        # Get current Pacific Time
-        from pytz import timezone as pytz_timezone
-        pacific_tz = pytz_timezone('US/Pacific')
-        current_pacific_time = datetime.now(pacific_tz)
-        
-        # Calculate total hours but limit to current hour for today/yesterday
-        if start_date and end_date and  start_date[:10]==end_date[:10]:
-            total_hours = int((to_date - from_date).total_seconds() // 3600) + 1
-        
-        # For hourly intervals, don't go beyond current Pacific hour
-            interval_keys = []
-            for i in range(total_hours):
-                interval_time = from_date + timedelta(hours=i)
-            
-            # Convert interval time to Pacific timezone for comparison
-                if interval_time.tzinfo is None:
-                    interval_time_pacific = pacific_tz.localize(interval_time)
-                else:
-                    interval_time_pacific = interval_time.astimezone(pacific_tz)
-            
-            # Only include intervals up to current Pacific hour
-                if interval_time_pacific.replace(minute=0, second=0, microsecond=0) <= current_pacific_time.replace(minute=0, second=0, microsecond=0):
-                    interval_keys.append(interval_time.strftime("%Y-%m-%d %H:00:00"))
-                else:
-                    break
-                
+
+    # --- INTERVAL LOGIC STARTS HERE ---
+    from pytz import timezone as pytz_timezone
+    pacific_tz = pytz_timezone('US/Pacific')
+    current_pacific_time = datetime.now(pacific_tz)
+
+    # Always return hourly intervals if start_date and end_date are the same day
+    if start_date and end_date and start_date[:10] == end_date[:10]:
+        total_hours = int((to_date - from_date).total_seconds() // 3600) + 1
+        interval_keys = []
+        for i in range(total_hours):
+            interval_time = from_date + timedelta(hours=i)
+            if interval_time.tzinfo is None:
+                interval_time_pacific = pacific_tz.localize(interval_time)
+            else:
+                interval_time_pacific = interval_time.astimezone(pacific_tz)
+            if interval_time_pacific.replace(minute=0, second=0, microsecond=0) <= current_pacific_time.replace(minute=0, second=0, microsecond=0):
+                interval_keys.append(interval_time.strftime("%Y-%m-%d %H:00:00"))
+            else:
+                break
+        interval_type = "hour"
+    elif preset in hourly_presets:
+        total_hours = int((to_date - from_date).total_seconds() // 3600) + 1
+        interval_keys = []
+        for i in range(total_hours):
+            interval_time = from_date + timedelta(hours=i)
+            if interval_time.tzinfo is None:
+                interval_time_pacific = pacific_tz.localize(interval_time)
+            else:
+                interval_time_pacific = interval_time.astimezone(pacific_tz)
+            if interval_time_pacific.replace(minute=0, second=0, microsecond=0) <= current_pacific_time.replace(minute=0, second=0, microsecond=0):
+                interval_keys.append(interval_time.strftime("%Y-%m-%d %H:00:00"))
+            else:
+                break
         interval_type = "hour"
     elif preset in daily_presets:
         interval_keys = [(from_date + timedelta(days=i)).strftime("%Y-%m-%d 00:00:00") 
@@ -3180,6 +3186,7 @@ def profit_loss_chart(request):
                 to_date.year, to_date.month
             )
             interval_type = "month"
+    # --- INTERVAL LOGIC ENDS HERE ---
 
     # Process intervals with optimized function
     for key in interval_keys:
