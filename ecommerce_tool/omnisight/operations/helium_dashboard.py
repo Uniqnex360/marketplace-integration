@@ -3144,24 +3144,25 @@ def profit_loss_chart(request):
         current_pacific_time = datetime.now(pacific_tz)
         
         # Calculate total hours but limit to current hour for today/yesterday
-        total_hours = int((to_date - from_date).total_seconds() // 3600) + 1
+        if start_date and end_date and  start_date[:10]==end_date[:10]:
+            total_hours = int((to_date - from_date).total_seconds() // 3600) + 1
         
         # For hourly intervals, don't go beyond current Pacific hour
-        interval_keys = []
-        for i in range(total_hours):
-            interval_time = from_date + timedelta(hours=i)
+            interval_keys = []
+            for i in range(total_hours):
+                interval_time = from_date + timedelta(hours=i)
             
             # Convert interval time to Pacific timezone for comparison
-            if interval_time.tzinfo is None:
-                interval_time_pacific = pacific_tz.localize(interval_time)
-            else:
-                interval_time_pacific = interval_time.astimezone(pacific_tz)
+                if interval_time.tzinfo is None:
+                    interval_time_pacific = pacific_tz.localize(interval_time)
+                else:
+                    interval_time_pacific = interval_time.astimezone(pacific_tz)
             
             # Only include intervals up to current Pacific hour
-            if interval_time_pacific.replace(minute=0, second=0, microsecond=0) <= current_pacific_time.replace(minute=0, second=0, microsecond=0):
-                interval_keys.append(interval_time.strftime("%Y-%m-%d %H:00:00"))
-            else:
-                break
+                if interval_time_pacific.replace(minute=0, second=0, microsecond=0) <= current_pacific_time.replace(minute=0, second=0, microsecond=0):
+                    interval_keys.append(interval_time.strftime("%Y-%m-%d %H:00:00"))
+                else:
+                    break
                 
         interval_type = "hour"
     elif preset in daily_presets:
