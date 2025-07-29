@@ -5094,81 +5094,84 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
     from bson import ObjectId
     import pytz
     try:
+        # --- Step 1: Parse all incoming filter values ---
+        start_datetime, end_datetime = None, None
+        pacific_tz = pytz.timezone("US/Pacific")
         if start_date:
-            start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
-            pacific_tz = pytz.timezone("US/Pacific")
-            start_datetime = pacific_tz.localize(start_datetime.replace(hour=0, minute=0, second=0))
-        else:
-            start_datetime = None
+            dt = datetime.strptime(start_date, '%Y-%m-%d')
+            start_datetime = pacific_tz.localize(dt.replace(hour=0, minute=0, second=0))
         if end_date:
-            end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
-            pacific_tz = pytz.timezone("US/Pacific")
-            end_datetime = pacific_tz.localize(end_datetime.replace(hour=23, minute=59, second=59))
-        else:
-            end_datetime = None
-        pipeline = []
-        match_query={}
-        date_conditions={}
-        
+            dt = datetime.strptime(end_date, '%Y-%m-%d')
+            end_datetime = pacific_tz.localize(dt.replace(hour=23, minute=59, second=59))
+
+        # --- Step 2: Build a single dictionary for all our filters ---
+        match_query = {}
+
+        # Part A: Add date conditions (NOT nested)
+        date_conditions = {}
         if start_datetime:
-            if start_datetime:
-                date_conditions["$gte"] = start_datetime
-            if end_datetime:
-                date_conditions["$lte"] = end_datetime
-            if date_conditions:
-                match_query['order_date']=date_conditions
-            if brands:
-                brand_object_ids=[ObjectId(b) for b in brands if len(b)==24]
-                products_in_brands=Product.objects(brand_id__in=brand_object_ids).only('id')
-                product_ids_from_brands=[p.id for p in products_in_brands]
-                order_item_with_products=OrderItems.objects(ProductDetails__product_id__in=product_ids_from_brands  ).only('id')
-                order_item_ids=[oi.id for oi in order_item_with_products]
-                match_query['order_items']={"$in":order_item_ids}
-                if match_query:
-                    pipeline.append({"$match":match_query})
-        pipeline.append({
-            "$lookup": {
-                "from": "marketplace",
-                "localField": "marketplace_id",
-                "foreignField": "_id",
-                "as": "marketplace_info"
-            }
-        })
-        pipeline.append({
-            "$project": {
+            date_conditions["$gte"] = start_datetime
+        if end_datetime:
+            date_conditions["$lte"] = end_datetime
+        if date_conditions:
+            match_query["order_date"] = date_conditions
+
+        # Part B: Add brand conditions (NOT nested)
+        if brands:
+            brand_object_ids = [ObjectId(b) for b in brands if len(b) == 24]
+            products_in_brands = Product.objects(brand_id__in=brand_object_ids).only('id')
+            product_ids_from_brands = [p.id for p in products_in_brands]
+            order_items_with_products = OrderItems.objects(ProductDetails__product_id__in=product_ids_from_brands).only('id')
+            order_item_ids = [oi.id for oi in order_items_with_products]
+            match_query["order_items"] = {"$in": order_item_ids}
+
+        # --- Step 3: Build the final aggregation pipeline ---
+        pipeline = []
+        
+        # Only add the $match stage if there are any filters. This happens ONCE.
+        if match_query:
+            pipeline.append({"$match": match_query})
+
+        # --- Step 4: Add advanced lookup and projection stages ---
+        # Use .extend() to add all the remaining stages at once.
+        pipeline.extend([
+            {"$unwind": {"path": "$order_items", "preserveNullAndEmptyArrays": True}},
+            {"$lookup": {"from": "order_items", "localField": "order_items", "foreignField": "_id", "as": "order_item_details"}},
+            {"$unwind": {"path": "$order_item_details", "preserveNullAndEmptyArrays": True}},
+            {"$lookup": {"from": "product", "localField": "order_item_details.ProductDetails.product_id", "foreignField": "_id", "as": "product_info"}},
+            {"$unwind": {"path": "$product_info", "preserveNullAndEmptyArrays": True}},
+            {"$lookup": {"from": "brand", "localField": "product_info.brand_id", "foreignField": "_id", "as": "brand_info"}},
+            {"$unwind": {"path": "$brand_info", "preserveNullAndEmptyArrays": True}},
+            {"$group": {
+                "_id": "$_id",
+                "purchase_order_id": {"$first": "$purchase_order_id"},
+                "order_date": {"$first": "$order_date"},
+                "order_total": {"$first": "$order_total"},
+                "order_status": {"$first": "$order_status"},
+                "marketplace_id": {"$first": "$marketplace_id"},
+                "brand_names": {"$addToSet": "$brand_info.name"}
+            }},
+            {"$lookup": {"from": "marketplace", "localField": "marketplace_id", "foreignField": "_id", "as": "marketplace_info"}},
+            {"$project": {
                 "_id": 0,
                 "order_id": {"$toString": "$_id"},
                 "purchase_order_id": "$purchase_order_id",
-                "customer_name": "$customer_name",
-                "customer_email": "$customer_email",
-                "shipping_address": "$shipping_address",
                 "order_date": "$order_date",
-                "order_status": "$order_status",
                 "order_total": "$order_total",
-                "currency": "$currency",
-                "total_quantity": "$total_quantity",
-                "items_order_quantity": "$items_order_quantity",
-                "marketplace_name": {
-                    "$ifNull": [
-                        {"$arrayElemAt": ["$marketplace_info.name", 0]},
-                        "Unknown"
-                    ]
-                },
+                "order_status": "$order_status",
+                "marketplace_name": {"$ifNull": [{"$arrayElemAt": ["$marketplace_info.name", 0]}, "Unknown"]},
                 "brand_name": {
-                    "$ifNull": [
-                        {"$arrayElemAt": ["$brand_info.name", 0]},
-                        "Unknown"
-                    ]
-                },
-                "expected_delivery_date": "$expected_delivery_date",
-                "tracking_number": "$tracking_number"
-            }
-        })
-        pipeline.append({
-            "$sort": {
-                "order_date": -1
-            }
-        })
+                    "$reduce": {
+                        "input": "$brand_names", "initialValue": "", "in": {
+                            "$cond": [ {"$eq": ["$$value", ""]}, "$$this", {"$concat": ["$$value", ", ", "$$this"]} ]
+                        }
+                    }
+                }
+            }},
+            {"$sort": {"order_date": -1}}
+        ])
+        
+        # --- Step 5: Execute the query and format the results ---
         orders = list(Order.objects.aggregate(*pipeline))
         pacific_tz = pytz.timezone("US/Pacific")
         for order in orders:
