@@ -5065,6 +5065,7 @@ def cogsGraph(request):
         "total_cogs": round(product_obj.total_cogs, 2) if product_obj.total_cogs else 0,
     }]
     return response_list
+
 def priceGraph(request):
     product_id = request.GET.get('product_id')
     preset = request.GET.get('preset', 'Today')
@@ -5106,49 +5107,31 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
         else:
             end_datetime = None
         pipeline = []
-        if brands:
-            brand_objects = []
-            for brand in brands:
-                if isinstance(brand, str) and len(brand) == 24:  
-                    try:
-                        brand_objects.append(ObjectId(brand))
-                    except:
-                        brand_objects.append(brand)  
-                else:
-                    brand_objects.append(brand)
-            pipeline.append({
-                "$match": {
-                    "$or": [
-                        {"brand_id": {"$in": brand_objects}},
-                        {"brand_name": {"$in": brands}}
-                    ]
-                }
-            })
-        date_match = {}
-        if start_datetime or end_datetime:
+        match_query={}
+        date_conditions={}
+        
+        if start_datetime:
             if start_datetime:
-                date_match["$gte"] = start_datetime
+                date_conditions["$gte"] = start_datetime
             if end_datetime:
-                date_match["$lte"] = end_datetime
-            pipeline.append({
-                "$match": {
-                    "order_date": date_match
-                }
-            })
+                date_conditions["$lte"] = end_datetime
+            if date_conditions:
+                match_query['order_date']=date_conditions
+            if brands:
+                brand_object_ids=[ObjectId(b) for b in brands if len(b)==24]
+                products_in_brands=Product.objects(brand_id__in=brand_object_ids).only('id')
+                product_ids_from_brands=[p.id for p in products_in_brands]
+                order_item_with_products=OrderItems.objects(ProductDetails__product_id__in=product_ids_from_brands  ).only('id')
+                order_item_ids=[oi.id for oi in order_item_with_products]
+                match_query['order_items']={"$in":order_item_ids}
+                if match_query:
+                    pipeline.append({"$match":match_query})
         pipeline.append({
             "$lookup": {
                 "from": "marketplace",
                 "localField": "marketplace_id",
                 "foreignField": "_id",
                 "as": "marketplace_info"
-            }
-        })
-        pipeline.append({
-            "$lookup": {
-                "from": "brands",
-                "localField": "brand_id", 
-                "foreignField": "_id",
-                "as": "brand_info"
             }
         })
         pipeline.append({
@@ -5211,6 +5194,7 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
     except Exception as e:
         print(f"Error in get_orders_by_brand_and_date: {e}")
         return []
+    
 async def get_all_orders_by_brand_and_date(brands, start_date, end_date, include_custom=False):
     """
     Get both regular and custom orders by brand and date
@@ -5289,7 +5273,7 @@ def downloadOrders(request):
         start_date = data.get('start_date')
         end_date = data.get("end_date")
         file_format = data.get("format", 'csv')
-        orders = asyncio.run(get_orders_by_brand_and_date(brands, start_date, end_date))
+        orders = asyncio.run(get_all_orders_by_brand_and_date(brands, start_date, end_date))
         if not orders:
             return {'error': "No orders for the given filters"}
         df = pd.DataFrame(orders)
