@@ -218,7 +218,7 @@ def get_amazon_orders_report(start_date: datetime, end_date: datetime):
     return df
 if __name__ == "__main__":
     # Example: Fetch for July 9 and 10, 2025
-    for date_str in ["2025-07-22", "2025-07-23",'2025-07-24','2025-07-25']:
+    for date_str in ["2025-07-28"]:
         start = datetime.strptime(date_str, "%Y-%m-%d")
         end = start.replace(hour=23, minute=59, second=59)
         start_pacific=pacific.localize(start)

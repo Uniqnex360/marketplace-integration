@@ -205,7 +205,6 @@ def get_metrics_by_date_range(request):
         total_orders = len(result)
         if result != []:
             for ins in result:
-                tax_price = 0
                 gross_revenue += ins['order_total']
                 total_units += ins['items_order_quantity']
                 for j in ins['order_items']:
