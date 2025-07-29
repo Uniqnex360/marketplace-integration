@@ -5297,6 +5297,12 @@ def downloadOrders(request):
             )
             response['Content-Disposition'] = 'attachment; filename=orders.xlsx'
             return response 
+        elif file_format=='txt':
+            output=io.StringIO()
+            df.to_csv(output,index=False,sep='\t')
+            response=HttpResponse(output.getvalue(),content_type='text/plain')
+            response['Content-Disposition'] = 'attachment; filename=orders.txt'
+            return response 
         else:
             return {'error': "Invalid format"}
     except Exception as e:
