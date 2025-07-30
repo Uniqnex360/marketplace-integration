@@ -717,16 +717,9 @@ def get_top_products(request):
             "productId": "$product_ins._id",
             "timeBucket": {
                 "$dateToString": {
-    "format": "%Y-%m-%d %H:00:00",  # Adjust to your desired format
-    "date": {
-        "$dateToString": {
-            "format": "%Y-%m-%d %H:%M:%S",
-            "date": "$chart_key_raw",
-            "timezone": "US/Pacific"  # Ensure the timezone is set here
-        }
-    }
-}
-
+                    "format": chart_date_format,
+                    "date": "$chart_key_raw"
+                }
             }
         },
         "productTitle": {"$first": "$product_ins.product_title"},
