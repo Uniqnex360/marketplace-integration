@@ -202,7 +202,14 @@ def get_metrics_by_date_range(request):
         if refund_ins != []:
             for ins in refund_ins:
                 refund += len(ins['order_items'])
-        total_orders = len(result)
+        unique_order_ids=set()
+        for order in result:
+            if 'purchase_order_id' in order and order['purchase_order_id']:
+                unique_order_ids.add(order['purchase_order_id'])
+            else:
+                unique_order_ids.add(str(order['_id']))
+        total_orders = len(unique_order_ids)
+        
         if result != []:
             for ins in result:
                 gross_revenue += ins['order_total']
@@ -634,7 +641,7 @@ def get_top_products(request):
     else:
         start_date, end_date = get_date_range(preset, timezone_str)  
     duration_hours = (end_date - start_date).total_seconds() / 3600
-    if duration_hours <= 24 or start_date.date() == end_date.date():
+    if duration_hours <= 24:
         chart_date_format = "%Y-%m-%d %H:00:00+00:00"
     else:
         chart_date_format = "%Y-%m-%d 00:00:00+00:00"
