@@ -813,6 +813,14 @@ def get_top_products(request):
         if title:
             formatted_results.append(product_dict)
     data = {"results": {"items": formatted_results}}
+    # After you create the formatted_results list but before returning the data
+    for item in formatted_results:
+        if "chart" in item:
+            if duration_hours <= 24:
+                end_date_str = end_date.strftime("%Y-%m-%d %H:00:00+00:00")
+            else :
+                end_date_str = end_date.strftime("%Y-%m-%d 00:00:00+00:00")
+            item["chart"] = {k: v for k, v in item["chart"].items() if k < end_date_str}
     return data
 def getPreviousDateRange(start_date, end_date):
     duration = end_date - start_date
