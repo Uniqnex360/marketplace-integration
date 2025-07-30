@@ -627,17 +627,11 @@ def get_top_products(request):
         local_tz = pytz.timezone(timezone_str)
         naive_from_date = datetime.strptime(start_date_str, '%Y-%m-%d')
         naive_to_date = datetime.strptime(end_date_str, '%Y-%m-%d')
-
-# Calculate the start of the NEXT day (e.g., 2025-07-16 00:00:00)
-        exclusive_end_date_naive = naive_to_date + timedelta(days=1)
-
-# Localize and convert to UTC
-        localized_from_date = local_tz.localize(naive_from_date)
-        localized_exclusive_to_date = local_tz.localize(exclusive_end_date_naive)
+        localized_from_date = local_tz.localize(naive_from_date).replace(hour=0, minute=0, second=0)
+        localized_to_date = local_tz.localize(naive_to_date).replace(hour=23, minute=59, second=59)
 
         start_date = localized_from_date.astimezone(pytz.UTC)
-        end_date = localized_exclusive_to_date.astimezone(pytz.UTC) # This will be 2025-07-16 07:00:00 UTC
-
+        end_date = localized_to_date.astimezone(pytz.UTC)
     else:
         start_date, end_date = get_date_range(preset, timezone_str)  
     duration_hours = (end_date - start_date).total_seconds() / 3600
@@ -661,7 +655,7 @@ def get_top_products(request):
         "refund": "$order_items_ins.ProductDetails.QuantityShipped"
     }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
     match = dict()
-    match['order_date'] = {"$gte": start_date, "$lt": end_date}
+    match['order_date'] = {"$gte": start_date, "$lte": end_date}
     match['order_status'] = {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
     if marketplace_id and marketplace_id not in ["all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
