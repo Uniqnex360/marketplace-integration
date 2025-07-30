@@ -525,32 +525,11 @@ def updatedRevenueWidgetAPIView(request):
     timezone_str="US/Pacific"
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    
-    # Define function to adjust only order count
-    def adjust_order_count(metrics, start_date, end_date, marketplace_id, brand_id, product_id, 
-                      manufacturer_name, fulfillment_channel, timezone_str):
-        # Get raw orders to recalculate unique order count
-        raw_orders = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, 
-                          manufacturer_name, fulfillment_channel, timezone_str)
-    
-        # Count unique orders
-        unique_order_ids = set()
-        for order in raw_orders:
-            if 'purchase_order_id' in order and order['purchase_order_id']:
-                unique_order_ids.add(order['purchase_order_id'])
-            else:
-                unique_order_ids.add(str(order['_id']))
-    
-        # Update ONLY the order count in the metrics
-        metrics['orders'] = len(unique_order_ids)
-        return metrics
-    
     if start_date != None and start_date != "":
         start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
     else:
         start_date, end_date = get_date_range(preset,timezone_str)
     comapre_past = get_previous_periods(start_date, end_date)
-    
     def fetch_total():
         return totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id, 
                                     product_id, manufacturer_name, fulfillment_channel,timezone_str)
@@ -564,7 +543,6 @@ def updatedRevenueWidgetAPIView(request):
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
         return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, 
                            brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
-    
     with ThreadPoolExecutor(max_workers=4) as executor:
         future_total = executor.submit(fetch_total)
         future_graph_data = executor.submit(fetch_graph_data)
@@ -577,38 +555,26 @@ def updatedRevenueWidgetAPIView(request):
             future_compare_graph_data = executor.submit(fetch_compare_graph_data)
             compare_total = future_compare_total.result()
             compare_graph = future_compare_graph_data.result()
-        
         total = future_total.result()
         graph_data = future_graph_data.result()
-    
-    # Adjust the order counts
-    total = adjust_order_count(total, start_date, end_date, marketplace_id, brand_id, product_id, 
-                               manufacturer_name, fulfillment_channel, timezone_str)
-    
-    if compare_total:
-        compare_total = adjust_order_count(compare_total, compare_startdate, compare_enddate, marketplace_id, brand_id, 
-                                         product_id, manufacturer_name, fulfillment_channel, timezone_str)
-    
-    # Adjust graph data order counts
-    for key, metrics in graph_data.items():
-        # Need to calculate the specific date range for this graph point
-        point_date = datetime.strptime(key, "%Y-%m-%d") if isinstance(key, str) else start_date
-        point_end = point_date.replace(hour=23, minute=59, second=59)
-        point_start = point_date.replace(hour=0, minute=0, second=0)
-        
-        metrics = adjust_order_count(metrics, point_start, point_end, marketplace_id, brand_id, product_id,
-                                    manufacturer_name, fulfillment_channel, timezone_str)
-    
-    if compare_graph:
-        for key, metrics in compare_graph.items():
-            point_date = datetime.strptime(key, "%Y-%m-%d") if isinstance(key, str) else compare_startdate
-            point_end = point_date.replace(hour=23, minute=59, second=59)
-            point_start = point_date.replace(hour=0, minute=0, second=0)
-            
-            metrics = adjust_order_count(metrics, point_start, point_end, marketplace_id, brand_id, product_id,
-                                       manufacturer_name, fulfillment_channel, timezone_str)
-    
     updated_graph = {}
+    def adjust_order_count(metrics, start_date, end_date, marketplace_id, brand_id, product_id, 
+                      manufacturer_name, fulfillment_channel, timezone_str):
+    # Get raw orders to recalculate unique order count
+        raw_orders = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, 
+                          manufacturer_name, fulfillment_channel, timezone_str)
+    
+    # Count unique orders
+        unique_order_ids = set()
+        for order in raw_orders:
+            if 'purchase_order_id' in order and order['purchase_order_id']:
+                unique_order_ids.add(order['purchase_order_id'])
+            else:
+                unique_order_ids.add(str(order['_id']))
+    
+    # Update ONLY the order count in the metrics
+    metrics['orders'] = len(unique_order_ids)
+    return metrics
     if compare_startdate and compare_startdate != "":
         for index, (key, metrics) in enumerate(graph_data.items()):
             compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
@@ -642,13 +608,11 @@ def updatedRevenueWidgetAPIView(request):
                 "refund_amount": metrics.get("refund_amount", 0),
                 "refund_quantity": metrics.get("refund_quantity", 0),
             }
-    
     data = {
         "total": total,
         "graph": updated_graph,
         "comapre_past": comapre_past
     }
-    
     if compare_startdate and compare_startdate != "":
         difference = {
             "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
@@ -660,7 +624,6 @@ def updatedRevenueWidgetAPIView(request):
             "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
         }
         data['compare_total'] = difference
-    
     name = "Revenue"
     item_pipeline = [{"$match": {"name": name}}]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
@@ -671,7 +634,6 @@ def updatedRevenueWidgetAPIView(request):
                          'refund_amount', 'net_profit', 'profit_margin', 'orders']:
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
-    
     return data
 @csrf_exempt
 def get_top_products(request):
