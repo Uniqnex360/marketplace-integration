@@ -719,7 +719,6 @@ def get_top_products(request):
                 "$dateToString": {
                     "format": chart_date_format,
                     "date": "$chart_key_raw",
-                      "timezone": timezone_str 
                 }
             }
         },
