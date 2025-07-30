@@ -654,7 +654,7 @@ def get_top_products(request):
         "refund": "$order_items_ins.ProductDetails.QuantityShipped"
     }.get(metric, "$order_items_ins.ProductDetails.QuantityOrdered")
     match = dict()
-    match['order_date'] = {"$gte": start_date, "$lte": end_date}
+    match['order_date'] = {"$gte": start_date, "$lt": end_date}
     match['order_status'] = {"$in": ['Shipped', 'Delivered', 'Acknowledged', 'Pending', 'Unshipped', 'PartiallyShipped']}
     if marketplace_id and marketplace_id not in ["all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
@@ -718,7 +718,8 @@ def get_top_products(request):
             "timeBucket": {
                 "$dateToString": {
                     "format": chart_date_format,
-                    "date": "$chart_key_raw"
+                    "date": "$chart_key_raw",
+                      "timezone": timezone_str 
                 }
             }
         },
