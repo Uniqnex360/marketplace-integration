@@ -1187,10 +1187,17 @@ def ordersCountForDashboard(request):
         pipeline.append({
             "$group": {
                 "_id": None, 
-                "count": {"$sum": 1},
+                "unique_order_ids":{"$addToSet":{"$ifNull":['$purchase_order_id']}},
                 "order_value": {"$sum": "$order_total"}
             }
-        })
+        },
+                        {
+                            "$project":{
+                                "count":{"$size":"$unique_order_ids"},
+                                "order_value":1
+                            }
+                        }
+                        )
         
         res = list(Order.objects.aggregate(*pipeline))
         if res:
