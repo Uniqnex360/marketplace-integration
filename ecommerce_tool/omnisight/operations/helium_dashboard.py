@@ -558,23 +558,7 @@ def updatedRevenueWidgetAPIView(request):
         total = future_total.result()
         graph_data = future_graph_data.result()
     updated_graph = {}
-    def adjust_order_count(metrics, start_date, end_date, marketplace_id, brand_id, product_id, 
-                      manufacturer_name, fulfillment_channel, timezone_str):
-    # Get raw orders to recalculate unique order count
-        raw_orders = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, 
-                          manufacturer_name, fulfillment_channel, timezone_str)
     
-    # Count unique orders
-        unique_order_ids = set()
-        for order in raw_orders:
-            if 'purchase_order_id' in order and order['purchase_order_id']:
-                unique_order_ids.add(order['purchase_order_id'])
-            else:
-                unique_order_ids.add(str(order['_id']))
-    
-    # Update ONLY the order count in the metrics
-    metrics['orders'] = len(unique_order_ids)
-    return metrics
     if compare_startdate and compare_startdate != "":
         for index, (key, metrics) in enumerate(graph_data.items()):
             compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
@@ -635,6 +619,7 @@ def updatedRevenueWidgetAPIView(request):
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
     return data
+import pytz
 @csrf_exempt
 def get_top_products(request):
     json_request = JSONParser().parse(request)
