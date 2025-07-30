@@ -820,7 +820,16 @@ def get_top_products(request):
                 end_date_str = end_date.strftime("%Y-%m-%d %H:00:00+00:00")
             else :
                 end_date_str = end_date.strftime("%Y-%m-%d 00:00:00+00:00")
-            item["chart"] = {k: v for k, v in item["chart"].items() if k < end_date_str}
+            filtered_chart = {k: v for k, v in item["chart"].items() if k < end_date_str}
+            same_day = start_date.date() == end_date.date()
+            if same_day:
+                hour_chart = {}
+                for k, v in filtered_chart.items():
+                    hour = k.split(" ")[1].split(":")[0]
+                    hour_chart[hour + "h"] = v
+                    item["chart"] = hour_chart
+            else:
+                item["chart"] = filtered_chart
     return data
 def getPreviousDateRange(start_date, end_date):
     duration = end_date - start_date
