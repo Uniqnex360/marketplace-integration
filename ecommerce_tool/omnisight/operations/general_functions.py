@@ -1185,20 +1185,18 @@ def ordersCountForDashboard(request):
     def count_orders(q):
         pipeline = build_pipeline_with_product_filter(match_conditions)
         pipeline.append({
-            "$group": {
-                "_id": None, 
-                "unique_order_ids":{"$addToSet":{"$ifNull":['$purchase_order_id']}},
-                "order_value": {"$sum": "$order_total"}
-            }
-        },
-                        {
-                            "$project":{
-                                "count":{"$size":"$unique_order_ids"},
-                                "order_value":1
-                            }
-                        }
-                        )
-        
+        "$group": {
+            "_id": None, 
+            "unique_order_ids": {"$addToSet": {"$ifNull": ['$purchase_order_id', '$_id']}},
+            "order_value": {"$sum": "$order_total"}
+        }
+    })
+        pipeline.append({
+        "$project": {
+            "count": {"$size": "$unique_order_ids"},
+            "order_value": 1
+        }
+    })
         res = list(Order.objects.aggregate(*pipeline))
         if res:
             q.put((res[0].get("count", 0), res[0].get("order_value", 0)))
