@@ -627,9 +627,8 @@ def get_top_products(request):
         local_tz = pytz.timezone(timezone_str)
         naive_from_date = datetime.strptime(start_date_str, '%Y-%m-%d')
         naive_to_date = datetime.strptime(end_date_str, '%Y-%m-%d')
-        localized_from_date = local_tz.localize(naive_from_date).replace(hour=0, minute=0, second=0)
+        localized_from_date = local_tz.localize(naive_from_date)
         localized_to_date = local_tz.localize(naive_to_date).replace(hour=23, minute=59, second=59)
-
         start_date = localized_from_date.astimezone(pytz.UTC)
         end_date = localized_to_date.astimezone(pytz.UTC)
     else:
@@ -717,12 +716,10 @@ def get_top_products(request):
         "_id": {
             "productId": "$product_ins._id",
             "timeBucket": {
-            "$dateToString": {
-    "format": "%Y-%m-%d",
-    "date": "$order_date",
-    "timezone": "America/Los_Angeles"
-}
-
+                "$dateToString": {
+                    "format": chart_date_format,
+                    "date": "$chart_key_raw"
+                }
             }
         },
         "productTitle": {"$first": "$product_ins.product_title"},
