@@ -41,7 +41,6 @@ class Brand(Document):
     
 
 
-
 class Manufacturer(Document):
     name = StringField()  # Manufacturer name
     description = StringField()  # Manufacturer description
@@ -267,10 +266,16 @@ class Order(Document):
     customer_order_id = StringField()  # ID from the customer's perspective for tracking
     seller_order_id = StringField()  # ID used by the seller for internal purposes
     merchant_order_id = StringField()  # ID used by the merchant for internal purposes
-
+    shipstation_id=StringField()
+    shipstation_synced=BooleanField(default=False)
+    shipstation_sync_date=DateTimeField()
+    shipping_rates_fetched=BooleanField(default=False)
+    shipping_rates_date=DateTimeField()
+    shipping_cost=FloatField(default=0.0)
+    tracking_number=StringField()
+    
     # Customer details
     customer_email_id = StringField()  # Email of the customer
-
     # Order timing
     order_date = DateTimeField()  # Date when the order was placed
     pacific_date = DateTimeField()  # Date in Pacific Time Zone
@@ -312,7 +317,7 @@ class Order(Document):
     order_total = FloatField(default=0.0)  # Total order cost including products, shipping, and taxes
     currency = StringField()  # Currency used for the order
     is_global_express_enabled = BooleanField()  # True if fast shipping is available for international orders
-
+    customer_name = StringField()
 
     order_channel = StringField()  # The channel through which the order was placed
     items_order_quantity = IntField(default=0)  # Number of items in the order
@@ -320,6 +325,16 @@ class Order(Document):
 
 
 
+class ShippingRate(Document):
+    order=ReferenceField(Order)
+    carrier=StringField()
+    service=StringField()
+    rate=FloatField()
+    delivery_days=IntField()
+    rate_data=DictField()
+    created_at=DateTimeField(default=datetime.now)
+    shipment_type = StringField(choices=['combined', 'split'])  
+    item_sku = StringField() 
 
 
 class product_details(EmbeddedDocument):
@@ -344,6 +359,12 @@ class custom_order(Document):
     shipment_type = StringField()  # e.g., "Standard", "Express"
     channel = StringField()  # e.g., "Amazon", "Shopify"
     order_status = StringField(default="Pending")
+    # Add these fields to Order model
+    multiple_shipments = BooleanField(default=False)  # Used in update_shipstation_status
+    shipments = ListField(DictField())  # Used to store shipment details
+    shipment_type = StringField(choices=['combined', 'split'])  # How items were shipped
+    shipping_options = DictField()  # Stores combined/split shipping options
+    recommended_shipping = StringField(choices=['combined', 'split'])     
 
     # Payment details
     payment_status = StringField(default="Pending")  # e.g., "Paid", "Pending"
