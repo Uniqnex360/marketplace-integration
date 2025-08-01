@@ -5347,6 +5347,7 @@ async def get_all_orders_by_brand_and_date(brands, start_date, end_date, include
                 "order_date": "$purchase_order_date",
                 "order_status": "$order_status",
                 "order_total": "$total_price",
+                'sku':'$sku',
                 "currency": {"$ifNull": ["$currency", "USD"]},
                 "total_quantity": "$total_quantity",
                 "items_order_quantity": {"$ifNull": ["$items_order_quantity", "$total_quantity"]},
