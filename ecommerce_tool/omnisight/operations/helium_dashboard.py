@@ -5256,7 +5256,7 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
                 "marketplace_id": {"$first": "$marketplace_id"},
                 "brand_names": {"$addToSet": "$brand_info.name"},
                 "skus":{"$addToSet":'$order_item_details.ProductDetails.SKU'},
-                'total_quantity':{"$addToSet":"$order_item_details.ProductDetails.QuantityOrdered"},
+                'total_quantity':{"$sum":"$order_item_details.ProductDetails.QuantityOrdered"},
                 "order_total": {"$first": "$order_total"},
                 "unit_prices":{"$addToSet":"$order_item_details.Pricing.ItemPrice.Amount"},
                 "item_taxes": {"$sum": {"$ifNull": ["$order_item_details.Pricing.ItemTax.Amount", 0]}},
@@ -5362,7 +5362,7 @@ async def get_all_orders_by_brand_and_date(brands, start_date, end_date, include
                 "shipping_address": "$shipping_address",
                 "order_date": "$purchase_order_date",
                 "order_status": "$order_status",
-                "order_total": "$total_price",
+                
                 "currency": {"$ifNull": ["$currency", "USD"]},
                 "total_quantity": "$total_quantity",
                 "items_order_quantity": {"$ifNull": ["$items_order_quantity", "$total_quantity"]},
@@ -5398,7 +5398,8 @@ async def get_all_orders_by_brand_and_date(brands, start_date, end_date, include
 "subtotal":{"$sum":"$ordered_products.quantity_price"},
 "tax":"$tax_amount",
 "shipping_price":"$shipment_cost",
-"shipping_tax":0
+"shipping_tax":0,
+"order_total": "$total_price",
 }
             }
         })
