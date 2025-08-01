@@ -5260,7 +5260,9 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
                 "order_total": {"$first": "$order_total"},
                 "order_status": {"$first": "$order_status"},
                 "marketplace_id": {"$first": "$marketplace_id"},
-                "brand_names": {"$addToSet": "$brand_info.name"}
+                "brand_names": {"$addToSet": "$brand_info.name"},
+                "skus":{"$addToSet":'$order_item_details.ProductDetails.SKU'},
+                'total_quantity':{"$addToSet":"$order_item_details.ProductDetails.QuantityOrdered"}
             }},
             {"$lookup": {"from": "marketplace", "localField": "marketplace_id", "foreignField": "_id", "as": "marketplace_info"}},
             {"$project": {
@@ -5277,7 +5279,15 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
                             "$cond": [ {"$eq": ["$$value", ""]}, "$$this", {"$concat": ["$$value", ", ", "$$this"]} ]
                         }
                     }
-                }
+                },
+                "sku": {
+    "$reduce": {
+        "input": "$skus", "initialValue": "", "in": {
+            "$cond": [ {"$eq": ["$$value", ""]}, "$$this", {"$concat": ["$$value", ", ", "$$this"]} ]
+        }
+    }
+},
+"total_quantity": "$total_quantity"
             }},
             {"$sort": {"order_date": -1}}
         ])
@@ -5310,9 +5320,6 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
         return []
     
 async def get_all_orders_by_brand_and_date(brands, start_date, end_date, include_custom=False):
-    """
-    Get both regular and custom orders by brand and date
-    """
     regular_orders = await get_orders_by_brand_and_date(brands, start_date, end_date)
     if not include_custom:
         return regular_orders
@@ -5347,14 +5354,26 @@ async def get_all_orders_by_brand_and_date(brands, start_date, end_date, include
                 "order_date": "$purchase_order_date",
                 "order_status": "$order_status",
                 "order_total": "$total_price",
-                'sku':'$sku',
                 "currency": {"$ifNull": ["$currency", "USD"]},
                 "total_quantity": "$total_quantity",
                 "items_order_quantity": {"$ifNull": ["$items_order_quantity", "$total_quantity"]},
                 "marketplace_name": "Custom Order",
                 "brand_name": "Custom",
                 "expected_delivery_date": "$expected_delivery_date",
-                "tracking_number": {"$ifNull": ["$tracking_number", ""]}
+                "tracking_number": {"$ifNull": ["$tracking_number", ""]},
+                "sku": {
+    "$reduce": {
+        "input": "$ordered_products.sku",
+        "initialValue": "",
+        "in": {
+            "$cond": [
+                {"$eq": ["$$value", ""]},
+                "$$this",
+                {"$concat": ["$$value", ", ", "$$this"]}
+            ]
+        }
+    }
+}
             }
         })
         pipeline.append({
