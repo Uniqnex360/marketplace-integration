@@ -5238,8 +5238,6 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
         if match_query:
             pipeline.append({"$match": match_query})
 
-        # --- Step 4: Add advanced lookup and projection stages ---
-        # Use .extend() to add all the remaining stages at once.
         pipeline.extend([
             {"$unwind": {"path": "$order_items", "preserveNullAndEmptyArrays": True}},
             {"$lookup": {"from": "order_items", "localField": "order_items", "foreignField": "_id", "as": "order_item_details"}},
@@ -5268,7 +5266,7 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
                 "order_id": {"$toString": "$_id"},
                 "purchase_order_id": "$purchase_order_id",
                 "order_date": "$order_date",
-                "order_total": "$order_total",
+                
                 "order_status": "$order_status",
                 "marketplace_name": {"$ifNull": [{"$arrayElemAt": ["$marketplace_info.name", 0]}, "Unknown"]},
                 "brand_name": {
@@ -5296,7 +5294,8 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
 "subtotal":"$subtotal",
 'tax':"$item_taxes",
 "shipping_price":{"$ifNull":["$shipping_price",0]},
-'shipping_tax':{"$ifNull":["$shipping_tax",0]}
+'shipping_tax':{"$ifNull":["$shipping_tax",0]},
+"order_total": "$order_total",
             }},
             {"$sort": {"order_date": -1}}
         ])
