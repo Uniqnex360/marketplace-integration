@@ -618,6 +618,7 @@ def fetchOrderDetails(request):
                 "customer_order_id": {"$ifNull": ["$customer_order_id", ""]},
                 "seller_order_id": {"$ifNull": ["$seller_order_id", ""]},
                 "customer_email_id": {"$ifNull": ["$customer_email_id", ""]},
+                "shipping_price":{"$ifNull":["$shipping_price",0]},
                 "order_date": {
                     "$dateToString": {
                         "format": "%Y-%m-%dT%H:%M:%S.%LZ",

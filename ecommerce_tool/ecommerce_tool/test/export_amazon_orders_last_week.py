@@ -114,23 +114,23 @@
 # pacific = pytz.timezone("US/Pacific")
 
 # # Step 1: Get access token
-# def get_amazon_access_token():
-#     url = "https://api.amazon.com/auth/o2/token"
-#     payload = {
-#         "grant_type": "refresh_token",
-#         "refresh_token": REFRESH_TOKEN,
-#         "client_id": AMAZON_API_KEY,
-#         "client_secret": AMAZON_SECRET_KEY,
-#     }
-#     headers = {"Content-Type": "application/x-www-form-urlencoded"}
+def get_amazon_access_token():
+    url = "https://api.amazon.com/auth/o2/token"
+    payload = {
+        "grant_type": "refresh_token",
+        "refresh_token": REFRESH_TOKEN,
+        "client_id": AMAZON_API_KEY,
+        "client_secret": AMAZON_SECRET_KEY,
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-#     try:
-#         response = requests.post(url, data=payload, headers=headers)
-#         response.raise_for_status()
-#         return response.json().get("access_token")
-#     except Exception as e:
-#         print(f"❌ Failed to get access token: {e}")
-#         return None
+    try:
+        response = requests.post(url, data=payload, headers=headers)
+        response.raise_for_status()
+        return response.json().get("access_token")
+    except Exception as e:
+        print(f"❌ Failed to get access token: {e}")
+        return None
 
 # # Step 2: Request report generation
 # def create_order_report(access_token, start_time, end_time):
@@ -245,23 +245,23 @@ from ecommerce_tool.settings import (
 pacific = pytz.timezone("US/Pacific")
 
 # Existing functions (get_amazon_access_token, create_report, poll_report, download_report, load_report_to_dataframe)
-def get_amazon_access_token():
-    url = "https://api.amazon.com/auth/o2/token"
-    payload = {
-        "grant_type": "refresh_token",
-        "refresh_token": REFRESH_TOKEN,
-        "client_id": AMAZON_API_KEY,
-        "client_secret": AMAZON_SECRET_KEY,
-    }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+# def get_amazon_access_token():
+#     url = "https://api.amazon.com/auth/o2/token"
+#     payload = {
+#         "grant_type": "refresh_token",
+#         "refresh_token": REFRESH_TOKEN,
+#         "client_id": AMAZON_API_KEY,
+#         "client_secret": AMAZON_SECRET_KEY,
+#     }
+#     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-    try:
-        response = requests.post(url, data=payload, headers=headers)
-        response.raise_for_status()
-        return response.json().get("access_token")
-    except Exception as e:
-        print(f"❌ Failed to get access token: {e}")
-        return None
+#     try:
+#         response = requests.post(url, data=payload, headers=headers)
+#         response.raise_for_status()
+#         return response.json().get("access_token")
+#     except Exception as e:
+#         print(f"❌ Failed to get access token: {e}")
+#         return None
 
 def create_report(access_token, report_type, marketplace_ids, data_start_time=None, data_end_time=None):
     url = "https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports"
@@ -556,30 +556,55 @@ def get_amazon_products_report_alternative():
     return None
 
 
+def get_fba_shipping_and_fee_report(start_date: datetime, end_date: datetime):
+    access_token = get_amazon_access_token()
+    if not access_token:
+        return None
+
+    report_type = "GET_FBA_FULFILLMENT_CUSTOMER_SHIPMENT_SALES_DATA"
+    marketplace_ids = [MARKETPLACE_ID]
+    
+    print(f"📦 Requesting FBA shipping/fee report from {start_date} to {end_date}")
+    report_id = create_report(
+        access_token,
+        report_type,
+        marketplace_ids,
+        data_start_time=start_date.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        data_end_time=end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+    )
+    
+    if not report_id:
+        return None
+
+    document_id = poll_report(access_token, report_id)
+    if not document_id:
+        return None
+
+    filename = f"fba_fees_{start_date.strftime('%Y-%m-%d')}.tsv"
+    downloaded_path = download_report(access_token, document_id, filename)
+    if not downloaded_path:
+        return None
+
+    df = load_report_to_dataframe(downloaded_path)
+    if df is None:
+        return None
+
+    # Optional: Save to Excel
+    excel_filename = downloaded_path.replace(".tsv", ".xlsx")
+    df.to_excel(excel_filename, index=False)
+    print(f"📁 Excel saved: {excel_filename}")
+
+    # Show a preview
+    print(f"\n📊 FBA Fees Report Loaded: {df.shape[0]} rows")
+    print("📋 Columns:", df.columns.tolist())
+    print(df.head())
+
+    return df
 if __name__ == "__main__":
-    print("--- Fetching Amazon Products Report with Categories ---")
-    
-    # Choose which method to use:
-    
-    # Method 1: Get basic report + fetch categories via API (Recommended)
-    products_df = get_amazon_products_report_with_categories()
-    
-    # Method 2: Try alternative report types (Uncomment to try)
-    # products_df = get_amazon_products_report_alternative()
-    
-    if products_df is not None:
-        print(f"\n📊 Final DataFrame shape: {products_df.shape}")
-        print("\nColumn names:")
-        print(products_df.columns.tolist())
-        print("\nFirst 5 rows:")
-        print(products_df.head())
-        
-        # Show category information if available
-        category_columns = [col for col in products_df.columns if 'category' in col.lower()]
-        if category_columns:
-            print(f"\n🏷️  Category columns: {category_columns}")
-            print("Sample category data:")
-            for col in category_columns:
-                print(f"{col}: {products_df[col].value_counts().head()}")
-    else:
-        print("\n❌ Failed to get Amazon products report with categories.")
+    from datetime import timedelta
+
+    # Yesterday's report
+    end_date = datetime.now(pytz.utc).replace(hour=23, minute=59, second=59)
+    start_date = end_date - timedelta(days=1)
+
+    get_fba_shipping_and_fee_report(start_date, end_date)
