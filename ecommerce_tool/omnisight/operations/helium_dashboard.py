@@ -5257,7 +5257,7 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
                 "brand_names": {"$addToSet": "$brand_info.name"},
                 "skus":{"$addToSet":'$order_item_details.ProductDetails.SKU'},
                 'total_quantity':{"$sum":"$order_item_details.ProductDetails.QuantityOrdered"},
-                "order_total": {"$first": "$order_total"},
+                
                 "unit_prices":{"$addToSet":"$order_item_details.Pricing.ItemPrice.Amount"},
                 "item_taxes": {"$sum": {"$ifNull": ["$order_item_details.Pricing.ItemTax.Amount", 0]}},
                 "subtotal": {"$sum": {"$multiply": ["$order_item_details.ProductDetails.QuantityOrdered", "$order_item_details.Pricing.ItemPrice.Amount"]}}
@@ -5296,7 +5296,8 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
 "subtotal":"$subtotal",
 'tax':"$item_taxes",
 "shipping_price":{"$ifNull":["$shipping_price",0]},
-'shipping_tax':{"$ifNull":["$shipping_tax",0]}
+'shipping_tax':{"$ifNull":["$shipping_tax",0]},
+"order_total": {"$first": "$order_total"},
             }},
             {"$sort": {"order_date": -1}}
         ])
@@ -5354,54 +5355,54 @@ async def get_all_orders_by_brand_and_date(brands, start_date, end_date, include
             })
         pipeline.append({
             "$project": {
-                "_id": 0,
-                "order_id": {"$toString": "$_id"},
-                "purchase_order_id": "$order_id",  
-                "customer_name": "$customer_name",
-                "customer_email": {"$ifNull": ["$customer_email", ""]},
-                "shipping_address": "$shipping_address",
-                "order_date": "$purchase_order_date",
-                "order_status": "$order_status",
-                
-                "currency": {"$ifNull": ["$currency", "USD"]},
-                "total_quantity": "$total_quantity",
-                "items_order_quantity": {"$ifNull": ["$items_order_quantity", "$total_quantity"]},
-                "marketplace_name": "Custom Order",
-                "brand_name": "Custom",
-                "expected_delivery_date": "$expected_delivery_date",
-                "tracking_number": {"$ifNull": ["$tracking_number", ""]},
-                "sku": {
-    "$reduce": {
-        "input": "$ordered_products.sku",
-        "initialValue": "",
-        "in": {
-            "$cond": [
-                {"$eq": ["$$value", ""]},
-                "$$this",
-                {"$concat": ["$$value", ", ", "$$this"]}
-            ]
+    "_id": 0,
+    "order_id": {"$toString": "$_id"},
+    "purchase_order_id": "$order_id",
+    "customer_name": "$customer_name",
+    "customer_email": {"$ifNull": ["$customer_email", ""]},
+    "shipping_address": "$shipping_address",
+    "order_date": "$purchase_order_date",
+    "order_status": "$order_status",
+    "currency": {"$ifNull": ["$currency", "USD"]},
+    "total_quantity": "$total_quantity",
+    "items_order_quantity": {"$ifNull": ["$items_order_quantity", "$total_quantity"]},
+    "marketplace_name": "Custom Order",
+    "brand_name": "Custom",
+    "expected_delivery_date": "$expected_delivery_date",
+    "tracking_number": {"$ifNull": ["$tracking_number", ""]},
+    "sku": {
+        "$reduce": {
+            "input": "$ordered_products.sku",
+            "initialValue": "",
+            "in": {
+                "$cond": [
+                    {"$eq": ["$$value", ""]},
+                    "$$this",
+                    {"$concat": ["$$value", ", ", "$$this"]}
+                ]
+            }
         }
     },
     "unit_price": {
-    "$reduce": {
-        "input": "$ordered_products.unit_price",
-        "initialValue": "",
-        "in": {
-            "$cond": [
-                {"$eq": ["$$value", ""]},
-                {"$toString": "$$this"},
-                {"$concat": ["$$value", ", ", {"$toString": "$$this"}]}
-            ]
-        }
-    }
-},
-"subtotal":{"$sum":"$ordered_products.quantity_price"},
-"tax":"$tax_amount",
-"shipping_price":"$shipment_cost",
-"shipping_tax":0,
-"order_total": "$total_price",
-}
+        "$reduce": {
+            "input": "$ordered_products.unit_price",
+            "initialValue": "",
+            "in": {
+                "$cond": [
+                    {"$eq": ["$$value", ""]},
+                    {"$toString": "$$this"},
+                    {"$concat": ["$$value", ", ", {"$toString": "$$this"}]}
+                ]
             }
+        }
+    },
+    "subtotal": {"$sum": "$ordered_products.quantity_price"},
+    "tax": "$tax_amount",
+    "shipping_price": "$shipment_cost",
+    "shipping_tax": 0,
+    "order_total": "$total_price"  # <-- Make sure this is the last field
+}
+
         })
         pipeline.append({
             "$sort": {
