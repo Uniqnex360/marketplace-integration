@@ -5257,12 +5257,12 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
                 "_id": "$_id",
                 "purchase_order_id": {"$first": "$purchase_order_id"},
                 "order_date": {"$first": "$order_date"},
-                "order_total": {"$first": "$order_total"},
                 "order_status": {"$first": "$order_status"},
                 "marketplace_id": {"$first": "$marketplace_id"},
                 "brand_names": {"$addToSet": "$brand_info.name"},
                 "skus":{"$addToSet":'$order_item_details.ProductDetails.SKU'},
-                'total_quantity':{"$addToSet":"$order_item_details.ProductDetails.QuantityOrdered"}
+                'total_quantity':{"$addToSet":"$order_item_details.ProductDetails.QuantityOrdered"},
+                "order_total": {"$first": "$order_total"}
             }},
             {"$lookup": {"from": "marketplace", "localField": "marketplace_id", "foreignField": "_id", "as": "marketplace_info"}},
             {"$project": {
