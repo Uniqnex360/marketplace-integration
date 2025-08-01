@@ -5205,7 +5205,6 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
     from bson import ObjectId
     import pytz
     try:
-        # --- Step 1: Parse all incoming filter values ---
         start_datetime, end_datetime = None, None
         pacific_tz = pytz.timezone("US/Pacific")
         if start_date:
@@ -5215,10 +5214,8 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
             dt = datetime.strptime(end_date, '%Y-%m-%d')
             end_datetime = pacific_tz.localize(dt.replace(hour=23, minute=59, second=59))
 
-        # --- Step 2: Build a single dictionary for all our filters ---
         match_query = {}
 
-        # Part A: Add date conditions (NOT nested)
         date_conditions = {}
         if start_datetime:
             date_conditions["$gte"] = start_datetime
@@ -5236,10 +5233,8 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
             order_item_ids = [oi.id for oi in order_items_with_products]
             match_query["order_items"] = {"$in": order_item_ids}
 
-        # --- Step 3: Build the final aggregation pipeline ---
         pipeline = []
         
-        # Only add the $match stage if there are any filters. This happens ONCE.
         if match_query:
             pipeline.append({"$match": match_query})
 
@@ -5262,7 +5257,10 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
                 "brand_names": {"$addToSet": "$brand_info.name"},
                 "skus":{"$addToSet":'$order_item_details.ProductDetails.SKU'},
                 'total_quantity':{"$addToSet":"$order_item_details.ProductDetails.QuantityOrdered"},
-                "order_total": {"$first": "$order_total"}
+                "order_total": {"$first": "$order_total"},
+                "unit_prices":{"$addToSet":"$order_item_details.Pricing.ItemPrice.Amount"},
+                "item_taxes": {"$sum": {"$ifNull": ["$order_item_details.Pricing.ItemTax.Amount", 0]}},
+                "subtotal": {"$sum": {"$multiply": ["$order_item_details.ProductDetails.QuantityOrdered", "$order_item_details.Pricing.ItemPrice.Amount"]}}
             }},
             {"$lookup": {"from": "marketplace", "localField": "marketplace_id", "foreignField": "_id", "as": "marketplace_info"}},
             {"$project": {
@@ -5287,7 +5285,18 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
         }
     }
 },
-"total_quantity": "$total_quantity"
+"total_quantity": "$total_quantity",
+"unit_price": {
+    "$reduce": {
+        "input": "$unit_prices", "initialValue": "", "in": {
+            "$cond": [ {"$eq": ["$$value", ""]}, {"$toString": "$$this"}, {"$concat": ["$$value", ", ", {"$toString": "$$this"}]} ]
+        }
+    }
+},
+"subtotal":"$subtotal",
+'tax':"$item_taxes",
+"shipping_price":{"$ifNull":["$shipping_price",0]},
+'shipping_tax':{"$ifNull":["$shipping_tax",0]}
             }},
             {"$sort": {"order_date": -1}}
         ])
@@ -5372,7 +5381,24 @@ async def get_all_orders_by_brand_and_date(brands, start_date, end_date, include
                 {"$concat": ["$$value", ", ", "$$this"]}
             ]
         }
+    },
+    "unit_price": {
+    "$reduce": {
+        "input": "$ordered_products.unit_price",
+        "initialValue": "",
+        "in": {
+            "$cond": [
+                {"$eq": ["$$value", ""]},
+                {"$toString": "$$this"},
+                {"$concat": ["$$value", ", ", {"$toString": "$$this"}]}
+            ]
+        }
     }
+},
+"subtotal":{"$sum":"$ordered_products.quantity_price"},
+"tax":"$tax_amount",
+"shipping_price":"$shipment_cost",
+"shipping_tax":0
 }
             }
         })
