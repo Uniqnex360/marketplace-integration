@@ -22,36 +22,8 @@ class Marketplace(Document):
 
 from datetime import datetime
 
-def save(self, *args, **kwargs):
-    self.updated_at = datetime.utcnow()
-    return super(Order, self).save(*args, **kwargs)
-class DailyMetrics(Document):
-    meta = {
-        'indexes': [
-            {'fields': ('brand_id', 'marketplace_id', 'date')}
-        ]
-    }
 
-    date = DateTimeField(required=True)
-    brand_id = ObjectIdField(required=True)
-    marketplace_id = ObjectIdField(required=True)
 
-    gross_revenue = FloatField(default=0.0)
-    net_profit = FloatField(default=0.0)
-    total_orders = IntField(default=0)
-    total_units = IntField(default=0)
-    total_tax = FloatField(default=0.0)
-    refund = IntField(default=0)
-    margin = FloatField(default=0.0) 
-
-    graph_data = DictField() 
-
-    created_at = DateTimeField(default=datetime.utcnow)
-    updated_at = DateTimeField(default=datetime.utcnow)
-
-    def save(self, *args, **kwargs):
-        self.updated_at = datetime.utcnow()
-        return super(DailyMetrics, self).save(*args, **kwargs)
 class Category(Document):
     name = StringField(required=True)  # Category name
     parent_category_id = ReferenceField('self', null=True)  # Parent category (if applicable)
@@ -70,7 +42,23 @@ class Brand(Document):
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
     marketplace_ids = ListField(ReferenceField(Marketplace),default=[])  # List of Marketplace IDs
     
+class CachedMetrics(Document):
+    brand_id = ReferenceField(Brand)
+    marketplace_id = ReferenceField(Marketplace)
+    date = DateTimeField(required=True, default=datetime.utcnow)  # This is the "metric date"
+    
+    gross_revenue = FloatField(default=0.0)
+    net_profit = FloatField(default=0.0)
+    total_orders = IntField(default=0)
+    total_units = IntField(default=0)
+    total_tax = FloatField(default=0.0)
+    refund = IntField(default=0)
+    margin = FloatField(default=0.0)
+    total_cogs = FloatField(default=0.0)
+    graph_data = DictField()  # Optional if you want to store 8-day chart too
 
+    last_updated = DateTimeField(default=datetime.utcnow)
+    
 
 class Manufacturer(Document):
     name = StringField()  # Manufacturer name
@@ -353,7 +341,9 @@ class Order(Document):
     order_channel = StringField()  # The channel through which the order was placed
     items_order_quantity = IntField(default=0)  # Number of items in the order
     shipping_price = FloatField(default=0.0)  # Shipping cost for the order
-
+    def save(self, *args, **kwargs):
+        self.updated_at = datetime.utcnow()
+        return super(Order, self).save(*args, **kwargs)
 
 
 class ShippingRate(Document):
