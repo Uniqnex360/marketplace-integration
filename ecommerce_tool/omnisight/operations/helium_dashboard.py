@@ -89,12 +89,12 @@ def get_metrics_by_date_range(request):
     end_date_str = json_request.get('end_date', None)
 
     # ========== HELPER FUNCTION ==========
-    def has_supported_filter(brand_id, product_id, manufacturer_name, fulfillment_channel):
+    def has_supported_filter(brand_id, product_id,   manufacturer_name, fulfillment_channel):
         return (
-            not product_id and          # accepts None, [], ''   (anything falsy)
-            not manufacturer_name and   # already OK
-            not fulfillment_channel     # accepts None or ''
-    )
+            product_id is [] and
+            not manufacturer_name and
+            fulfillment_channel is ''
+        )
 
     if start_date_str and end_date_str:
         start_date_dt = datetime.strptime(start_date_str, "%d/%m/%Y")
