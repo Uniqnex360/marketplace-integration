@@ -5320,7 +5320,6 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
             {"$sort": {"order_date": -1}}
         ])
         
-        # --- Step 5: Execute the query and format the results ---
         orders = list(Order.objects.aggregate(*pipeline))
         pacific_tz = pytz.timezone("US/Pacific")
         for order in orders:
@@ -5416,7 +5415,7 @@ async def get_all_orders_by_brand_and_date(brands, start_date, end_date, include
 },
 "subtotal":{"$sum":"$ordered_products.quantity_price"},
 "tax":"$tax_amount",
-"shipping_price":"$shipment_cost",
+"shipping_price":"$shipping_price",
 "shipping_tax":0,
 "order_total": "$total_price",
 }
