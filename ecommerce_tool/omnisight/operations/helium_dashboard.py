@@ -93,7 +93,8 @@ def get_metrics_by_date_range(request):
         return (
             product_id is [] and
             not manufacturer_name and
-            fulfillment_channel is ''
+            fulfillment_channel == ''
+
         )
 
     if start_date_str and end_date_str:
@@ -5272,6 +5273,8 @@ async def get_orders_by_brand_and_date(brands, start_date, end_date):
                 "order_date": {"$first": "$order_date"},
                 "order_status": {"$first": "$order_status"},
                 "marketplace_id": {"$first": "$marketplace_id"},
+                 "shipping_price":    {"$first": "$shipping_price"},
+                "shipping_tax":      {"$first": "$shipping_tax"},
                 "brand_names": {"$addToSet": "$brand_info.name"},
                 "skus":{"$addToSet":'$order_item_details.ProductDetails.SKU'},
                 'total_quantity':{"$sum":"$order_item_details.ProductDetails.QuantityOrdered"},
@@ -5415,7 +5418,7 @@ async def get_all_orders_by_brand_and_date(brands, start_date, end_date, include
 },
 "subtotal":{"$sum":"$ordered_products.quantity_price"},
 "tax":"$tax_amount",
-"shipping_price":"$shipping_price",
+"shipping_price":"$shipment_cost",
 "shipping_tax":0,
 "order_total": "$total_price",
 }
