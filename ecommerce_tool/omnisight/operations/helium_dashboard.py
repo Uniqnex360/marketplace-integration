@@ -91,12 +91,11 @@ def get_metrics_by_date_range(request):
     # ========== HELPER FUNCTION ==========
     def has_supported_filter(brand_id, product_id, manufacturer_name, fulfillment_channel):
         return (
-            product_id is None and
-            not manufacturer_name and
-            fulfillment_channel is None
-        )
+            not product_id and          # accepts None, [], ''   (anything falsy)
+            not manufacturer_name and   # already OK
+            not fulfillment_channel     # accepts None or ''
+    )
 
-    # ========== DATE PARSING ==========
     if start_date_str and end_date_str:
         start_date_dt = datetime.strptime(start_date_str, "%d/%m/%Y")
         end_date_dt = datetime.strptime(end_date_str, "%d/%m/%Y").replace(hour=23, minute=59, second=59)
