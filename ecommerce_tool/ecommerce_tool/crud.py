@@ -1,3 +1,4 @@
+from datetime import datetime
 class DatabaseModel():
     def get_document(queryset,filter={},field_list=[]):
         data = queryset(**filter).limit(1).only(*field_list)
@@ -12,6 +13,7 @@ class DatabaseModel():
         return data
     
     def update_documents(queryset, filter={}, json={}):
+        json['updated_at']=datetime.utcnow()
         data = queryset(**filter).update(**json)
         return bool(data)
     

@@ -46,6 +46,7 @@ from omnisight.operations.common_utils import calculate_listing_score
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import math
+from omnisight.models import *
 from django.utils import timezone
 from concurrent.futures import ThreadPoolExecutor
 from rest_framework.parsers import JSONParser
@@ -65,6 +66,43 @@ def sanitize_data(data):
         if math.isnan(data) or data == float('inf') or data == float('-inf'):
             return 0  
     return data
+
+def fetch_from_summary_db(start_date=None, end_date=None, brand_id=None, marketplace_id=None, preset=None, timezone_str="US/Pacific"):
+    if preset and (start_date is None or end_date is None):
+        start_date,end_date=get_date_range(preset,time_zone_str=timezone_str)
+    records=list(DailyMetrics.find({
+        'date':{"$gte":start_date,"$lte":end_date},
+        'brand_id':brand_id,
+        'marketplace_id':marketplace_id
+    }))
+    days_requested=(end_date-start_date)+1
+    if len(records)!=days_requested:
+        return None
+    result={
+        'gross_revenue':sum(r['gross_revenue']for r in records),
+        'total_orders':sum(r['total_orders'] for r in records),
+        'total_units':sum(r['total_units'] for r in records),
+        'net_profit':sum(r['net_profit']  for r in records),
+        'margin':calculate_margin(records),
+        'refund':sum(r['refund'] for r in records),
+        'total_tax':sum(r['total_tax'] for r in records),
+        'graph_data':{
+            r['date'].strftime("%B %d, %Y").lower():{
+                'gross_revenue':r['gross_revenue']
+            }for r in records
+        },
+        'difference':{}
+        
+        
+    
+    }
+    return result
+
+def calculate_margin(records):
+    gross=sum(r['gross_revenue'] for r in records)
+    net=sum(r['net_profit'] for r in records)
+    return round((net/gross)*100,2) if gross else 0
+
 @csrf_exempt
 def get_metrics_by_date_range(request):
     json_request = JSONParser().parse(request)
@@ -98,6 +136,7 @@ def get_metrics_by_date_range(request):
             "start": start_date_dt-timedelta(days=1),
             "end": end_date_dt-timedelta(days=1)
         }
+        
     }
     if start_date_str and end_date_str:
         graph_days_filter = {}
@@ -121,6 +160,14 @@ def get_metrics_by_date_range(request):
         }
     metrics = {}
     graph_data = {}
+    def has_supported_filter(brand_id,product_id,manufacturer_name,fulfilment_channel):
+        return product_id is None and not manufacturer_name and fulfillment_channel is None
+    if has_supported_filter(brand_id,product_id,manufacturer_name,fulfillment_channel):
+        metrics=fetch_from_summary_db(start_date_dt,end_date_dt,brand_id,marketplace_id)
+        if metrics is None:
+            return metrics
+        
+        
     def process_date_range(key, date_range, results):
         gross_revenue = 0
         result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
@@ -276,6 +323,7 @@ def get_metrics_by_date_range(request):
     metrics["difference"] = difference
     metrics = sanitize_data(metrics)
     return metrics
+
 @csrf_exempt
 def LatestOrdersTodayAPIView(request):
     json_request = JSONParser().parse(request)
@@ -1318,6 +1366,7 @@ def getPeriodWiseData(request):
             except Exception as exc:
                 response_data[key] = {"error": str(exc)}
     return JsonResponse(response_data, safe=False)
+
 @csrf_exempt
 def getPeriodWiseDataXl(request):
     json_request = JSONParser().parse(request)

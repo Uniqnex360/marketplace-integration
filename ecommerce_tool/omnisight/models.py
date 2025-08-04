@@ -1,5 +1,5 @@
 from __future__ import annotations
-from mongoengine import Document, StringField, FloatField, IntField, BooleanField, DictField, ListField, EmbeddedDocument, EmbeddedDocumentField,ReferenceField, DateTimeField
+from mongoengine import Document, StringField, FloatField,ObjectIdField, IntField, BooleanField, DictField, ListField, EmbeddedDocument, EmbeddedDocumentField,ReferenceField, DateTimeField
 from mongoengine.errors import ValidationError
 from datetime import datetime
 import re
@@ -20,7 +20,38 @@ class Marketplace(Document):
 
 
 
+from datetime import datetime
 
+def save(self, *args, **kwargs):
+    self.updated_at = datetime.utcnow()
+    return super(Order, self).save(*args, **kwargs)
+class DailyMetrics(Document):
+    meta = {
+        'indexes': [
+            {'fields': ('brand_id', 'marketplace_id', 'date')}
+        ]
+    }
+
+    date = DateTimeField(required=True)
+    brand_id = ObjectIdField(required=True)
+    marketplace_id = ObjectIdField(required=True)
+
+    gross_revenue = FloatField(default=0.0)
+    net_profit = FloatField(default=0.0)
+    total_orders = IntField(default=0)
+    total_units = IntField(default=0)
+    total_tax = FloatField(default=0.0)
+    refund = IntField(default=0)
+    margin = FloatField(default=0.0) 
+
+    graph_data = DictField() 
+
+    created_at = DateTimeField(default=datetime.utcnow)
+    updated_at = DateTimeField(default=datetime.utcnow)
+
+    def save(self, *args, **kwargs):
+        self.updated_at = datetime.utcnow()
+        return super(DailyMetrics, self).save(*args, **kwargs)
 class Category(Document):
     name = StringField(required=True)  # Category name
     parent_category_id = ReferenceField('self', null=True)  # Parent category (if applicable)
@@ -295,7 +326,7 @@ class Order(Document):
     order_status = StringField()  # Tracking order lifecycle
     number_of_items_shipped = IntField()  # Number of items that have been shipped
     number_of_items_unshipped = IntField()  # Number of items pending shipment
-
+    updated_at = DateTimeField(default=datetime.utcnow)
     # Fulfillment and sales
     fulfillment_channel = StringField()  # Who is fulfilling the order
     sales_channel = StringField()  # The channel through which the order was placed

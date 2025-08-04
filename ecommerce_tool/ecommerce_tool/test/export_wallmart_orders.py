@@ -7,6 +7,52 @@ import pytz
 from omnisight.operations.walmart_utils import oauthFunction
 import os
 
+def getWalmartOrderDetails(purchase_order_id):
+    """
+    Fetches and displays details of a Walmart order by its purchaseOrderId.
+    """
+    access_token = oauthFunction()
+    if not access_token:
+        print("❌ Failed to get access token")
+        return None
+
+    url = f"https://marketplace.walmartapis.com/v3/orders/{purchase_order_id}"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "WM_SEC.ACCESS_TOKEN": access_token,
+        "WM_QOS.CORRELATION_ID": str(uuid.uuid4()),
+        "WM_SVC.NAME": "Walmart Marketplace",
+        "Accept": "application/json"
+    }
+
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        order = response.json().get('order', {})
+        print(f"🧾 Order Details for: {purchase_order_id}\n")
+        print(json.dumps(order, indent=2))  # Pretty print full order
+        
+        # Fixed: Properly nested loops to check all charges
+        total_shipping = 0
+        for line in order.get('orderLines', {}).get('orderLine', []):
+            charges = line.get('charges', {}).get('charge', [])
+            for charge in charges:  # Now properly indented within the line loop
+                charge_type = charge.get('chargeType')
+                amount = float(charge.get('chargeAmount', {}).get('amount', 0))
+                if charge_type == 'SHIPPING':
+                    total_shipping += amount
+                    print(f"🚚 Shipping Charge (Line): ${amount}")
+        
+        # Display total shipping if any found
+        if total_shipping > 0:
+            print(f"🚚 Total Shipping Charge: ${total_shipping}")
+        else:
+            print("ℹ️ No shipping charges found")
+
+        return order
+    else:
+        print(f"❌ Error fetching order: [HTTP {response.status_code}] {response.text}")
+        return None
 
 def fetchTodayWalmartOrdersCount(exclude_cancelled=True, min_order_value=0):
     """
@@ -388,7 +434,6 @@ def countWalmartOrdersByDateRange(start_date, end_date, timezone="US/Pacific", e
     }
 
 
-# Example usage:
 if __name__ == "__main__":
-    # Get today's order count (excluding cancelled orders and orders with total <= 0)
-    fetchTodayWalmartOrdersCount(exclude_cancelled=True, min_order_value=0)
+    # Fetch order details
+    getWalmartOrderDetails("129021677569106")
