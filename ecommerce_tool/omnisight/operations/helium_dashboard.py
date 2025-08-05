@@ -1341,10 +1341,10 @@ def clean_json_floats(obj):
 
 @csrf_exempt
 def getPeriodWiseData(request):
-    # Parse request
+    # Parse the request data
     try:
         json_request = JSONParser().parse(request)
-    except json.JSONDecodeError:
+    except Exception:
         return JsonResponse({"error": "Invalid JSON data"}, status=400)
 
     # Extract parameters
@@ -1355,7 +1355,7 @@ def getPeriodWiseData(request):
     fulfillment_channel = json_request.get('fulfillment_channel')
     timezone_str = 'US/Pacific'
 
-    # Generate unique cache key based on filters
+    # Generate unique cache key based on all filters
     params = {
         'marketplace_id': marketplace_id,
         'brand_id': tuple(brand_id),
@@ -1363,14 +1363,14 @@ def getPeriodWiseData(request):
         'manufacturer_name': tuple(manufacturer_name),
         'fulfillment_channel': fulfillment_channel
     }
-    cache_key = f"period_data:{hash(frozenset(params.items()))}:{timezone_str}"
+    cache_key = f"period_data_{hash(frozenset(params.items()))}_{timezone_str}"
 
-    # ✅ Try to fetch from cache
+    # ✅ Try to return from cache if available
     cached_response = cache.get(cache_key)
     if cached_response:
         return JsonResponse(cached_response, safe=False)
 
-    # 🔁 Otherwise: compute fresh and store in cache
+    # ❌ Don't return early — instead, compute and return full result
     try:
         response_data = calculate_and_cache_metrics(
             marketplace_id,
@@ -1378,17 +1378,12 @@ def getPeriodWiseData(request):
             product_id,
             manufacturer_name,
             fulfillment_channel,
-            timezone_str
+            timezone_str,
+            cache_key
         )
-
-        # Cache it for 6 hours (or whatever fits your data)
-        cache.set(cache_key, response_data, timeout=60 * 60 * 6)
-
         return JsonResponse(response_data, safe=False)
-    
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-
 
 def calculate_and_cache_metrics(marketplace_id, brand_id, product_id, 
                               manufacturer_name, fulfillment_channel, 
