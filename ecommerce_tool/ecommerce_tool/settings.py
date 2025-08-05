@@ -87,7 +87,7 @@ INSTALLED_APPS = [
     'django_celery_beat',
     'omnisight',
     'django.redis'
-]
+] 
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.redis.RedisCache',
