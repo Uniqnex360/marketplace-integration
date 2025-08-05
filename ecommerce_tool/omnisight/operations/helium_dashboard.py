@@ -1372,12 +1372,14 @@ def getPeriodWiseData(request):
         'fulfillment_channel': fulfillment_channel if fulfillment_channel else ''
     }
     
-    # Create deterministic cache key
-    cache_key = f"period_data_{hash(frozenset(params.items()))}_{timezone_str}"
+    # Create deterministic cache key with length check
+    import hashlib
+    param_str = str(sorted(params.items()))
+    cache_key = f"period_data_{hashlib.md5(param_str.encode()).hexdigest()}_{timezone_str}"
     
     # 🐛 DEBUG: Log cache key generation for troubleshooting
     print(f"Cache key params: {params}")
-    print(f"Generated cache key: {cache_key}")
+    print(f"Generated cache key: {cache_key} (length: {len(cache_key)})")
 
     # ✅ Try to return from cache if available
     cached_response = cache.get(cache_key)
@@ -1502,9 +1504,49 @@ def calculate_and_cache_metrics(marketplace_id, brand_id, product_id,
         except Exception as exc:
             response_data[key] = {"error": str(exc)}
 
-    # Cache with 2 hour timeout
-    cache_success = cache.set(cache_key, response_data, timeout=7200)
-    print(f"💾 Cache save {'SUCCESS' if cache_success else 'FAILED'}")
+    # 🚀 FIX: Handle cache save issues
+    try:
+        # Check data size before caching
+        import sys
+        data_size = sys.getsizeof(str(response_data))
+        print(f"📊 Response data size: {data_size:,} bytes ({data_size/1024/1024:.2f} MB)")
+        
+        if data_size > 1024 * 1024:  # If larger than 1MB
+            print("⚠️  Data too large for cache, trying compression...")
+            import pickle
+            import gzip
+            
+            # Try compressed caching
+            compressed_data = gzip.compress(pickle.dumps(response_data))
+            cache_success = cache.set(cache_key, compressed_data, timeout=7200)
+            print(f"💾 Compressed cache save: {'SUCCESS' if cache_success else 'FAILED'}")
+            
+            if not cache_success:
+                # Fallback: Cache only essential data
+                essential_data = {}
+                for period_key, period_data in response_data.items():
+                    if isinstance(period_data, dict) and 'label' in period_data:
+                        essential_data[period_key] = {
+                            'label': period_data['label'],
+                            'period': period_data['period'],
+                            'cached_at': str(timezone.now())
+                        }
+                
+                cache_success = cache.set(f"essential_{cache_key}", essential_data, timeout=7200)
+                print(f"💾 Essential data cache save: {'SUCCESS' if cache_success else 'FAILED'}")
+        else:
+            # Normal caching for smaller data
+            cache_success = cache.set(cache_key, response_data, timeout=7200)
+            print(f"💾 Normal cache save: {'SUCCESS' if cache_success else 'FAILED'}")
+        
+        if not cache_success:
+            # Final attempt with shorter timeout
+            cache_success = cache.set(cache_key, response_data, timeout=300)  # 5 minutes
+            print(f"💾 Short timeout cache save: {'SUCCESS' if cache_success else 'FAILED'}")
+            
+    except Exception as cache_error:
+        print(f"❌ Cache save error: {cache_error}")
+        print(f"🔧 Cache backend: {getattr(cache, '_cache', 'Unknown')}")
     
     return response_data
 
