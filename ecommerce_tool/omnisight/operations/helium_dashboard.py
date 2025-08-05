@@ -9,7 +9,9 @@ from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime,timedelta
 from bson.son import SON
 from bson import ObjectId
+import hashlib
 import numpy as np
+from asgiref.sync import sync_to_async
 import json
 import time
 import asyncio
@@ -1274,6 +1276,7 @@ def clean_json_floats(obj):
 def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
@@ -1281,8 +1284,23 @@ def getPeriodWiseData(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = 'US/Pacific'
-    def calculate_metrics_sync(start_date, end_date):
-        return calculate_metricss(
+    
+    def create_cache_key(start_date, end_date):
+        """Create a unique cache key for the metrics calculation"""
+        key_string = f"{start_date}_{end_date}_{marketplace_id}_{brand_id}_{product_id}_{manufacturer_name}_{fulfillment_channel}"
+        return hashlib.md5(key_string.encode()).hexdigest()[:16]
+    
+    def calculate_metrics_with_cache(start_date, end_date):
+        """Calculate metrics with caching support"""
+        cache_key = f"metrics_{create_cache_key(start_date, end_date)}"
+        
+        # Try to get from cache first
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+        
+        # Calculate if not in cache
+        result = calculate_metricss(
             start_date, end_date, 
             marketplace_id, brand_id, 
             product_id, manufacturer_name, 
@@ -1290,24 +1308,53 @@ def getPeriodWiseData(request):
             timezone_str, False,
             use_threads=False
         )
-    def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
-        current_metrics = calculate_metrics_sync(current_start, current_end)
+        
+        # Cache the result for 5 minutes
+        cache.set(cache_key, result, timeout=300)
+        return result
+    
+    def format_period_metrics_optimized(label, current_start, current_end, prev_start, prev_end):
+        """Format period metrics with parallel calculation for current and previous periods"""
+        
+        # Calculate both current and previous periods in parallel
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            current_future = executor.submit(calculate_metrics_with_cache, current_start, current_end)
+            previous_future = executor.submit(calculate_metrics_with_cache, prev_start, prev_end)
+            
+            try:
+                current_metrics = current_future.result(timeout=60)  # 60 second timeout
+                previous_metrics = previous_future.result(timeout=60)
+            except Exception as e:
+                return {
+                    "label": label,
+                    "error": f"Calculation failed: {str(e)}"
+                }
+        
+        # Format period information
         period_format = {
             "current": {"from": to_utc_format(current_start)},
             "previous": {"from": to_utc_format(prev_start)}
         }
+        
         if label not in ['Today', 'Yesterday']:
             period_format["current"]["to"] = to_utc_format(current_end)
             period_format["previous"]["to"] = to_utc_format(prev_end)
+        
         output = {
             "label": label,
             "period": period_format
         }
+        
+        # Add metrics with current and previous values
         for key in current_metrics:
             output[key] = {
                 "current": current_metrics[key],
+                "previous": previous_metrics.get(key, 0)  # Default to 0 if key doesn't exist
             }
+        
         return output
+    
+    # Get all date ranges
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1315,28 +1362,182 @@ def getPeriodWiseData(request):
         "yearToDate": get_date_range("This Year", timezone_str),
         "lastYear": get_date_range("Last Year", timezone_str)
     }
+    
+    # Define period jobs
     period_jobs = [
-        ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
-         date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)),
-        ("last7Days", "Last 7 Days", date_ranges["last7Days"][0], date_ranges["last7Days"][1],
-         date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][0] - timedelta(seconds=1)),
-        ("last30Days", "Last 30 Days", date_ranges["last30Days"][0], date_ranges["last30Days"][1],
-         date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][0] - timedelta(seconds=1)),
-        ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
+        ("yesterday", "Yesterday", 
+         date_ranges["yesterday"][0], date_ranges["yesterday"][1],
+         date_ranges["yesterday"][0] - timedelta(days=1), 
+         date_ranges["yesterday"][0] - timedelta(seconds=1)),
+        
+        ("last7Days", "Last 7 Days", 
+         date_ranges["last7Days"][0], date_ranges["last7Days"][1],
+         date_ranges["last7Days"][0] - timedelta(days=7), 
+         date_ranges["last7Days"][0] - timedelta(seconds=1)),
+        
+        ("last30Days", "Last 30 Days", 
+         date_ranges["last30Days"][0], date_ranges["last30Days"][1],
+         date_ranges["last30Days"][0] - timedelta(days=30), 
+         date_ranges["last30Days"][0] - timedelta(seconds=1)),
+        
+        ("yearToDate", "Year to Date", 
+         date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
+    
     response_data = {}
-    with ThreadPoolExecutor(max_workers=16) as executor:
+    
+    # Use increased thread pool for better parallelism
+    # Each job now spawns 2 more threads, so we reduce main pool size to avoid oversubscription
+    with ThreadPoolExecutor(max_workers=4) as executor:
         future_to_label = {
-            executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
+            executor.submit(
+                format_period_metrics_optimized, 
+                label, cur_start, cur_end, prev_start, prev_end
+            ): key
             for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
         }
+        
         for future in as_completed(future_to_label):
             key = future_to_label[future]
             try:
-                response_data[key] = future.result()
+                response_data[key] = future.result(timeout=90)  # 90 second timeout per job
             except Exception as exc:
-                response_data[key] = {"error": str(exc)}
+                response_data[key] = {
+                    "label": dict(period_jobs)[key] if key in dict(period_jobs) else key,
+                    "error": str(exc)
+                }
+    
+    return JsonResponse(response_data, safe=False)
+
+
+# Alternative async version (use this if you're on Django 4.1+ and can use async views)
+async def getPeriodWiseDataAsync(request):
+    """Async version of the function for even better performance"""
+    
+    def to_utc_format(dt):
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id', None)
+    brand_id = json_request.get('brand_id', [])
+    product_id = json_request.get('product_id', [])
+    manufacturer_name = json_request.get('manufacturer_name', [])
+    fulfillment_channel = json_request.get('fulfillment_channel', None)
+    timezone_str = 'US/Pacific'
+    
+    # Convert sync function to async
+    calculate_metrics_async = sync_to_async(calculate_metricss, thread_sensitive=False)
+    
+    async def calculate_metrics_with_cache_async(start_date, end_date):
+        cache_key = f"metrics_{start_date}_{end_date}_{marketplace_id}"
+        cached_result = await sync_to_async(cache.get)(cache_key)
+        
+        if cached_result is not None:
+            return cached_result
+        
+        result = await calculate_metrics_async(
+            start_date, end_date, 
+            marketplace_id, brand_id, 
+            product_id, manufacturer_name, 
+            fulfillment_channel,
+            timezone_str, False,
+            use_threads=False
+        )
+        
+        await sync_to_async(cache.set)(cache_key, result, 300)
+        return result
+    
+    async def format_period_metrics_async(label, current_start, current_end, prev_start, prev_end):
+        try:
+            # Calculate both periods concurrently
+            current_task = calculate_metrics_with_cache_async(current_start, current_end)
+            previous_task = calculate_metrics_with_cache_async(prev_start, prev_end)
+            
+            current_metrics, previous_metrics = await asyncio.gather(
+                current_task, previous_task, return_exceptions=True
+            )
+            
+            if isinstance(current_metrics, Exception):
+                raise current_metrics
+            if isinstance(previous_metrics, Exception):
+                raise previous_metrics
+            
+            period_format = {
+                "current": {"from": to_utc_format(current_start)},
+                "previous": {"from": to_utc_format(prev_start)}
+            }
+            
+            if label not in ['Today', 'Yesterday']:
+                period_format["current"]["to"] = to_utc_format(current_end)
+                period_format["previous"]["to"] = to_utc_format(prev_end)
+            
+            output = {
+                "label": label,
+                "period": period_format
+            }
+            
+            for key in current_metrics:
+                output[key] = {
+                    "current": current_metrics[key],
+                    "previous": previous_metrics.get(key, 0)
+                }
+            
+            return output
+            
+        except Exception as e:
+            return {
+                "label": label,
+                "error": str(e)
+            }
+    
+    # Get date ranges (convert to async if needed)
+    get_date_range_async = sync_to_async(get_date_range, thread_sensitive=False)
+    
+    date_ranges = {
+        "yesterday": await get_date_range_async("Yesterday", timezone_str),
+        "last7Days": await get_date_range_async("Last 7 days", timezone_str),
+        "last30Days": await get_date_range_async("Last 30 days", timezone_str),
+        "yearToDate": await get_date_range_async("This Year", timezone_str),
+        "lastYear": await get_date_range_async("Last Year", timezone_str)
+    }
+    
+    period_jobs = [
+        ("yesterday", "Yesterday", 
+         date_ranges["yesterday"][0], date_ranges["yesterday"][1],
+         date_ranges["yesterday"][0] - timedelta(days=1), 
+         date_ranges["yesterday"][0] - timedelta(seconds=1)),
+        
+        ("last7Days", "Last 7 Days", 
+         date_ranges["last7Days"][0], date_ranges["last7Days"][1],
+         date_ranges["last7Days"][0] - timedelta(days=7), 
+         date_ranges["last7Days"][0] - timedelta(seconds=1)),
+        
+        ("last30Days", "Last 30 Days", 
+         date_ranges["last30Days"][0], date_ranges["last30Days"][1],
+         date_ranges["last30Days"][0] - timedelta(days=30), 
+         date_ranges["last30Days"][0] - timedelta(seconds=1)),
+        
+        ("yearToDate", "Year to Date", 
+         date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
+         date_ranges["lastYear"][0], date_ranges["lastYear"][1])
+    ]
+    
+    # Execute all period calculations concurrently
+    tasks = [
+        format_period_metrics_async(label, cur_start, cur_end, prev_start, prev_end)
+        for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
+    ]
+    
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    response_data = {}
+    for i, (key, *_) in enumerate(period_jobs):
+        if isinstance(results[i], Exception):
+            response_data[key] = {"error": str(results[i])}
+        else:
+            response_data[key] = results[i]
+    
     return JsonResponse(response_data, safe=False)
 
 @csrf_exempt
