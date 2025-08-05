@@ -1462,6 +1462,7 @@ def calculate_and_cache_metrics(marketplace_id, brand_id, product_id,
                 response_data[key] = {"error": str(exc)}
 
     cache.set(cache_key, response_data, timeout=3600)
+    return response_data
 
 @csrf_exempt
 def getPeriodWiseDataXl(request):
