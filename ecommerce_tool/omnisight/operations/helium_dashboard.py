@@ -1355,20 +1355,37 @@ def getPeriodWiseData(request):
     fulfillment_channel = json_request.get('fulfillment_channel')
     timezone_str = 'US/Pacific'
 
-    # Generate unique cache key based on all filters
+    # 🚀 FIXED: Normalize parameters for consistent cache keys
+    def normalize_list_param(param):
+        """Normalize list parameters to ensure consistent cache keys"""
+        if not param:
+            return tuple()  # Empty list/None becomes empty tuple
+        # Remove duplicates, sort, and convert to tuple
+        return tuple(sorted(set(str(x) for x in param if x is not None)))
+
+    # Generate normalized cache key
     params = {
-        'marketplace_id': marketplace_id,
-        'brand_id': tuple(brand_id),
-        'product_id': tuple(product_id),
-        'manufacturer_name': tuple(manufacturer_name),
-        'fulfillment_channel': fulfillment_channel
+        'marketplace_id': marketplace_id if marketplace_id else '',
+        'brand_id': normalize_list_param(brand_id),
+        'product_id': normalize_list_param(product_id),
+        'manufacturer_name': normalize_list_param(manufacturer_name),
+        'fulfillment_channel': fulfillment_channel if fulfillment_channel else ''
     }
+    
+    # Create deterministic cache key
     cache_key = f"period_data_{hash(frozenset(params.items()))}_{timezone_str}"
+    
+    # 🐛 DEBUG: Log cache key generation for troubleshooting
+    print(f"Cache key params: {params}")
+    print(f"Generated cache key: {cache_key}")
 
     # ✅ Try to return from cache if available
     cached_response = cache.get(cache_key)
     if cached_response:
+        print(f"🎯 CACHE HIT - Returning cached data")
         return JsonResponse(cached_response, safe=False)
+    
+    print(f"❌ CACHE MISS - Calculating new data")
 
     try:
         response_data = calculate_and_cache_metrics(
@@ -1410,7 +1427,7 @@ def calculate_and_cache_metrics(marketplace_id, brand_id, product_id,
             "current_end": current_end
         }
 
-    # Get date ranges once (cached if possible)
+    # Get date ranges once (with caching)
     date_ranges = get_all_date_ranges(timezone_str)
     
     # Prepare all period metadata first
@@ -1434,9 +1451,11 @@ def calculate_and_cache_metrics(marketplace_id, brand_id, product_id,
         all_date_ranges.add((cur_start, cur_end))
         all_date_ranges.add((prev_start, prev_end))
 
-    # Calculate metrics for all date ranges in parallel with optimized settings
+    print(f"📊 Processing {len(all_date_ranges)} unique date ranges")
+
+    # Calculate metrics for all date ranges in parallel
     metrics_cache = {}
-    with ThreadPoolExecutor(max_workers=min(len(all_date_ranges), 12)) as executor:
+    with ThreadPoolExecutor(max_workers=min(len(all_date_ranges), 8)) as executor:
         # Submit all metric calculations
         future_to_range = {
             executor.submit(
@@ -1446,7 +1465,7 @@ def calculate_and_cache_metrics(marketplace_id, brand_id, product_id,
                 product_id, manufacturer_name, 
                 fulfillment_channel,
                 timezone_str, False,
-                use_threads=True  # Enable threading in calculate_metricss if available
+                use_threads=False  # Keep conservative threading
             ): (start_date, end_date) 
             for start_date, end_date in all_date_ranges
         }
@@ -1457,6 +1476,7 @@ def calculate_and_cache_metrics(marketplace_id, brand_id, product_id,
             try:
                 metrics_cache[date_range] = future.result()
             except Exception as exc:
+                print(f"❌ Error calculating metrics for {date_range}: {exc}")
                 metrics_cache[date_range] = {"error": str(exc)}
 
     # Build final response using cached metrics
@@ -1482,9 +1502,37 @@ def calculate_and_cache_metrics(marketplace_id, brand_id, product_id,
         except Exception as exc:
             response_data[key] = {"error": str(exc)}
 
-    # Cache with longer timeout for expensive operations
-    cache.set(cache_key, response_data, timeout=7200)  # 2 hours instead of 1
+    # Cache with 2 hour timeout
+    cache_success = cache.set(cache_key, response_data, timeout=7200)
+    print(f"💾 Cache save {'SUCCESS' if cache_success else 'FAILED'}")
+    
     return response_data
+
+
+def get_all_date_ranges(timezone_str):
+    """Optimized function to get all date ranges at once with caching"""
+    from datetime import datetime
+    
+    # Cache key includes current date to invalidate daily
+    cache_key = f"date_ranges_{timezone_str}_{datetime.now().date()}"
+    cached_ranges = cache.get(cache_key)
+    
+    if cached_ranges:
+        print(f"📅 Using cached date ranges")
+        return cached_ranges
+    
+    print(f"📅 Calculating new date ranges")
+    date_ranges = {
+        "yesterday": get_date_range("Yesterday", timezone_str),
+        "last7Days": get_date_range("Last 7 days", timezone_str),
+        "last30Days": get_date_range("Last 30 days", timezone_str),
+        "yearToDate": get_date_range("This Year", timezone_str),
+        "lastYear": get_date_range("Last Year", timezone_str)
+    }
+    
+    # Cache date ranges for a day
+    cache.set(cache_key, date_ranges, timeout=86400)
+    return date_ranges
 
 
 def get_all_date_ranges(timezone_str):
