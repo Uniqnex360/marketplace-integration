@@ -10,6 +10,7 @@ from datetime import datetime,timedelta
 from bson.son import SON
 from bson import ObjectId
 import numpy as np
+from django.core.cache import cache
 import json
 import time
 import asyncio
@@ -56,6 +57,7 @@ from rest_framework.parsers import JSONParser
 from django.http import JsonResponse
 import logging
 logger = logging.getLogger(__name__)
+CACHE_TIMEOUT=60*60*2
 def sanitize_data(data):
     """Recursively sanitize data to ensure all float values are JSON compliant."""
     if isinstance(data, dict):
@@ -1326,15 +1328,32 @@ def getPeriodWiseData(request):
          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
     response_data = {}
+    jobs_to_run=[]
+    cached_results={}
+    for key,label,cur_start,cur_end,prev_start,prev_end in period_jobs:
+        cache_key=f"period_data:{key}:{timezone_str}"
+        cached_data=cache.get(cache_key)
+        if cached_data:
+            cached_results[key]=cached_data
+        else:
+            jobs_to_run.append((key,label,cur_start,cur_end,prev_start,prev_end))
     with ThreadPoolExecutor(max_workers=8) as executor:
         future_to_label = {
             executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
-            for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
+            for key, label, cur_start, cur_end, prev_start, prev_end in jobs_to_run
         }
         for future in as_completed(future_to_label):
             key = future_to_label[future]
             try:
-                response_data[key] = future.result()
+                cache_key=f"period_data:{key}:{timezone_str}"
+                cached_data=cache.get(cache_key)
+                if cached_data:
+                    response_data[key] = cached_data
+                else:
+                    result=future.result()
+                    response_data[key]=result
+                    cache.set(cache_key,result,CACHE_TIMEOUT)
+                    
             except Exception as exc:
                 response_data[key] = {"error": str(exc)}
     return JsonResponse(response_data, safe=False)
