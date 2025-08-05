@@ -10,7 +10,6 @@ from datetime import datetime,timedelta
 from bson.son import SON
 from bson import ObjectId
 import numpy as np
-from django.core.cache import cache
 import json
 import time
 import asyncio
@@ -57,7 +56,6 @@ from rest_framework.parsers import JSONParser
 from django.http import JsonResponse
 import logging
 logger = logging.getLogger(__name__)
-CACHE_TIMEOUT=60*60*2
 def sanitize_data(data):
     """Recursively sanitize data to ensure all float values are JSON compliant."""
     if isinstance(data, dict):
@@ -1272,17 +1270,135 @@ def clean_json_floats(obj):
     elif isinstance(obj, list):
         return [clean_json_floats(i) for i in obj]
     return obj
+# @csrf_exempt
+# def getPeriodWiseData(request):
+#     def to_utc_format(dt):
+#         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+#     json_request = JSONParser().parse(request)
+#     marketplace_id = json_request.get('marketplace_id', None)
+#     brand_id = json_request.get('brand_id', [])
+#     product_id = json_request.get('product_id', [])
+#     manufacturer_name = json_request.get('manufacturer_name', [])
+#     fulfillment_channel = json_request.get('fulfillment_channel', None)
+#     timezone_str = 'US/Pacific'
+#     def calculate_metrics_sync(start_date, end_date):
+#         return calculate_metricss(
+#             start_date, end_date, 
+#             marketplace_id, brand_id, 
+#             product_id, manufacturer_name, 
+#             fulfillment_channel,
+#             timezone_str, False,
+#             use_threads=False
+#         )
+#     def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
+#         current_metrics = calculate_metrics_sync(current_start, current_end)
+#         period_format = {
+#             "current": {"from": to_utc_format(current_start)},
+#             "previous": {"from": to_utc_format(prev_start)}
+#         }
+#         if label not in ['Today', 'Yesterday']:
+#             period_format["current"]["to"] = to_utc_format(current_end)
+#             period_format["previous"]["to"] = to_utc_format(prev_end)
+#         output = {
+#             "label": label,
+#             "period": period_format
+#         }
+#         for key in current_metrics:
+#             output[key] = {
+#                 "current": current_metrics[key],
+#             }
+#         return output
+#     date_ranges = {
+#         "yesterday": get_date_range("Yesterday", timezone_str),
+#         "last7Days": get_date_range("Last 7 days", timezone_str),
+#         "last30Days": get_date_range("Last 30 days", timezone_str),
+#         "yearToDate": get_date_range("This Year", timezone_str),
+#         "lastYear": get_date_range("Last Year", timezone_str)
+#     }
+#     period_jobs = [
+#         ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
+#          date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)),
+#         ("last7Days", "Last 7 Days", date_ranges["last7Days"][0], date_ranges["last7Days"][1],
+#          date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][0] - timedelta(seconds=1)),
+#         ("last30Days", "Last 30 Days", date_ranges["last30Days"][0], date_ranges["last30Days"][1],
+#          date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][0] - timedelta(seconds=1)),
+#         ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
+#          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
+#     ]
+#     response_data = {}
+#     with ThreadPoolExecutor(max_workers=8) as executor:
+#         future_to_label = {
+#             executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
+#             for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
+#         }
+#         for future in as_completed(future_to_label):
+#             key = future_to_label[future]
+#             try:
+#                 response_data[key] = future.result()
+#             except Exception as exc:
+#                 response_data[key] = {"error": str(exc)}
+#     return JsonResponse(response_data, safe=False)
+
 @csrf_exempt
 def getPeriodWiseData(request):
-    def to_utc_format(dt):
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id', None)
+    # Parse the request data
+    try:
+        json_request = JSONParser().parse(request)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON data"}, status=400)
+
+    # Extract parameters
+    marketplace_id = json_request.get('marketplace_id')
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel', None)
+    fulfillment_channel = json_request.get('fulfillment_channel')
     timezone_str = 'US/Pacific'
+
+    # Generate cache key
+    params = {
+        'marketplace_id': marketplace_id,
+        'brand_id': tuple(brand_id),
+        'product_id': tuple(product_id),
+        'manufacturer_name': tuple(manufacturer_name),
+        'fulfillment_channel': fulfillment_channel
+    }
+    cache_key = f"period_data_{hash(frozenset(params.items()))}"
+
+    # Check cache first
+    cached_response = cache.get(cache_key)
+    if cached_response is not None:
+        return JsonResponse(cached_response, safe=False)
+
+    # Return immediate response while processing in background
+    immediate_response = {
+        "status": "processing",
+        "message": "Data is being calculated",
+        "cache_key": cache_key
+    }
+
+    # Start background processing
+    executor = ThreadPoolExecutor(max_workers=1)  # Single worker for this task
+    executor.submit(
+        calculate_and_cache_metrics,
+        marketplace_id,
+        brand_id,
+        product_id,
+        manufacturer_name,
+        fulfillment_channel,
+        timezone_str,
+        cache_key
+    )
+
+    return JsonResponse(immediate_response)
+
+def calculate_and_cache_metrics(marketplace_id, brand_id, product_id, 
+                              manufacturer_name, fulfillment_channel, 
+                              timezone_str, cache_key):
+    
+    def to_utc_format(dt):
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
     def calculate_metrics_sync(start_date, end_date):
         return calculate_metricss(
             start_date, end_date, 
@@ -1292,24 +1408,32 @@ def getPeriodWiseData(request):
             timezone_str, False,
             use_threads=False
         )
-    def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
+
+    def format_period_metrics(label, current_start, current_end, 
+                             prev_start, prev_end):
         current_metrics = calculate_metrics_sync(current_start, current_end)
         period_format = {
             "current": {"from": to_utc_format(current_start)},
             "previous": {"from": to_utc_format(prev_start)}
         }
+        
         if label not in ['Today', 'Yesterday']:
             period_format["current"]["to"] = to_utc_format(current_end)
             period_format["previous"]["to"] = to_utc_format(prev_end)
+            
         output = {
             "label": label,
             "period": period_format
         }
+        
         for key in current_metrics:
             output[key] = {
                 "current": current_metrics[key],
             }
+            
         return output
+
+    # Get date ranges (implement your actual date range logic here)
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1327,36 +1451,24 @@ def getPeriodWiseData(request):
         ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
+
     response_data = {}
-    jobs_to_run=[]
-    cached_results={}
-    for key,label,cur_start,cur_end,prev_start,prev_end in period_jobs:
-        cache_key=f"period_data:{key}:{timezone_str}"
-        cached_data=cache.get(cache_key)
-        if cached_data:
-            cached_results[key]=cached_data
-        else:
-            jobs_to_run.append((key,label,cur_start,cur_end,prev_start,prev_end))
     with ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_label = {
-            executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
-            for key, label, cur_start, cur_end, prev_start, prev_end in jobs_to_run
+        futures = {
+            executor.submit(
+                format_period_metrics, 
+                label, cur_start, cur_end, prev_start, prev_end
+            ): key for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
         }
-        for future in as_completed(future_to_label):
-            key = future_to_label[future]
+        
+        for future in as_completed(futures):
+            key = futures[future]
             try:
-                cache_key=f"period_data:{key}:{timezone_str}"
-                cached_data=cache.get(cache_key)
-                if cached_data:
-                    response_data[key] = cached_data
-                else:
-                    result=future.result()
-                    response_data[key]=result
-                    cache.set(cache_key,result,CACHE_TIMEOUT)
-                    
+                response_data[key] = future.result()
             except Exception as exc:
                 response_data[key] = {"error": str(exc)}
-    return JsonResponse(response_data, safe=False)
+
+    cache.set(cache_key, response_data, timeout=3600)
 
 @csrf_exempt
 def getPeriodWiseDataXl(request):
