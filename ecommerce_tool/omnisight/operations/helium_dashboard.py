@@ -1341,7 +1341,7 @@ def clean_json_floats(obj):
 
 @csrf_exempt
 def getPeriodWiseData(request):
-    # Parse the request data
+    # Parse request
     try:
         json_request = JSONParser().parse(request)
     except json.JSONDecodeError:
@@ -1355,7 +1355,7 @@ def getPeriodWiseData(request):
     fulfillment_channel = json_request.get('fulfillment_channel')
     timezone_str = 'US/Pacific'
 
-    # Generate cache key
+    # Generate unique cache key based on filters
     params = {
         'marketplace_id': marketplace_id,
         'brand_id': tuple(brand_id),
@@ -1363,34 +1363,32 @@ def getPeriodWiseData(request):
         'manufacturer_name': tuple(manufacturer_name),
         'fulfillment_channel': fulfillment_channel
     }
-    cache_key = f"period_data_{hash(frozenset(params.items()))}"
+    cache_key = f"period_data:{hash(frozenset(params.items()))}:{timezone_str}"
 
-    # Check cache first
+    # ✅ Try to fetch from cache
     cached_response = cache.get(cache_key)
-    if cached_response is not None:
+    if cached_response:
         return JsonResponse(cached_response, safe=False)
 
-    # Return immediate response while processing in background
-    immediate_response = {
-        "status": "processing",
-        "message": "Data is being calculated",
-        "cache_key": cache_key
-    }
+    # 🔁 Otherwise: compute fresh and store in cache
+    try:
+        response_data = calculate_and_cache_metrics(
+            marketplace_id,
+            brand_id,
+            product_id,
+            manufacturer_name,
+            fulfillment_channel,
+            timezone_str
+        )
 
-    # Start background processing
-    executor = ThreadPoolExecutor(max_workers=1)  # Single worker for this task
-    executor.submit(
-        calculate_and_cache_metrics,
-        marketplace_id,
-        brand_id,
-        product_id,
-        manufacturer_name,
-        fulfillment_channel,
-        timezone_str,
-        cache_key
-    )
+        # Cache it for 6 hours (or whatever fits your data)
+        cache.set(cache_key, response_data, timeout=60 * 60 * 6)
 
-    return JsonResponse(immediate_response)
+        return JsonResponse(response_data, safe=False)
+    
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
 
 def calculate_and_cache_metrics(marketplace_id, brand_id, product_id, 
                               manufacturer_name, fulfillment_channel, 
