@@ -1370,7 +1370,6 @@ def getPeriodWiseData(request):
     if cached_response:
         return JsonResponse(cached_response, safe=False)
 
-    # ❌ Don't return early — instead, compute and return full result
     try:
         response_data = calculate_and_cache_metrics(
             marketplace_id,
@@ -1385,6 +1384,7 @@ def getPeriodWiseData(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
 def calculate_and_cache_metrics(marketplace_id, brand_id, product_id, 
                               manufacturer_name, fulfillment_channel, 
                               timezone_str, cache_key):
@@ -1392,19 +1392,8 @@ def calculate_and_cache_metrics(marketplace_id, brand_id, product_id,
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     
-    def calculate_metrics_sync(start_date, end_date):
-        return calculate_metricss(
-            start_date, end_date, 
-            marketplace_id, brand_id, 
-            product_id, manufacturer_name, 
-            fulfillment_channel,
-            timezone_str, False,
-            use_threads=False
-        )
-
     def format_period_metrics(label, current_start, current_end, 
                              prev_start, prev_end):
-        current_metrics = calculate_metrics_sync(current_start, current_end)
         period_format = {
             "current": {"from": to_utc_format(current_start)},
             "previous": {"from": to_utc_format(prev_start)}
@@ -1414,26 +1403,17 @@ def calculate_and_cache_metrics(marketplace_id, brand_id, product_id,
             period_format["current"]["to"] = to_utc_format(current_end)
             period_format["previous"]["to"] = to_utc_format(prev_end)
             
-        output = {
+        return {
             "label": label,
-            "period": period_format
+            "period": period_format,
+            "current_start": current_start,
+            "current_end": current_end
         }
-        
-        for key in current_metrics:
-            output[key] = {
-                "current": current_metrics[key],
-            }
-            
-        return output
 
-    # Get date ranges (implement your actual date range logic here)
-    date_ranges = {
-        "yesterday": get_date_range("Yesterday", timezone_str),
-        "last7Days": get_date_range("Last 7 days", timezone_str),
-        "last30Days": get_date_range("Last 30 days", timezone_str),
-        "yearToDate": get_date_range("This Year", timezone_str),
-        "lastYear": get_date_range("Last Year", timezone_str)
-    }
+    # Get date ranges once (cached if possible)
+    date_ranges = get_all_date_ranges(timezone_str)
+    
+    # Prepare all period metadata first
     period_jobs = [
         ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
          date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)),
@@ -1445,24 +1425,87 @@ def calculate_and_cache_metrics(marketplace_id, brand_id, product_id,
          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
 
-    response_data = {}
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {
+    # Collect all unique date ranges for batch processing
+    all_date_ranges = set()
+    period_metadata = {}
+    
+    for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs:
+        period_metadata[key] = format_period_metrics(label, cur_start, cur_end, prev_start, prev_end)
+        all_date_ranges.add((cur_start, cur_end))
+        all_date_ranges.add((prev_start, prev_end))
+
+    # Calculate metrics for all date ranges in parallel with optimized settings
+    metrics_cache = {}
+    with ThreadPoolExecutor(max_workers=min(len(all_date_ranges), 12)) as executor:
+        # Submit all metric calculations
+        future_to_range = {
             executor.submit(
-                format_period_metrics, 
-                label, cur_start, cur_end, prev_start, prev_end
-            ): key for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
+                calculate_metricss,
+                start_date, end_date, 
+                marketplace_id, brand_id, 
+                product_id, manufacturer_name, 
+                fulfillment_channel,
+                timezone_str, False,
+                use_threads=True  # Enable threading in calculate_metricss if available
+            ): (start_date, end_date) 
+            for start_date, end_date in all_date_ranges
         }
         
-        for future in as_completed(futures):
-            key = futures[future]
+        # Collect results
+        for future in as_completed(future_to_range):
+            date_range = future_to_range[future]
             try:
-                response_data[key] = future.result()
+                metrics_cache[date_range] = future.result()
             except Exception as exc:
-                response_data[key] = {"error": str(exc)}
+                metrics_cache[date_range] = {"error": str(exc)}
 
-    cache.set(cache_key, response_data, timeout=3600)
+    # Build final response using cached metrics
+    response_data = {}
+    for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs:
+        try:
+            current_metrics = metrics_cache.get((cur_start, cur_end), {})
+            
+            output = period_metadata[key].copy()
+            # Remove temporary fields
+            output.pop('current_start', None)
+            output.pop('current_end', None)
+            
+            # Add metrics data
+            for metric_key in current_metrics:
+                if metric_key != "error":
+                    output[metric_key] = {
+                        "current": current_metrics[metric_key],
+                    }
+            
+            response_data[key] = output
+            
+        except Exception as exc:
+            response_data[key] = {"error": str(exc)}
+
+    # Cache with longer timeout for expensive operations
+    cache.set(cache_key, response_data, timeout=7200)  # 2 hours instead of 1
     return response_data
+
+
+def get_all_date_ranges(timezone_str):
+    """Optimized function to get all date ranges at once"""
+    cache_key = f"date_ranges_{timezone_str}_{datetime.now().date()}"
+    cached_ranges = cache.get(cache_key)
+    
+    if cached_ranges:
+        return cached_ranges
+    
+    date_ranges = {
+        "yesterday": get_date_range("Yesterday", timezone_str),
+        "last7Days": get_date_range("Last 7 days", timezone_str),
+        "last30Days": get_date_range("Last 30 days", timezone_str),
+        "yearToDate": get_date_range("This Year", timezone_str),
+        "lastYear": get_date_range("Last Year", timezone_str)
+    }
+    
+    # Cache date ranges for a day
+    cache.set(cache_key, date_ranges, timeout=86400)
+    return date_ranges
 
 @csrf_exempt
 def getPeriodWiseDataXl(request):
