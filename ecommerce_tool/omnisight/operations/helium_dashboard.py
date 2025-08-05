@@ -1385,7 +1385,10 @@ def getPeriodWiseData(request):
          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
     
-    response_data = {}
+    response_data = OrderedDict()
+    unordered_response_data = {}
+
+
     
     # Use increased thread pool for better parallelism
     # Each job now spawns 2 more threads, so we reduce main pool size to avoid oversubscription
@@ -1401,13 +1404,15 @@ def getPeriodWiseData(request):
         for future in as_completed(future_to_label):
             key = future_to_label[future]
             try:
-                response_data[key] = future.result(timeout=90)  # 90 second timeout per job
+                unordered_response_data[key] = future.result(timeout=90)  # 90 second timeout per job
             except Exception as exc:
-                response_data[key] = {
+                unordered_response_data[key] = {
                     "label": dict(period_jobs)[key] if key in dict(period_jobs) else key,
                     "error": str(exc)
                 }
-    
+    ordered_keys = ['yesterday', 'last7Days', 'last30Days', 'yearToDate']
+    response_data = OrderedDict((key, unordered_response_data[key]) for key in ordered_keys if key in unordered_response_data)
+
     return JsonResponse(response_data, safe=False)
 
 
