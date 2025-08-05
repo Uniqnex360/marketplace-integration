@@ -3074,12 +3074,12 @@ def getProfitAndLossDetails(request):
                 tax_price += item_data['tax_price']
                 if order['marketplace_name'] == "Amazon":
                     total_cogs += item_data['total_cogs']
-                    shipping_cost += item_data['a_shipping_cost']
+                    shipping_cost += order.get('shipping_price', 0) or 0
                     channel_fee += item_data['referral_fee']
                     product_cost += item_data['product_cost']
                 else:
                     total_cogs += item_data['w_total_cogs']
-                    shipping_cost += item_data['w_shiping_cost']
+                    shipping_cost += order.get('shipping_price', 0) or 0
                     channel_fee += item_data['walmart_fee']
                     product_cost += item_data['w_product_cost']
                 vendor_funding += item_data['vendor_funding']
