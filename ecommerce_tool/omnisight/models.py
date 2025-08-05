@@ -213,6 +213,7 @@ class user(Document):
     last_login = DateTimeField(default=datetime.now())
     creation_date = DateTimeField(default=datetime.now())
     credentilas = ListField(DictField())
+    updated_at = DateTimeField(default=datetime.utcnow)
 
 
 class access_token(Document):

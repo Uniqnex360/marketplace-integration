@@ -1047,6 +1047,7 @@ def get_parent_products(match, page, page_size, start_date, end_date,
         "tab_type": "parent"
     }
     return JsonResponse(response_data, safe=False)
+
 def get_individual_products(match, page, page_size, start_date, end_date, 
                             today_start_date, today_end_date, sort_by, sort_by_value):
     db_sortable_fields = {
