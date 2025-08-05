@@ -90,7 +90,7 @@ INSTALLED_APPS = [
 ] 
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+         "BACKEND": "django_redis.cache.RedisCache",
         'LOCATION': 'redis://:foobaredUniqnex@127.0.0.1:6379/1',  # Using DB 1, Celery uses DB 0
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
