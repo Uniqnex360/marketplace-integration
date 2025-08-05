@@ -2841,7 +2841,6 @@ def getProfitAndLossDetails(request):
                               manufacturer_name, fulfillment_channel, timezone)
         all_item_ids = []
         for order in result:
-            print(order)
             all_item_ids.extend(order['order_items'])
 
         item_pipeline = [

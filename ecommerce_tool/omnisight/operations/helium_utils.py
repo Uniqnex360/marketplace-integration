@@ -277,7 +277,7 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
                 "currency": 1,
                 "shipping_address": 1,
                 "shipping_information": 1,
-                "shipping_price": {"$ifNull": ["$ShippingPrice", 0.0]},
+                "shipping_price": {"$ifNull": ["$shipping_price", 0.0]},
                 "items_order_quantity": {"$ifNull": ["$items_order_quantity", 0]},
             }
         }
