@@ -516,6 +516,8 @@ def updatedRevenueWidgetAPIView(request):
     from django.utils import timezone
     import pytz
     from concurrent.futures import ThreadPoolExecutor
+    from datetime import datetime
+
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
     compare_startdate = json_request.get("compare_startdate")
@@ -525,44 +527,66 @@ def updatedRevenueWidgetAPIView(request):
     brand_id = json_request.get("brand_id", None)
     manufacturer_name = json_request.get("manufacturer_name", None)
     fulfillment_channel = json_request.get("fulfillment_channel", None)
-    timezone_str="US/Pacific"
+
+    timezone_str = "US/Pacific"
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    if start_date != None and start_date != "":
-        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
+
+    if start_date not in [None, ""]:
+        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
-        start_date, end_date = get_date_range(preset,timezone_str)
+        start_date, end_date = get_date_range(preset, timezone_str)
+
+    compare_enabled = compare_startdate not in [None, ""]
+    if compare_enabled:
+        compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, microsecond=0
+        )
+
     comapre_past = get_previous_periods(start_date, end_date)
+
     def fetch_total():
-        return totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id, 
-                                    product_id, manufacturer_name, fulfillment_channel,timezone_str)
+        return totalRevenueCalculation(
+            start_date, end_date, marketplace_id, brand_id,
+            product_id, manufacturer_name, fulfillment_channel, timezone_str
+        )
+
     def fetch_graph_data():
-        return get_graph_data(start_date, end_date, preset, marketplace_id, brand_id, 
-                           product_id, manufacturer_name, fulfillment_channel,timezone_str)
+        return get_graph_data(
+            start_date, end_date, preset, marketplace_id, brand_id,
+            product_id, manufacturer_name, fulfillment_channel, timezone_str
+        )
+
     def fetch_compare_total():
-        return totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id, 
-                                    brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
+        return totalRevenueCalculation(
+            compare_startdate, compare_enddate, marketplace_id,
+            brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
+        )
+
     def fetch_compare_graph_data():
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
-        return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, 
-                           brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
+        return get_graph_data(
+            compare_startdate, compare_enddate, initial, marketplace_id,
+            brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
+        )
+
     with ThreadPoolExecutor(max_workers=4) as executor:
         future_total = executor.submit(fetch_total)
         future_graph_data = executor.submit(fetch_graph_data)
-        compare_total = None
-        compare_graph = None
-        if compare_startdate and compare_startdate != "":
-            compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
-            compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
-            future_compare_total = executor.submit(fetch_compare_total)
-            future_compare_graph_data = executor.submit(fetch_compare_graph_data)
-            compare_total = future_compare_total.result()
-            compare_graph = future_compare_graph_data.result()
+        future_compare_total = executor.submit(fetch_compare_total) if compare_enabled else None
+        future_compare_graph_data = executor.submit(fetch_compare_graph_data) if compare_enabled else None
+
         total = future_total.result()
         graph_data = future_graph_data.result()
+        compare_total = future_compare_total.result() if compare_enabled else None
+        compare_graph = future_compare_graph_data.result() if compare_enabled else None
+
     updated_graph = {}
-    
-    if compare_startdate and compare_startdate != "":
+
+    if compare_enabled:
         for index, (key, metrics) in enumerate(graph_data.items()):
             compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
             updated_graph[key] = {
@@ -581,7 +605,7 @@ def updatedRevenueWidgetAPIView(request):
                 "compare_units_sold": compare_metrics.get("units_sold", 0),
                 "compare_refund_amount": compare_metrics.get("refund_amount", 0),
                 "compare_refund_quantity": compare_metrics.get("refund_quantity", 0),
-                "compare_date": list(compare_graph.keys())[index] if index < len(compare_graph) else None
+                "compare_date": list(compare_graph.keys())[index] if index < len(compare_graph) else None,
             }
     else:
         for key, metrics in graph_data.items():
@@ -595,12 +619,14 @@ def updatedRevenueWidgetAPIView(request):
                 "refund_amount": metrics.get("refund_amount", 0),
                 "refund_quantity": metrics.get("refund_quantity", 0),
             }
+
     data = {
         "total": total,
         "graph": updated_graph,
-        "comapre_past": comapre_past
+        "comapre_past": comapre_past,
     }
-    if compare_startdate and compare_startdate != "":
+
+    if compare_enabled:
         difference = {
             "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
             "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
@@ -611,17 +637,20 @@ def updatedRevenueWidgetAPIView(request):
             "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
         }
         data['compare_total'] = difference
+
     name = "Revenue"
     item_pipeline = [{"$match": {"name": name}}]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
     if item_result:
         item_result = item_result[0]
         if not item_result['select_all']:
-            for field in ['gross_revenue', 'units_sold', 'refund_quantity', 
-                         'refund_amount', 'net_profit', 'profit_margin', 'orders']:
+            for field in ['gross_revenue', 'units_sold', 'refund_quantity',
+                          'refund_amount', 'net_profit', 'profit_margin', 'orders']:
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
+
     return data
+
 import pytz
 @csrf_exempt
 def get_top_products(request):
