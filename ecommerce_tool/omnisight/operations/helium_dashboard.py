@@ -532,7 +532,7 @@ def RevenueWidgetAPIView(request):
 def updatedRevenueWidgetAPIView(request):
     from django.utils import timezone
     import pytz
-    
+
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
     compare_startdate = json_request.get("compare_startdate")
@@ -545,167 +545,41 @@ def updatedRevenueWidgetAPIView(request):
     timezone_str = "US/Pacific"
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
-    
-    if start_date != None and start_date != "":
+
+    if start_date is not None and start_date != "":
         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
         start_date, end_date = get_date_range(preset, timezone_str)
-    
+
     comapre_past = get_previous_periods(start_date, end_date)
-    
-    def calculate_revenue_metrics(from_date, to_date, marketplace_id, brand_id, product_id,
-                                 manufacturer_name, fulfillment_channel, timezone_str):
-        """Single function to calculate all metrics in one pass"""
-        
-        # Get all orders in date range (similar to grossRevenue function)
-        result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id,
-                            manufacturer_name, fulfillment_channel, timezone_str)
-        
-        # Collect all item IDs
-        all_item_ids = []
-        for order in result:
-            all_item_ids.extend(order['order_items'])
-        
-        # Single aggregation pipeline to get all item details
-        item_pipeline = [
-            {"$match": {"_id": {"$in": all_item_ids}}},
-            {"$lookup": {
-                "from": "product",
-                "localField": "ProductDetails.product_id",
-                "foreignField": "_id",
-                "as": "product_ins"
-            }},
-            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-            {"$project": {
-                "_id": 1,
-                "price": "$Pricing.ItemPrice.Amount",
-                "tax_price": "$Pricing.ItemTax.Amount",
-                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
-                "walmart_fee": {"$ifNull": ["$product_ins.walmart_fee", 0]},
-                "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
-                "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]}
-            }}
-        ]
-        
-        item_results = list(OrderItems.objects.aggregate(*item_pipeline))
-        item_lookup = {item['_id']: item for item in item_results}
-        
-        # Initialize metrics
-        total_metrics = {
-            "gross_revenue": 0,
-            "net_profit": 0,
-            "profit_margin": 0,
-            "orders": 0,
-            "units_sold": 0,
-            "refund_amount": 0,
-            "refund_quantity": 0,
-            "total_cogs": 0,
-            "vendor_funding": 0
-        }
-        
-        # Initialize daily metrics for graph
-        daily_metrics = {}
-        
-        # Process all orders in single pass
-        for order in result:
-            order_date = order['order_date'].strftime("%Y-%m-%d")
-            
-            # Initialize daily metrics if not exists
-            if order_date not in daily_metrics:
-                daily_metrics[order_date] = {
-                    "gross_revenue": 0,
-                    "net_profit": 0,
-                    "profit_margin": 0,
-                    "orders": 0,
-                    "units_sold": 0,
-                    "refund_amount": 0,
-                    "refund_quantity": 0,
-                    "total_cogs": 0,
-                    "vendor_funding": 0,
-                    "temp_price": 0
-                }
-            
-            # Update totals and daily metrics
-            order_total = order['order_total']
-            total_metrics["gross_revenue"] += order_total
-            total_metrics["orders"] += 1
-            total_metrics["units_sold"] += order['items_order_quantity']
-            
-            daily_metrics[order_date]["gross_revenue"] += order_total
-            daily_metrics[order_date]["orders"] += 1
-            daily_metrics[order_date]["units_sold"] += order['items_order_quantity']
-            
-            # Process items for this order
-            order_cogs = 0
-            order_vendor_funding = 0
-            order_price = 0
-            
-            for item_id in order['order_items']:
-                item_data = item_lookup.get(item_id)
-                if not item_data:
-                    continue
-                
-                order_price += item_data['price']
-                
-                if order['marketplace_name'] == "Amazon":
-                    order_cogs += item_data['total_cogs']
-                else:
-                    order_cogs += item_data['w_total_cogs']
-                
-                order_vendor_funding += item_data['vendor_funding']
-            
-            # Update COGS and vendor funding
-            total_metrics["total_cogs"] += order_cogs
-            total_metrics["vendor_funding"] += order_vendor_funding
-            
-            daily_metrics[order_date]["total_cogs"] += order_cogs
-            daily_metrics[order_date]["vendor_funding"] += order_vendor_funding
-            daily_metrics[order_date]["temp_price"] += order_price
-        
-        # Calculate net profit and margin for totals
-        total_metrics["net_profit"] = (total_metrics["gross_revenue"] - total_metrics["total_cogs"]) + total_metrics["vendor_funding"]
-        total_metrics["profit_margin"] = (total_metrics["net_profit"] / total_metrics["gross_revenue"] * 100) if total_metrics["gross_revenue"] else 0
-        
-        # Calculate net profit and margin for each day
-        for date, metrics in daily_metrics.items():
-            metrics["net_profit"] = (metrics["temp_price"] - metrics["total_cogs"]) + metrics["vendor_funding"]
-            metrics["profit_margin"] = (metrics["net_profit"] / metrics["gross_revenue"] * 100) if metrics["gross_revenue"] else 0
-            # Remove temporary fields
-            metrics.pop("total_cogs", None)
-            metrics.pop("vendor_funding", None)
-            metrics.pop("temp_price", None)
-        
-        # Remove internal calculation fields from total
-        total_metrics.pop("total_cogs", None)
-        total_metrics.pop("vendor_funding", None)
-        
-        return total_metrics, daily_metrics
-    
-    # Calculate current period metrics
-    total, graph_data = calculate_revenue_metrics(
-        start_date, end_date, marketplace_id, brand_id, 
+
+    # Fetch data sequentially (no ThreadPoolExecutor)
+    total = totalRevenueCalculation(
+        start_date, end_date, marketplace_id, brand_id,
         product_id, manufacturer_name, fulfillment_channel, timezone_str
     )
-    
-    # Calculate comparison period metrics if needed
+    graph_data = get_graph_data(
+        start_date, end_date, preset, marketplace_id, brand_id,
+        product_id, manufacturer_name, fulfillment_channel, timezone_str
+    )
+
     compare_total = None
     compare_graph = None
     if compare_startdate and compare_startdate != "":
         compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
         compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
-        
-        compare_total, compare_graph = calculate_revenue_metrics(
-            compare_startdate, compare_enddate, marketplace_id, brand_id,
-            product_id, manufacturer_name, fulfillment_channel, timezone_str
+        compare_total = totalRevenueCalculation(
+            compare_startdate, compare_enddate, marketplace_id,
+            brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
         )
-    
-    # Build updated graph structure
+        initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
+        compare_graph = get_graph_data(
+            compare_startdate, compare_enddate, initial, marketplace_id,
+            brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
+        )
+
     updated_graph = {}
-    
+
     if compare_startdate and compare_startdate != "":
         for index, (key, metrics) in enumerate(graph_data.items()):
             compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
@@ -739,14 +613,13 @@ def updatedRevenueWidgetAPIView(request):
                 "refund_amount": metrics.get("refund_amount", 0),
                 "refund_quantity": metrics.get("refund_quantity", 0),
             }
-    
+
     data = {
         "total": total,
         "graph": updated_graph,
         "comapre_past": comapre_past
     }
-    
-    # Calculate percentage differences if comparing
+
     if compare_startdate and compare_startdate != "":
         difference = {
             "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
@@ -758,19 +631,17 @@ def updatedRevenueWidgetAPIView(request):
             "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
         }
         data['compare_total'] = difference
-    
-    # Apply field selection from chooseMatrix
+
     name = "Revenue"
     item_pipeline = [{"$match": {"name": name}}]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
     if item_result:
         item_result = item_result[0]
         if not item_result['select_all']:
-            for field in ['gross_revenue', 'units_sold', 'refund_quantity', 
-                         'refund_amount', 'net_profit', 'profit_margin', 'orders']:
+            for field in ['gross_revenue', 'units_sold', 'refund_quantity',
+                          'refund_amount', 'net_profit', 'profit_margin', 'orders']:
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
-    
     return data
 import pytz
 @csrf_exempt
