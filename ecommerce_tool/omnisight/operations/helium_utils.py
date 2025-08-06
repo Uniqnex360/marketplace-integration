@@ -828,7 +828,6 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     }
 
     return total
-@lru_cache(maxsize=128)
 def calculate_metricss(
     from_date,
     to_date,
