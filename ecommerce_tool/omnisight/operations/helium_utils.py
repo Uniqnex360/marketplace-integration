@@ -8,6 +8,8 @@ import threading
 import math
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
+
 logger = logging.getLogger(__name__)
 import pandas as pd
 from pytz import timezone
