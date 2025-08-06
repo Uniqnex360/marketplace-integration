@@ -1299,9 +1299,6 @@ def getPeriodWiseData(request):
         fulfillment_channel = json_request.get('fulfillment_channel')
         timezone_str = 'US/Pacific'
 
-        # Pre-validate IDs to prevent downstream issues
-        if marketplace_id and not ObjectId.is_valid(marketplace_id):
-            raise ValueError("Invalid marketplace_id format")
 
         # Calculate metrics once and reuse (if possible)
         def get_cached_metrics(start_date, end_date):
