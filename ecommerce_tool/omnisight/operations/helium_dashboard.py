@@ -50,7 +50,6 @@ from concurrent.futures import ThreadPoolExecutor
 import math
 from omnisight.models import *
 from django.utils import timezone
-from concurrent.futures import ThreadPoolExecutor
 from rest_framework.parsers import JSONParser
 from datetime import datetime
 from datetime import datetime, timedelta
@@ -1533,11 +1532,6 @@ def exportPeriodWiseCSV(request):
     return response
 @csrf_exempt
 def getPeriodWiseDataCustom(request):
-    import pytz
-    from datetime import datetime, timedelta
-    from rest_framework.parsers import JSONParser
-    from django.http import JsonResponse
-    from concurrent.futures import ThreadPoolExecutor
     
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
