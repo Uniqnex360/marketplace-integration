@@ -1,5 +1,6 @@
 from __future__ import annotations
 import pandas as pd
+import time
 from mongoengine import Q
 from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund,Brand,inventry_log,productPriceChange
 from mongoengine.queryset.visitor import Q
@@ -579,6 +580,13 @@ def updatedRevenueWidgetAPIView(request):
         graph_data = future_graph_data.result()
     updated_graph = {}
     
+
+    start = time.time()
+    total = future_total.result()
+    print("Total revenue calculation took", time.time() - start)
+    start = time.time()
+    graph_data = future_graph_data.result()
+    print("Graph data calculation took", time.time() - start)
     if compare_startdate and compare_startdate != "":
         for index, (key, metrics) in enumerate(graph_data.items()):
             compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
@@ -639,7 +647,6 @@ def updatedRevenueWidgetAPIView(request):
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
     return data
-import pytz
 @csrf_exempt
 def get_top_products(request):
     json_request = JSONParser().parse(request)
@@ -910,7 +917,7 @@ def get_products_with_pagination(request):
     else:
         return get_individual_products(match, page, page_size, start_date, end_date, 
                                                   today_start_date, today_end_date, sort_by, sort_by_value)
-def get_parent_products(match, page, page_size, start_date, end_date,
+def get_parent_products(match, page, page_size, start_date, end_date, 
                                    today_start_date, today_end_date, sort_by, sort_by_value):
     pipeline = []
     if match:
@@ -986,9 +993,6 @@ def get_parent_products(match, page, page_size, start_date, end_date,
     sales_data = batch_get_sales_data_optimized(all_product_ids, start_date, end_date, today_start_date, today_end_date)
     processed_products = []
     for group in products_result:
-        product_ids = group["product_ids"]
-        cogs = group["cogs"] / len(product_ids) if product_ids else 0
-        vendor_funding = group["vendor_funding"] / len(product_ids) if product_ids else 0
         total_sales_today = 0
         total_units_today = 0
         total_revenue = 0
@@ -996,21 +1000,23 @@ def get_parent_products(match, page, page_size, start_date, end_date,
         total_units_period = 0
         total_revenue_period = 0
         total_net_profit_period = 0
-        for product_id in product_ids:
+        for product_id in group["product_ids"]:
             product_sales = sales_data.get(product_id, {
                 "today": {"revenue": 0, "units": 0},
                 "period": {"revenue": 0, "units": 0},
                 "compare": {"revenue": 0, "units": 0}
             })
+            cogs = group["cogs"] / len(group["product_ids"])  
+            vendor_funding = group["vendor_funding"] / len(group["product_ids"])  
             total_sales_today += product_sales["today"]["revenue"]
             total_units_today += product_sales["period"]["units"]
             total_revenue += product_sales["period"]["revenue"]
-            period_profit = (product_sales["period"]["revenue"] - (cogs * product_sales["period"]["units"]) +
+            period_profit = (product_sales["period"]["revenue"] - (cogs * product_sales["period"]["units"]) + 
                            (vendor_funding * product_sales["period"]["units"]))
             total_net_profit += period_profit
             total_units_period += product_sales["compare"]["units"] - product_sales["period"]["units"]
             total_revenue_period += product_sales["compare"]["revenue"] - product_sales["period"]["revenue"]
-            compare_profit = (product_sales["compare"]["revenue"] - (cogs * product_sales["compare"]["units"]) +
+            compare_profit = (product_sales["compare"]["revenue"] - (cogs * product_sales["compare"]["units"]) + 
                             (vendor_funding * product_sales["compare"]["units"]))
             total_net_profit_period += compare_profit - period_profit
         margin = (total_net_profit / total_revenue) * 100 if total_revenue > 0 else 0
@@ -1033,7 +1039,7 @@ def get_parent_products(match, page, page_size, start_date, end_date,
         group.pop("product_ids", None)
         group.pop("vendor_funding", None)
         processed_products.append(group)
-    calculated_fields = {'salesForToday', 'unitsSoldForToday', 'grossRevenue', 'netProfit', 'margin',
+    calculated_fields = {'salesForToday', 'unitsSoldForToday', 'grossRevenue', 'netProfit', 'margin', 
                         'unitsSoldForPeriod', 'grossRevenueforPeriod', 'netProfitforPeriod', 'marginforPeriod'}
     if sort_by and sort_by in calculated_fields:
         reverse_sort = sort_by_value == -1
