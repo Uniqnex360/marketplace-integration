@@ -741,8 +741,6 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
 
 
 def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"):
-    from collections import defaultdict
-
     total = dict()
     gross_revenue = 0
     total_cogs = 0
@@ -754,25 +752,27 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     vendor_funding = 0
     refund_quantity_ins = 0
 
-    # Step 1: Fetch all orders and refunds
+    # Step 1: Fetch orders and refunds
     orders = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
     refund_ins = refundOrder(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
 
-    # Step 2: Calculate refund metrics
     if refund_ins:
         for ins in refund_ins:
             refund += ins['order_total']
             refund_quantity_ins += len(ins['order_items'])
 
-    # Step 3: Accumulate all order item IDs and other quick metrics
+    # Step 2: Build item list and item-to-marketplace map
     all_item_ids = []
+    item_marketplace_map = {}
     for order in orders:
         gross_revenue += order['order_total']
         total_units += order['items_order_quantity']
         total_orders += 1
-        all_item_ids.extend(order['order_items'])
+        for item_id in order['order_items']:
+            all_item_ids.append(item_id)
+            item_marketplace_map[str(item_id)] = order['marketplace_name']
 
-    # Step 4: Single bulk aggregation for all order items
+    # Step 3: One bulk aggregation query
     pipeline = [
         {"$match": {"_id": {"$in": all_item_ids}}},
         {
@@ -786,38 +786,42 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
         {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
         {
             "$project": {
-                "_id": 0,
+                "_id": 1,
                 "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
                 "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
                 "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
                 "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                 "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                "marketplace_name": {"$ifNull": ["$marketplace_name", ""]},
             }
         }
     ]
 
     item_results = list(OrderItems.objects.aggregate(*pipeline))
 
-    # Step 5: Aggregate calculated fields
+    # Step 4: Aggregate with marketplace-aware COGS logic
     for item in item_results:
-        temp_other_price += item['price']
-        if item['marketplace_name'] == "Amazon":
-            total_cogs += item['total_cogs']
-        else:
-            total_cogs += item['w_total_cogs']
-        vendor_funding += item['vendor_funding']
+        item_id = str(item["_id"])
+        temp_other_price += item["price"]
 
-    # Step 6: Final net profit calculation
+        # Correctly choose COGS based on marketplace
+        marketplace = item_marketplace_map.get(item_id, "")
+        if marketplace == "Amazon":
+            total_cogs += item["total_cogs"]
+        else:
+            total_cogs += item["w_total_cogs"]
+
+        vendor_funding += item["vendor_funding"]
+
+    # Step 5: Net profit
     net_profit = (temp_other_price - total_cogs) + vendor_funding
 
-    # Step 7: Final response
+    # Step 6: Final totals
     total = {
         "gross_revenue": round(gross_revenue, 2),
         "net_profit": round(net_profit, 2),
         "profit_margin": round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0,
-        "orders": round(total_orders, 2),
-        "units_sold": round(total_units, 2),
+        "orders": total_orders,
+        "units_sold": total_units,
         "refund_amount": round(refund, 2),
         "refund_quantity": refund_quantity_ins
     }
