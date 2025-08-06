@@ -511,160 +511,538 @@ def RevenueWidgetAPIView(request):
             del data['total']["orders"]
     return data
 @csrf_exempt
-
-
 def updatedRevenueWidgetAPIView(request):
-    """
-    Calculates and returns revenue widget data, optimized for performance.
-    """
-
+    from django.utils import timezone
+    import pytz
+    from concurrent.futures import ThreadPoolExecutor
+    from django.core.cache import cache
+    import hashlib
+    from bson import ObjectId
+    from datetime import datetime
+    
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
-    compare_startdate_str = json_request.get("compare_startdate")  # Keep as string initially
-    compare_enddate_str = json_request.get("compare_enddate")  # Keep as string initially
-    marketplace_id = json_request.get("marketplace_id")
-    product_id = json_request.get("product_id")
-    brand_id = json_request.get("brand_id")
-    manufacturer_name = json_request.get("manufacturer_name")
-    fulfillment_channel = json_request.get("fulfillment_channel")
+    compare_startdate = json_request.get("compare_startdate")
+    compare_enddate = json_request.get("compare_enddate")
+    marketplace_id = json_request.get("marketplace_id", None)
+    product_id = json_request.get("product_id", None)
+    brand_id = json_request.get("brand_id", None)
+    manufacturer_name = json_request.get("manufacturer_name", None)
+    fulfillment_channel = json_request.get("fulfillment_channel", None)
     timezone_str = "US/Pacific"
-    start_date_str = json_request.get("start_date")
-    end_date_str = json_request.get("end_date")
-    if start_date_str: # if the date is not none
-        start_date, end_date = convertdateTotimezone(start_date_str, end_date_str, timezone_str)
+    
+    start_date = json_request.get("start_date", None)
+    end_date = json_request.get("end_date", None)
+    
+    if start_date != None and start_date != "":
+        start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
         start_date, end_date = get_date_range(preset, timezone_str)
-    #Prefetch the total calculation
-    total = totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id,
-                                            product_id, manufacturer_name, fulfillment_channel, timezone_str)
-    graph_data = get_graph_data(start_date, end_date, preset, marketplace_id, brand_id,
-                                   product_id, manufacturer_name, fulfillment_channel, timezone_str)
+    
+    # Generate cache key based on all parameters
+    cache_params = {
+        'start_date': str(start_date),
+        'end_date': str(end_date),
+        'compare_startdate': str(compare_startdate),
+        'compare_enddate': str(compare_enddate),
+        'marketplace_id': marketplace_id,
+        'product_id': product_id,
+        'brand_id': brand_id,
+        'manufacturer_name': manufacturer_name,
+        'fulfillment_channel': fulfillment_channel,
+        'preset': preset
+    }
+    cache_key = f"revenue_widget_{hashlib.md5(str(cache_params).encode()).hexdigest()}"
+    
+    # Try to get from cache first (Redis recommended)
+    cached_data = cache.get(cache_key)
+    if cached_data:
+        return cached_data
+    
+    # Check if we have cached metrics for this query
+    cached_metrics = check_cached_metrics(
+        start_date, end_date, marketplace_id, brand_id, 
+        product_id, manufacturer_name, fulfillment_channel
+    )
+    
     comapre_past = get_previous_periods(start_date, end_date)
-    compare_total = None
-    compare_graph = None
-    if compare_startdate_str: #Compare start date is not none
-        compare_startdate = datetime.strptime(compare_startdate_str, "%Y-%m-%d").replace(hour=0, minute=0, second=0,
-                                                                                                    microsecond=0)
-        compare_enddate = datetime.strptime(compare_enddate_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59,
-                                                                                                microsecond=0)
-        compare_total = totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id,
-                                                    brand_id, product_id, manufacturer_name, fulfillment_channel,
-                                                    timezone_str)
-        initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
-        compare_graph = get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id,
-                                           brand_id, product_id, manufacturer_name, fulfillment_channel,
-                                           timezone_str)
-
-    updated_graph = {}
-    if compare_startdate_str: #Compare start date is not none
-        #Predefine keys to be extracted, prevent extracting this data during the loop
-        compare_graph_values = list(compare_graph.values())
-        compare_graph_keys = list(compare_graph.keys())
-        #Prefetch the length outside of the for loop,
-        compare_graph_len = len(compare_graph_values)
-        for index, (key, metrics) in enumerate(graph_data.items()):
-            if index < compare_graph_len:
-                compare_metrics = compare_graph_values[index]
-                compare_key = compare_graph_keys[index]
-                #Predefine all keys here for the compareMetrics so that it is not repeatedly extracted
-                c_gross_revenue = compare_metrics.get("gross_revenue", 0)
-                c_net_profit = compare_metrics.get("net_profit", 0)
-                c_profit_margin = compare_metrics.get("profit_margin", 0)
-                c_orders = compare_metrics.get("orders", 0)
-                c_units_sold = compare_metrics.get("units_sold", 0)
-                c_refund_amount = compare_metrics.get("refund_amount", 0)
-                c_refund_quantity = compare_metrics.get("refund_quantity", 0)
-            else:
-                compare_metrics = {}
-                compare_key = None
-                #Set default keys, will prevent potential errors where keys are not defined.
-                c_gross_revenue = 0
-                c_net_profit = 0
-                c_profit_margin = 0
-                c_orders = 0
-                c_units_sold = 0
-                c_refund_amount = 0
-                c_refund_quantity = 0
-            #Extract metrics values during first assignment to prevent repeating extraction of data
-            gross_revenue = metrics.get("gross_revenue", 0)
-            net_profit = metrics.get("net_profit", 0)
-            profit_margin = metrics.get("profit_margin", 0)
-            orders = metrics.get("orders", 0)
-            units_sold = metrics.get("units_sold", 0)
-            refund_amount = metrics.get("refund_amount", 0)
-            refund_quantity = metrics.get("refund_quantity", 0)
-            updated_graph[key] = {
-                "current_date": key,
-                "gross_revenue": gross_revenue,
-                "net_profit": net_profit,
-                "profit_margin": profit_margin,
-                "orders": orders,
-                "units_sold": units_sold,
-                "refund_amount": refund_amount,
-                "refund_quantity": refund_quantity,
-                "compare_gross_revenue": c_gross_revenue,
-                "compare_net_profit": c_net_profit,
-                "compare_profit_margin": c_profit_margin,
-                "compare_orders":  c_orders,
-                "compare_units_sold": c_units_sold,
-                "compare_refund_amount": c_refund_amount,
-                "compare_refund_quantity": c_refund_quantity,
-                "compare_date": compare_key,
-            }
-    else:
-        for key, metrics in graph_data.items():
-            updated_graph[key] = {
-                "current_date": key,
-                "gross_revenue": metrics.get("gross_revenue", 0),
-                "net_profit": metrics.get("net_profit", 0),
-                "profit_margin": metrics.get("profit_margin", 0),
-                "orders": metrics.get("orders", 0),
-                "units_sold": metrics.get("units_sold", 0),
-                "refund_amount": metrics.get("refund_amount", 0),
-                "refund_quantity": metrics.get("refund_quantity", 0),
-            }
-
+    
+    # Prepare comparison dates once
+    compare_start_parsed = None
+    compare_end_parsed = None
+    if compare_startdate and compare_startdate != "":
+        compare_start_parsed = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        compare_end_parsed = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, microsecond=0
+        )
+    
+    def fetch_current_data():
+        """Fetch current period data with optimized MongoDB aggregation"""
+        if cached_metrics and cached_metrics['current']:
+            total = cached_metrics['current']
+        else:
+            total = totalRevenueCalculation_optimized(
+                start_date, end_date, marketplace_id, brand_id, 
+                product_id, manufacturer_name, fulfillment_channel, timezone_str
+            )
+        
+        graph_data = get_graph_data_optimized(
+            start_date, end_date, preset, marketplace_id, brand_id, 
+            product_id, manufacturer_name, fulfillment_channel, timezone_str
+        )
+        return total, graph_data
+    
+    def fetch_comparison_data():
+        """Fetch comparison period data"""
+        if not (compare_start_parsed and compare_end_parsed):
+            return None, None
+        
+        if cached_metrics and cached_metrics['compare']:
+            compare_total = cached_metrics['compare']
+        else:
+            compare_total = totalRevenueCalculation_optimized(
+                compare_start_parsed, compare_end_parsed, marketplace_id, 
+                brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
+            )
+        
+        initial = "Today" if compare_start_parsed.date() == compare_end_parsed.date() else None
+        compare_graph = get_graph_data_optimized(
+            compare_start_parsed, compare_end_parsed, initial, marketplace_id, 
+            brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
+        )
+        return compare_total, compare_graph
+    
+    # Use fewer workers for better performance
+    max_workers = 2 if compare_startdate and compare_startdate != "" else 1
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_current = executor.submit(fetch_current_data)
+        future_comparison = None
+        
+        if compare_startdate and compare_startdate != "":
+            future_comparison = executor.submit(fetch_comparison_data)
+        
+        # Get results
+        total, graph_data = future_current.result()
+        compare_total, compare_graph = None, None
+        
+        if future_comparison:
+            compare_total, compare_graph = future_comparison.result()
+    
+    # Build response data efficiently
+    updated_graph = build_graph_response_optimized(graph_data, compare_graph)
+    
     data = {
         "total": total,
         "graph": updated_graph,
         "comapre_past": comapre_past
     }
-
-    if compare_startdate_str:#Compare start date is not none
-        #Handle case where values are none to prevent division by zero error
-        compare_gross_revenue = compare_total["gross_revenue"] if compare_total["gross_revenue"] is not None else 1
-        compare_net_profit = compare_total["net_profit"] if compare_total["net_profit"] is not None else 1
-        compare_profit_margin = compare_total["profit_margin"] if compare_total["profit_margin"] is not None else 1
-        compare_orders = compare_total["orders"] if compare_total["orders"] is not None else 1
-        compare_units_sold = compare_total["units_sold"] if compare_total["units_sold"] is not None else 1
-        compare_refund_amount = compare_total["refund_amount"] if compare_total["refund_amount"] is not None else 1
-        compare_refund_quantity = compare_total["refund_quantity"] if compare_total["refund_quantity"] is not None else 1
-        difference = {
-            "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_gross_revenue * 100) if compare_gross_revenue else 0, 2),
-            "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_net_profit * 100) if compare_net_profit else 0, 2),
-            "profit_margin": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_profit_margin * 100) if compare_profit_margin else 0, 2),
-            "orders": round(((total["orders"] - compare_total["orders"]) / compare_orders * 100) if compare_orders else 0, 2),
-            "units_sold": round(((total["units_sold"] - compare_total["units_sold"]) / compare_units_sold * 100) if compare_units_sold else 0, 2),
-            "refund_amount": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_refund_amount * 100) if compare_refund_amount else 0, 2),
-            "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_refund_quantity * 100) if compare_refund_quantity else 0, 2),
-        }
-        data['compare_total'] = difference
-
-    name = "Revenue"
-    item_pipeline = [{"$match": {"name": name}}]
-    item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
-    if item_result:
-        item_result = item_result[0]
-        if not item_result['select_all']:
-            # Extract fields to be deleted outside the loop, will reduce operations done during loop
-            fields_to_delete = [field for field in ['gross_revenue', 'units_sold', 'refund_quantity',
-                                                     'refund_amount', 'net_profit', 'profit_margin', 'orders']
-                                 if not item_result.get(field, True)]
-            #Delete from totals instead of looping through and doing multiple operations
-            for field in fields_to_delete:
-                data['total'].pop(field, None)
+    
+    # Add comparison differences if available
+    if compare_total:
+        data['compare_total'] = calculate_percentage_differences(total, compare_total)
+    
+    # Apply field filtering with caching
+    data = apply_field_filtering_cached(data, "Revenue")
+    
+    # Cache the result for 5 minutes
+    cache.set(cache_key, data, 300)
+    
     return data
-import pytz
+
+
+def check_cached_metrics(start_date, end_date, marketplace_id, brand_id, 
+                        product_id, manufacturer_name, fulfillment_channel):
+    """Check if we have cached metrics for this query"""
+    try:
+        # Build query for cached metrics
+        query_filters = {
+            'from_date__lte': start_date,
+            'to_date__gte': end_date
+        }
+        
+        if marketplace_id:
+            query_filters['marketplace_id'] = ObjectId(marketplace_id)
+        if brand_id:
+            query_filters['brand_ids__in'] = [ObjectId(brand_id)]
+        if fulfillment_channel:
+            query_filters['fulfillment_channel'] = fulfillment_channel
+        
+        cached_metric = CachedMetrics.objects(**query_filters).first()
+        
+        if cached_metric:
+            return {
+                'current': {
+                    'gross_revenue': cached_metric.gross_revenue,
+                    'net_profit': cached_metric.net_profit,
+                    'profit_margin': cached_metric.margin,
+                    'orders': cached_metric.total_orders,
+                    'units_sold': cached_metric.total_units,
+                    'refund_amount': 0,  # Add to CachedMetrics model if needed
+                    'refund_quantity': cached_metric.refund
+                }
+            }
+    except Exception as e:
+        print(f"Error fetching cached metrics: {e}")
+    
+    return None
+
+
+def totalRevenueCalculation_optimized(start_date, end_date, marketplace_id, brand_id, 
+                                    product_id, manufacturer_name, fulfillment_channel, timezone_str):
+    """Optimized total revenue calculation using MongoDB aggregation"""
+    
+    # Build match criteria
+    match_criteria = {
+        'order_date': {
+            '$gte': start_date,
+            '$lte': end_date
+        }
+    }
+    
+    if marketplace_id:
+        match_criteria['marketplace_id'] = ObjectId(marketplace_id)
+    if fulfillment_channel:
+        match_criteria['fulfillment_channel'] = fulfillment_channel
+    
+    # Build product filter pipeline
+    product_match = {}
+    if brand_id or product_id or manufacturer_name:
+        if brand_id:
+            product_match['brand_id'] = ObjectId(brand_id)
+        if product_id:
+            product_match['_id'] = ObjectId(product_id)
+        if manufacturer_name:
+            product_match['manufacturer_name'] = manufacturer_name
+    
+    # Optimized aggregation pipeline
+    pipeline = [
+        {'$match': match_criteria},
+        
+        # Unwind order items for product-level filtering
+        {'$unwind': '$order_items'},
+        
+        # Lookup product details if filtering by product attributes
+        {
+            '$lookup': {
+                'from': 'product',
+                'localField': 'order_items.ProductDetails.product_id',
+                'foreignField': '_id',
+                'as': 'product_info',
+                'pipeline': [{'$match': product_match}] if product_match else []
+            }
+        } if product_match else {'$addFields': {'product_info': [{}]}},
+        
+        # Filter out orders that don't match product criteria
+        {'$match': {'product_info': {'$ne': []}}} if product_match else {'$match': {}},
+        
+        # Calculate metrics
+        {
+            '$group': {
+                '_id': None,
+                'gross_revenue': {
+                    '$sum': {
+                        '$add': [
+                            '$order_items.Pricing.ItemPrice.Amount',
+                            {'$ifNull': ['$order_items.Pricing.ItemTax.Amount', 0]}
+                        ]
+                    }
+                },
+                'total_orders': {'$addToSet': '$_id'},
+                'total_units': {
+                    '$sum': '$order_items.ProductDetails.QuantityOrdered'
+                },
+                'total_cogs': {
+                    '$sum': {
+                        '$multiply': [
+                            '$order_items.ProductDetails.QuantityOrdered',
+                            {'$ifNull': [{'$arrayElemAt': ['$product_info.cogs', 0]}, 0]}
+                        ]
+                    }
+                },
+                'refund_quantity': {
+                    '$sum': {
+                        '$cond': [
+                            {'$eq': ['$order_status', 'Returned']},
+                            '$order_items.ProductDetails.QuantityOrdered',
+                            0
+                        ]
+                    }
+                }
+            }
+        },
+        
+        # Calculate derived metrics
+        {
+            '$addFields': {
+                'orders': {'$size': '$total_orders'},
+                'net_profit': {'$subtract': ['$gross_revenue', '$total_cogs']},
+                'profit_margin': {
+                    '$cond': [
+                        {'$gt': ['$gross_revenue', 0]},
+                        {
+                            '$multiply': [
+                                {'$divide': [
+                                    {'$subtract': ['$gross_revenue', '$total_cogs']},
+                                    '$gross_revenue'
+                                ]},
+                                100
+                            ]
+                        },
+                        0
+                    ]
+                },
+                'refund_amount': 0  # Calculate this based on your refund logic
+            }
+        }
+    ]
+    
+    try:
+        result = list(Order.objects.aggregate(pipeline))
+        if result:
+            metrics = result[0]
+            return {
+                'gross_revenue': round(metrics.get('gross_revenue', 0), 2),
+                'net_profit': round(metrics.get('net_profit', 0), 2),
+                'profit_margin': round(metrics.get('profit_margin', 0), 2),
+                'orders': metrics.get('orders', 0),
+                'units_sold': metrics.get('total_units', 0),
+                'refund_amount': metrics.get('refund_amount', 0),
+                'refund_quantity': metrics.get('refund_quantity', 0)
+            }
+    except Exception as e:
+        print(f"Error in revenue calculation: {e}")
+    
+    # Return default values if query fails
+    return {
+        'gross_revenue': 0,
+        'net_profit': 0,
+        'profit_margin': 0,
+        'orders': 0,
+        'units_sold': 0,
+        'refund_amount': 0,
+        'refund_quantity': 0
+    }
+
+
+def get_graph_data_optimized(start_date, end_date, preset, marketplace_id, brand_id, 
+                           product_id, manufacturer_name, fulfillment_channel, timezone_str):
+    """Optimized graph data using MongoDB aggregation with time grouping"""
+    
+    # Determine date grouping format
+    date_format = get_date_format_for_preset(preset)
+    
+    # Build match criteria
+    match_criteria = {
+        'order_date': {
+            '$gte': start_date,
+            '$lte': end_date
+        }
+    }
+    
+    if marketplace_id:
+        match_criteria['marketplace_id'] = ObjectId(marketplace_id)
+    if fulfillment_channel:
+        match_criteria['fulfillment_channel'] = fulfillment_channel
+    
+    # Build product filter
+    product_match = {}
+    if brand_id or product_id or manufacturer_name:
+        if brand_id:
+            product_match['brand_id'] = ObjectId(brand_id)
+        if product_id:
+            product_match['_id'] = ObjectId(product_id)
+        if manufacturer_name:
+            product_match['manufacturer_name'] = manufacturer_name
+    
+    pipeline = [
+        {'$match': match_criteria},
+        {'$unwind': '$order_items'},
+        
+        # Lookup product details if needed
+        {
+            '$lookup': {
+                'from': 'product',
+                'localField': 'order_items.ProductDetails.product_id',
+                'foreignField': '_id',
+                'as': 'product_info',
+                'pipeline': [{'$match': product_match}] if product_match else []
+            }
+        } if product_match else {'$addFields': {'product_info': [{}]}},
+        
+        {'$match': {'product_info': {'$ne': []}}} if product_match else {'$match': {}},
+        
+        # Group by date period
+        {
+            '$group': {
+                '_id': {
+                    '$dateToString': {
+                        'format': date_format,
+                        'date': '$order_date',
+                        'timezone': timezone_str
+                    }
+                },
+                'gross_revenue': {
+                    '$sum': {
+                        '$add': [
+                            '$order_items.Pricing.ItemPrice.Amount',
+                            {'$ifNull': ['$order_items.Pricing.ItemTax.Amount', 0]}
+                        ]
+                    }
+                },
+                'orders': {'$addToSet': '$_id'},
+                'units_sold': {'$sum': '$order_items.ProductDetails.QuantityOrdered'},
+                'total_cogs': {
+                    '$sum': {
+                        '$multiply': [
+                            '$order_items.ProductDetails.QuantityOrdered',
+                            {'$ifNull': [{'$arrayElemAt': ['$product_info.cogs', 0]}, 0]}
+                        ]
+                    }
+                },
+                'refund_quantity': {
+                    '$sum': {
+                        '$cond': [
+                            {'$eq': ['$order_status', 'Returned']},
+                            '$order_items.ProductDetails.QuantityOrdered',
+                            0
+                        ]
+                    }
+                }
+            }
+        },
+        
+        # Calculate derived metrics
+        {
+            '$addFields': {
+                'net_profit': {'$subtract': ['$gross_revenue', '$total_cogs']},
+                'profit_margin': {
+                    '$cond': [
+                        {'$gt': ['$gross_revenue', 0]},
+                        {
+                            '$multiply': [
+                                {'$divide': [
+                                    {'$subtract': ['$gross_revenue', '$total_cogs']},
+                                    '$gross_revenue'
+                                ]},
+                                100
+                            ]
+                        },
+                        0
+                    ]
+                },
+                'orders_count': {'$size': '$orders'},
+                'refund_amount': 0
+            }
+        },
+        
+        {'$sort': {'_id': 1}}
+    ]
+    
+    try:
+        results = list(Order.objects.aggregate(pipeline))
+        graph_data = {}
+        
+        for result in results:
+            period = result['_id']
+            graph_data[period] = {
+                'gross_revenue': round(result.get('gross_revenue', 0), 2),
+                'net_profit': round(result.get('net_profit', 0), 2),
+                'profit_margin': round(result.get('profit_margin', 0), 2),
+                'orders': result.get('orders_count', 0),
+                'units_sold': result.get('units_sold', 0),
+                'refund_amount': result.get('refund_amount', 0),
+                'refund_quantity': result.get('refund_quantity', 0)
+            }
+        
+        return graph_data
+        
+    except Exception as e:
+        print(f"Error in graph data calculation: {e}")
+        return {}
+
+
+def get_date_format_for_preset(preset):
+    """Get MongoDB date format string based on preset"""
+    format_mapping = {
+        'Today': '%Y-%m-%d %H:00:00',
+        'Yesterday': '%Y-%m-%d %H:00:00',
+        'Last 7 Days': '%Y-%m-%d',
+        'Last 30 Days': '%Y-%m-%d',
+        'This Month': '%Y-%m-%d',
+        'Last Month': '%Y-%m-%d',
+        'This Year': '%Y-%m',
+        'Last Year': '%Y-%m'
+    }
+    return format_mapping.get(preset, '%Y-%m-%d')
+
+
+def build_graph_response_optimized(graph_data, compare_graph):
+    """Efficiently build graph response"""
+    updated_graph = {}
+    compare_items = list(compare_graph.items()) if compare_graph else []
+    
+    for index, (key, metrics) in enumerate(graph_data.items()):
+        updated_graph[key] = {
+            "current_date": key,
+            **{k: metrics.get(k, 0) for k in [
+                "gross_revenue", "net_profit", "profit_margin", 
+                "orders", "units_sold", "refund_amount", "refund_quantity"
+            ]}
+        }
+        
+        # Add comparison data if available
+        if index < len(compare_items):
+            compare_key, compare_metrics = compare_items[index]
+            updated_graph[key].update({
+                f"compare_{k}": compare_metrics.get(k, 0) 
+                for k in ["gross_revenue", "net_profit", "profit_margin", 
+                         "orders", "units_sold", "refund_amount", "refund_quantity"]
+            })
+            updated_graph[key]["compare_date"] = compare_key
+    
+    return updated_graph
+
+
+def calculate_percentage_differences(total, compare_total):
+    """Calculate percentage differences efficiently"""
+    return {
+        field: round(
+            ((total[field] - compare_total[field]) / compare_total[field] * 100) 
+            if compare_total[field] else 0, 2
+        )
+        for field in ['gross_revenue', 'net_profit', 'profit_margin', 'orders', 
+                     'units_sold', 'refund_amount', 'refund_quantity']
+    }
+
+
+def apply_field_filtering_cached(data, name):
+    """Apply field filtering with caching"""
+    from django.core.cache import cache
+    
+    filter_cache_key = f"field_filter_{name}"
+    item_result = cache.get(filter_cache_key)
+    
+    if item_result is None:
+        try:
+            item_result = chooseMatrix.objects(name=name).first()
+            if item_result:
+                item_result = item_result.to_mongo().to_dict()
+                cache.set(filter_cache_key, item_result, 3600)  # Cache for 1 hour
+        except Exception as e:
+            print(f"Error fetching field filter: {e}")
+            return data
+    
+    if item_result and not item_result.get('select_all', True):
+        fields_to_check = ['gross_revenue', 'units_sold', 'refund_quantity', 
+                          'refund_amount', 'net_profit', 'profit_margin', 'orders']
+        for field in fields_to_check:
+            if not item_result.get(field, True):
+                data['total'].pop(field, None)
+    
+    return data
 @csrf_exempt
 def get_top_products(request):
     json_request = JSONParser().parse(request)
