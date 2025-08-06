@@ -795,9 +795,10 @@ def totalRevenueCalculation(
     product_ids = set()
     for item in item_docs:
         pid = getattr(item.ProductDetails, 'product_id', None) if item.ProductDetails else None
-        if pid:
-            product_ids.add(pid)
-    product_ids = [ObjectId(i) if not isinstance(i, ObjectId) else i for i in product_ids]
+    # Only add if pid is a string or ObjectId (not a Product object)
+    if pid and isinstance(pid, (str, ObjectId)):
+        product_ids.add(pid)
+    product_ids = [ObjectId(i) if isinstance(i, str) else i for i in product_ids]
 
     # --- Batch fetch all Products ---
     product_docs = list(Product.objects.filter(id__in=list(product_ids)))
