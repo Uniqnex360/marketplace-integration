@@ -7,6 +7,7 @@ from ecommerce_tool.crud import DatabaseModel
 import threading
 import math
 import logging
+from concurrent.futures import ThreadPoolExecutor
 logger = logging.getLogger(__name__)
 import pandas as pd
 from pytz import timezone
@@ -700,7 +701,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         }
 
     # Process time buckets with limited threading
-    from concurrent.futures import ThreadPoolExecutor
+    
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {executor.submit(process_time_bucket, time_key): time_key for time_key in graph_data}
         for future in futures:
