@@ -48,7 +48,6 @@ from concurrent.futures import ThreadPoolExecutor
 import math
 from omnisight.models import *
 from django.utils import timezone
-from concurrent.futures import ThreadPoolExecutor
 from rest_framework.parsers import JSONParser
 from datetime import datetime
 from datetime import datetime, timedelta
@@ -1344,13 +1343,13 @@ def getPeriodWiseData(request):
                 calculate_metricss,
                 job["current_start"], job["current_end"],
                 marketplace_id, brand_id, product_id, manufacturer_name,
-                fulfillment_channel, timezone_str, False, False
+                fulfillment_channel, timezone_str, False, True
             )
             futures[f"{key}_previous"] = executor.submit(
                 calculate_metricss,
                 job["previous_start"], job["previous_end"],
                 marketplace_id, brand_id, product_id, manufacturer_name,
-                fulfillment_channel, timezone_str, False, False
+                fulfillment_channel, timezone_str, False, True
             )
 
         # Wait for all results

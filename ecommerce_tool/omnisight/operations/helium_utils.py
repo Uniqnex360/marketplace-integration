@@ -420,7 +420,7 @@ def AnnualizedRevenueAPIView(target_date):
 
 
 def getdaywiseproductssold(start_date, end_date, product_id, is_hourly=False):
-   
+
     date_format = "%Y-%m-%d %H:00" if is_hourly else "%Y-%m-%d"
 
     pipeline = [
