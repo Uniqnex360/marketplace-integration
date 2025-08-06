@@ -5,6 +5,7 @@ from datetime import datetime,timedelta
 from dateutil.relativedelta import relativedelta
 from ecommerce_tool.crud import DatabaseModel
 import threading
+from functools import lru_cache
 import math
 import logging
 logger = logging.getLogger(__name__)
@@ -827,7 +828,7 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     }
 
     return total
-
+@lru_cache(maxsize=128)
 def calculate_metricss(
     from_date,
     to_date,
@@ -840,6 +841,7 @@ def calculate_metricss(
     include_extra_fields=False,
     use_threads=False
 ):
+    # Initial metrics
     gross_revenue = 0
     total_cogs = 0
     net_profit = 0
@@ -855,19 +857,35 @@ def calculate_metricss(
     sku_set = set()
     p_id = set()
 
-    result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone)
-    all_item_ids = [ObjectId(item_id) for order in result for item_id in order['order_items']]
-    refund_ins = refundOrder(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone)
-    refund = len(refund_ins)
-    
-    
     if timezone != 'UTC':
         from_date, to_date = convertLocalTimeToUTC(from_date, to_date, timezone)
-    
-    # Remove timezone info for MongoDB query (assuming your MongoDB driver expects naive UTC)
+
     from_date = from_date.replace(tzinfo=None)
     to_date = to_date.replace(tzinfo=None)
 
+    # ✅ Step 1: Get all orders and basic order-level metrics
+    orders = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
+
+    if not orders:
+        return {
+            "grossRevenue": 0,
+            "expenses": 0,
+            "netProfit": 0,
+            "roi": 0,
+            "unitsSold": 0,
+            "refunds": 0,
+            "skuCount": 0,
+            "sessions": 0,
+            "pageViews": 0,
+            "unitSessionPercentage": 0,
+            "margin": 0,
+            "orders": 0
+        }
+
+    # ✅ Step 2: Collect all item_ids in one go
+    all_item_ids = list({ObjectId(item_id) for order in orders for item_id in order['order_items']})
+
+    # ✅ Step 3: Aggregate item + product data in one efficient Mongo pipeline
     item_pipeline = [
         { "$match": { "_id": { "$in": all_item_ids } } },
         {
@@ -881,6 +899,7 @@ def calculate_metricss(
         { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
         {
             "$project": {
+                "_id": 1,
                 "p_id" : "$product_ins._id",
                 "price": "$Pricing.ItemPrice.Amount",
                 "tax_price": "$Pricing.ItemTax.Amount",
@@ -889,76 +908,78 @@ def calculate_metricss(
                 "total_cogs": { "$ifNull": ["$product_ins.total_cogs", 0] },
                 "w_total_cogs": { "$ifNull": ["$product_ins.w_total_cogs", 0] },
                 "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] },
-                "a_shipping_cost" : {"$ifNull":["$product_ins.a_shipping_cost",0]},
-                "w_shiping_cost" : {"$ifNull":["$product_ins.w_shiping_cost",0]},
+                "a_shipping_cost": { "$ifNull": ["$product_ins.a_shipping_cost", 0] },
+                "w_shiping_cost": { "$ifNull": ["$product_ins.w_shiping_cost", 0] }
             }
         }
     ]
 
-    item_details_map = {str(item['_id']): item for item in OrderItems.objects.aggregate(*item_pipeline)}
+    item_details = list(OrderItems.objects.aggregate(*item_pipeline))
+    item_details_map = {str(item["_id"]): item for item in item_details}
 
+    # ✅ Step 4: Process each order (can parallelize if use_threads=True)
     def process_order(order):
-        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost,p_id
-
+        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, shipping_cost, p_id
         gross_revenue += order['order_total']
         total_units += order['items_order_quantity']
         for item_id in order['order_items']:
             item_data = item_details_map.get(str(item_id))
-            if item_data:
-                temp_price += item_data['price']
-                tax_price += item_data.get('tax_price', 0)
+            if not item_data:
+                continue
+            temp_price += item_data.get('price', 0)
+            tax_price += item_data.get('tax_price', 0)
 
-                if order.get('marketplace_name') == "Amazon":
-                    total_cogs += item_data.get('total_cogs', 0)
-                    shipping_cost += item_data.get('a_shipping_cost', 0)
-                else:
-                    total_cogs += item_data.get('w_total_cogs', 0)
-                    shipping_cost += item_data.get('w_shiping_cost', 0)
+            if order.get('marketplace_name') == "Amazon":
+                total_cogs += item_data.get('total_cogs', 0)
+                shipping_cost += item_data.get('a_shipping_cost', 0)
+            else:
+                total_cogs += item_data.get('w_total_cogs', 0)
+                shipping_cost += item_data.get('w_shiping_cost', 0)
 
-                vendor_funding += item_data.get('vendor_funding', 0)
-                
+            vendor_funding += item_data.get('vendor_funding', 0)
 
-                if item_data.get('sku'):
-                    sku_set.add(item_data['sku'])
+            if item_data.get('sku'):
+                sku_set.add(item_data['sku'])
 
-                try:
-                    p_id.add(item_data['p_id'])
-                except:
-                    pass
+            if item_data.get('p_id'):
+                p_id.add(item_data['p_id'])
 
-    # Modified threading approach
     if use_threads:
-        # Use a ThreadPool with limited workers
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(process_order, order) for order in result]
+            futures = [executor.submit(process_order, order) for order in orders]
             for future in as_completed(futures):
-                future.result()  # This will raise exceptions if any occurred
+                future.result()
     else:
-        # Process sequentially
-        for order in result:
+        for order in orders:
             process_order(order)
-    pipeline = [
-        {
-            "$match": {
-                "product_id": {"$in": list(p_id)},
-                "date": {"$gte": from_date, "$lte": to_date}
-            }
-        },
-        {
-            "$group": {
-                "_id": None,
-                "page_views": {"$sum": "$page_views"},
-                "sessions": {"$sum": "$sessions"}
-            }
-        }
-    ]
-    p_result = list(pageview_session_count.objects.aggregate(*pipeline))
-    for P_ins in p_result:
-        page_views += P_ins.get('page_views', 0)
-        sessions += P_ins.get('sessions', 0)
 
+    # ✅ Step 5: Efficient aggregation for sessions/page_views
+    if p_id:
+        pipeline = [
+            {
+                "$match": {
+                    "product_id": {"$in": list(p_id)},
+                    "date": {"$gte": from_date, "$lte": to_date}
+                }
+            },
+            {
+                "$group": {
+                    "_id": None,
+                    "page_views": {"$sum": "$page_views"},
+                    "sessions": {"$sum": "$sessions"}
+                }
+            }
+        ]
+        p_result = list(pageview_session_count.objects.aggregate(*pipeline))
+        if p_result:
+            page_views += p_result[0].get('page_views', 0)
+            sessions += p_result[0].get('sessions', 0)
+
+    # ✅ Step 6: Get refund count (optional optimization: cache this if repeated)
+    refund = len(refundOrder(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone))
+
+    # ✅ Step 7: Final calculations
     net_profit = (temp_price - total_cogs) + vendor_funding
     margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
     unitSessionPercentage = (total_units / sessions) * 100 if sessions else 0
@@ -975,7 +996,7 @@ def calculate_metricss(
         "pageViews": page_views,
         "unitSessionPercentage": round(unitSessionPercentage, 2),
         "margin": round(margin, 2),
-        "orders": len(result)
+        "orders": len(orders)
     }
 
     if include_extra_fields:
@@ -984,10 +1005,11 @@ def calculate_metricss(
             "tax_price": round(tax_price, 2),
             "total_cogs": round(total_cogs, 2),
             "product_cost": round(temp_price, 2),
-            "shipping_cost": round(shipping_cost,2),
+            "shipping_cost": round(shipping_cost, 2),
         })
 
     return base_result
+
 
 
 
