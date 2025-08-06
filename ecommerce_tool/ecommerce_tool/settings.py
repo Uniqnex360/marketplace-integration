@@ -94,8 +94,8 @@ CACHES = {
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         },
-        'KEY_PREFIX': 'metrics_cache',
-        'TIMEOUT': 300,  # 5 minutes default timeout
+        # 'KEY_PREFIX': 'metrics_cache',
+        # 'TIMEOUT': 300,  # 5 minutes default timeout
     }
 }
 MIDDLEWARE = [

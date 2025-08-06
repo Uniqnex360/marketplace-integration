@@ -850,162 +850,133 @@ def calculate_metricss(
     manufacturer_name,
     fulfillment_channel,
     timezone='UTC',
-    include_extra_fields=False
+    include_extra_fields=False,
+    use_threads=False
 ):
-    # 1. Convert dates to UTC for MongoDB queries
-    if timezone != 'UTC':
-        from_date_utc, to_date_utc = convertLocalTimeToUTC(from_date, to_date, timezone)
-    else:
-        from_date_utc, to_date_utc = from_date, to_date
+    """Optimized version with better database queries and caching"""
     
-    # Remove timezone info for MongoDB query if it expects naive UTC datetime
-    from_date_utc = from_date_utc.replace(tzinfo=None)
-    to_date_utc = to_date_utc.replace(tzinfo=None)
-
-    # --- MAIN AGGREGATION PIPELINE ---
-    # This pipeline will join Orders -> OrderItems -> Product
-    # and calculate all core metrics in MongoDB.
-    
-    order_match_criteria = {
-        "order_date": {"$gte": from_date_utc, "$lte": to_date_utc}
-    }
-    if marketplace_id:
-        order_match_criteria["marketplace_id"] = ObjectId(marketplace_id)
-    if fulfillment_channel:
-        order_match_criteria["fulfillment_channel"] = fulfillment_channel
-
-    pipeline = [
-        # Stage 1: Filter Orders by date and top-level criteria
-        {"$match": order_match_criteria},
-        
-        # Stage 2: Unwind order_items (list of OrderItem ObjectIds)
-        # This creates a separate document for each order_item in an order.
-        {"$unwind": "$order_items"},
-        
-        # Stage 3: Lookup OrderItem details
-        # Join with OrderItems collection using the ObjectId in order_items
-        {"$lookup": {
-            "from": "order_items",
-            "localField": "order_items",
-            "foreignField": "_id",
-            "as": "order_item_details"
-        }},
-        {"$unwind": "$order_item_details"}, # Unwind to access order_item_details as an object
-
-        # Stage 4: Lookup Product details
-        # Join with Product collection using product_id from OrderItem
-        {"$lookup": {
-            "from": "product",
-            "localField": "order_item_details.ProductDetails.product_id",
-            "foreignField": "_id",
-            "as": "product_details"
-        }},
-        {"$unwind": {"path": "$product_details", "preserveNullAndEmptyArrays": True}}, # Preserve if product might be missing
-
-        # Stage 5: Filter by Brand, Product, Manufacturer (if specified)
-        # These filters use conditions based on the looked-up product_details
-        {"$match": {
-            "$and": [
-                {"$expr": {"$eq": [True, True]}} # Dummy condition
-            ]
-        }},
-    ]
-
-    # Dynamically add filters if brand_id, product_id, manufacturer_name are provided
-    if brand_id:
-        # Ensure brand_id is a list of ObjectIds
-        brand_object_ids = [ObjectId(b_id) for b_id in brand_id if ObjectId.is_valid(b_id)]
-        if brand_object_ids:
-            pipeline[-1]["$match"]["$and"].append({"product_details.brand_id": {"$in": brand_object_ids}})
-    if product_id:
-        # Ensure product_id is a list of ObjectIds
-        product_object_ids = [ObjectId(p_id) for p_id in product_id if ObjectId.is_valid(p_id)]
-        if product_object_ids:
-            pipeline[-1]["$match"]["$and"].append({"product_details._id": {"$in": product_object_ids}})
-    if manufacturer_name:
-        # Assuming manufacturer_name is a list of strings
-        # This requires another lookup to Manufacturer collection if only name is available,
-        # or checking product_details.manufacturer_name if stored there.
-        # For efficiency, best to filter by manufacturer_id if possible.
-        # Assuming product_details.manufacturer_name exists for now.
-        pipeline[-1]["$match"]["$and"].append({"product_details.manufacturer_name": {"$in": manufacturer_name}})
-    
-    # Remove dummy condition if no real conditions were added
-    if pipeline[-1]["$match"]["$and"] == [{"$expr": {"$eq": [True, True]}}]:
-        pipeline[-1]["$match"].pop("$and") # Remove empty $and clause
-
-    # Stage 6: Group and calculate sums
-    pipeline.append({
-        "$group": {
-            "_id": None, # Group all results into a single document
-            "grossRevenue": {"$sum": "$order_total"}, # Sum of order totals
-            "total_units": {"$sum": "$order_item_details.ProductDetails.QuantityOrdered"}, # Sum of units ordered
-            "temp_price": {"$sum": "$order_item_details.Pricing.ItemPrice.Amount"}, # Sum of item prices
-            "tax_price": {"$sum": {"$ifNull": ["$order_item_details.Pricing.ItemTax.Amount", 0]}}, # Sum of item taxes
-            "total_cogs": {
-                "$sum": {
-                    "$cond": {
-                        "if": {"$eq": ["$marketplace", "Amazon"]}, # Assuming marketplace name is on Order
-                        "then": {"$ifNull": ["$product_details.total_cogs", 0]}, # Amazon COGS
-                        "else": {"$ifNull": ["$product_details.w_total_cogs", 0]}  # Walmart COGS
-                    }
-                }
-            },
-            "vendor_funding": {"$sum": {"$ifNull": ["$product_details.vendor_funding", 0]}}, # Sum of vendor funding
-            "shipping_cost": {
-                "$sum": {
-                    "$cond": {
-                        "if": {"$eq": ["$marketplace", "Amazon"]},
-                        "then": {"$ifNull": ["$product_details.a_shipping_cost", 0]},
-                        "else": {"$ifNull": ["$product_details.w_shiping_cost", 0]}
-                    }
-                }
-            },
-            "sku_set": {"$addToSet": "$order_item_details.ProductDetails.SKU"}, # Collect unique SKUs
-            "p_ids_for_pageviews": {"$addToSet": "$product_details._id"}, # Collect unique Product IDs for page views
-            "orders": {"$addToSet": "$purchase_order_id"} # Collect unique order IDs to count distinct orders
-        }
-    })
-
-    # Execute the main aggregation
-    result = list(Order.objects.aggregate(*pipeline))
-    
-    # Initialize values from aggregation result or defaults
-    gross_revenue = result[0]['grossRevenue'] if result else 0.0
-    total_units = result[0]['total_units'] if result else 0
-    temp_price = result[0]['temp_price'] if result else 0.0
-    tax_price = result[0]['tax_price'] if result else 0.0
-    total_cogs = result[0]['total_cogs'] if result else 0.0
-    vendor_funding = result[0]['vendor_funding'] if result else 0.0
-    shipping_cost = result[0]['shipping_cost'] if result else 0.0
-    sku_count = len(result[0]['sku_set']) if result and 'sku_set' in result[0] else 0
-    order_count = len(result[0]['orders']) if result and 'orders' in result[0] else 0
-    p_ids_for_pageviews = result[0]['p_ids_for_pageviews'] if result and 'p_ids_for_pageviews' in result[0] else []
-
-    # Calculate refunds separately (if not already part of main pipeline based on `order_status` or similar)
-    # Assuming "refundOrder" implies querying `Refund` or `Order` status
-    # For a quick count based on order_status, this can be integrated into the main pipeline as well.
-    # For now, keeping it as a separate simple query.
-    refund_match_criteria = {
-        "order_date": {"$gte": from_date_utc, "$lte": to_date_utc},
-        "order_status": "Refunded" # Example: Assuming "Refunded" status
-    }
-    if marketplace_id:
-        refund_match_criteria["marketplace_id"] = ObjectId(marketplace_id)
-    if fulfillment_channel:
-        refund_match_criteria["fulfillment_channel"] = fulfillment_channel
-    
-    refund = Order.objects.filter(**refund_match_criteria).count()
-    
-    # Aggregate page views and sessions (can't easily be part of the above pipeline)
+    # Initialize variables
+    gross_revenue = 0
+    total_cogs = 0
+    net_profit = 0
+    total_units = 0
+    vendor_funding = 0
+    temp_price = 0
+    refund = 0
+    tax_price = 0
     sessions = 0
     page_views = 0
-    if p_ids_for_pageviews: # Only query if there are products involved
-        pv_pipeline = [
+    shipping_cost = 0
+    unitSessionPercentage = 0
+    sku_set = set()
+    p_id = set()
+
+    # Batch process orders and refunds in parallel
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        orders_future = executor.submit(
+            grossRevenue, from_date, to_date, marketplace_id, brand_id, 
+            product_id, manufacturer_name, fulfillment_channel, timezone
+        )
+        refunds_future = executor.submit(
+            refundOrder, from_date, to_date, marketplace_id, brand_id, 
+            product_id, manufacturer_name, fulfillment_channel, timezone
+        )
+        
+        result = orders_future.result()
+        refund_ins = refunds_future.result()
+        refund = len(refund_ins)
+
+    if not result:
+        return {
+            "grossRevenue": 0, "expenses": 0, "netProfit": 0, "roi": 0,
+            "unitsSold": 0, "refunds": refund, "skuCount": 0, "sessions": 0,
+            "pageViews": 0, "unitSessionPercentage": 0, "margin": 0, "orders": 0
+        }
+
+    # Get all item IDs efficiently
+    all_item_ids = [ObjectId(item_id) for order in result for item_id in order['order_items']]
+    
+    if timezone != 'UTC':
+        from_date, to_date = convertLocalTimeToUTC(from_date, to_date, timezone)
+    
+    from_date = from_date.replace(tzinfo=None)
+    to_date = to_date.replace(tzinfo=None)
+
+    # Optimized item pipeline with better indexing hints
+    item_pipeline = [
+        { "$match": { "_id": { "$in": all_item_ids } } },
+        {
+            "$lookup": {
+                "from": "product",
+                "localField": "ProductDetails.product_id",
+                "foreignField": "_id",
+                "as": "product_ins"
+            }
+        },
+        { "$unwind": { "path": "$product_ins", "preserveNullAndEmptyArrays": True } },
+        {
+            "$project": {
+                "p_id": "$product_ins._id",
+                "price": "$Pricing.ItemPrice.Amount",
+                "tax_price": "$Pricing.ItemTax.Amount",
+                "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
+                "sku": "$product_ins.sku",
+                "total_cogs": { "$ifNull": ["$product_ins.total_cogs", 0] },
+                "w_total_cogs": { "$ifNull": ["$product_ins.w_total_cogs", 0] },
+                "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] },
+                "a_shipping_cost": {"$ifNull": ["$product_ins.a_shipping_cost", 0]},
+                "w_shiping_cost": {"$ifNull": ["$product_ins.w_shiping_cost", 0]},
+            }
+        }
+    ]
+
+    # Execute item details query
+    item_details_map = {str(item['_id']): item for item in OrderItems.objects.aggregate(*item_pipeline)}
+
+    def process_order(order):
+        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost, p_id
+
+        gross_revenue += order['order_total']
+        total_units += order['items_order_quantity']
+        
+        for item_id in order['order_items']:
+            item_data = item_details_map.get(str(item_id))
+            if item_data:
+                temp_price += item_data['price']
+                tax_price += item_data.get('tax_price', 0)
+
+                if order.get('marketplace_name') == "Amazon":
+                    total_cogs += item_data.get('total_cogs', 0)
+                    shipping_cost += item_data.get('a_shipping_cost', 0)
+                else:
+                    total_cogs += item_data.get('w_total_cogs', 0)
+                    shipping_cost += item_data.get('w_shiping_cost', 0)
+
+                vendor_funding += item_data.get('vendor_funding', 0)
+                
+                if item_data.get('sku'):
+                    sku_set.add(item_data['sku'])
+
+                if item_data.get('p_id'):
+                    p_id.add(item_data['p_id'])
+
+    # Process orders with better threading control
+    if use_threads and len(result) > 100:  # Only use threads for large datasets
+        with ThreadPoolExecutor(max_workers=min(4, len(result) // 25)) as executor:
+            futures = [executor.submit(process_order, order) for order in result]
+            for future in as_completed(futures):
+                future.result()
+    else:
+        for order in result:
+            process_order(order)
+
+    # Get page views and sessions in parallel if we have product IDs
+    if p_id:
+        pipeline = [
             {
                 "$match": {
-                    "product_id": {"$in": p_ids_for_pageviews}, # Use product IDs from previous aggregation
-                    "date": {"$gte": from_date_utc, "$lte": to_date_utc}
+                    "product_id": {"$in": list(p_id)},
+                    "date": {"$gte": from_date, "$lte": to_date}
                 }
             },
             {
@@ -1016,42 +987,42 @@ def calculate_metricss(
                 }
             }
         ]
-        p_result = list(pageview_session_count.objects.aggregate(*pv_pipeline))
+        
+        p_result = list(pageview_session_count.objects.aggregate(*pipeline))
         if p_result:
             page_views = p_result[0].get('page_views', 0)
             sessions = p_result[0].get('sessions', 0)
 
+    # Calculate final metrics
     net_profit = (temp_price - total_cogs) + vendor_funding
     margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
     unitSessionPercentage = (total_units / sessions) * 100 if sessions else 0
 
     base_result = {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round(total_cogs, 2), # This is total_cogs
+        "expenses": round(total_cogs, 2),
         "netProfit": round(net_profit, 2),
         "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs > 0 else 0,
         "unitsSold": total_units,
         "refunds": refund,
-        "skuCount": sku_count,
+        "skuCount": len(sku_set),
         "sessions": sessions,
         "pageViews": page_views,
         "unitSessionPercentage": round(unitSessionPercentage, 2),
         "margin": round(margin, 2),
-        "orders": order_count
+        "orders": len(result)
     }
 
     if include_extra_fields:
         base_result.update({
-            "seller": "", # This field isn't calculated here
+            "seller": "",
             "tax_price": round(tax_price, 2),
-            "total_cogs": round(total_cogs, 2), # Redundant with 'expenses' unless you mean something else
-            "product_cost": round(temp_price, 2), # This is sum of ItemPrice
-            "shipping_cost": round(shipping_cost,2),
+            "total_cogs": round(total_cogs, 2),
+            "product_cost": round(temp_price, 2),
+            "shipping_cost": round(shipping_cost, 2),
         })
 
     return base_result
-
-
 def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None,timezone_str="UTC"):
     total = dict()
     gross_revenue = 0

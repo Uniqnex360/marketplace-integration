@@ -42,23 +42,6 @@ class Brand(Document):
     marketplace_id = ReferenceField(Marketplace)  # Reference to the marketplace
     marketplace_ids = ListField(ReferenceField(Marketplace),default=[])  # List of Marketplace IDs
     
-class CachedMetrics(Document):
-    brand_id = ReferenceField(Brand)
-    marketplace_id = ReferenceField(Marketplace)
-    date = DateTimeField(required=True, default=datetime.utcnow)  # This is the "metric date"
-    
-    gross_revenue = FloatField(default=0.0)
-    net_profit = FloatField(default=0.0)
-    total_orders = IntField(default=0)
-    total_units = IntField(default=0)
-    total_tax = FloatField(default=0.0)
-    refund = IntField(default=0)
-    margin = FloatField(default=0.0)
-    total_cogs = FloatField(default=0.0)
-    graph_data = DictField()  # Optional if you want to store 8-day chart too
-
-    last_updated = DateTimeField(default=datetime.utcnow)
-    
 
 class Manufacturer(Document):
     name = StringField()  # Manufacturer name
@@ -176,6 +159,44 @@ class Product(Document):
     w_total_cogs = FloatField(default=0.0)  # Total cost of goods sold for Walmart
     pack_size = IntField(default=0)  # Size of the product pack
 
+class CachedMetrics(Document):
+    cache_hash = StringField(required=True, unique=True)
+
+    marketplace_id = ReferenceField(Marketplace, null=True) 
+    brand_ids = ListField(ReferenceField(Brand), default=[]) 
+    product_ids = ListField(ReferenceField(Product), default=[])
+    manufacturer_names = ListField(StringField(), default=[])
+    fulfillment_channel = StringField(default=None) 
+
+    from_date = DateTimeField(required=True)
+    to_date = DateTimeField(required=True)
+
+    gross_revenue = FloatField(default=0.0)
+    net_profit = FloatField(default=0.0)
+    total_orders = IntField(default=0)
+    total_units = IntField(default=0)
+    total_tax = FloatField(default=0.0)
+    refund = IntField(default=0)
+    margin = FloatField(default=0.0)
+    total_cogs = FloatField(default=0.0)
+    sku_count = IntField(default=0)
+    sessions = IntField(default=0)
+    page_views = IntField(default=0)
+    unit_session_percentage = FloatField(default=0.0)
+    roi = FloatField(default=0.0)
+    
+    last_updated = DateTimeField(default=datetime.utcnow)
+
+    extra_data = DictField() 
+
+    meta = {'indexes': [
+        {'fields': ['cache_hash'], 'unique': True},
+
+        {'fields': ['marketplace_id', 'from_date', 'to_date']},
+        {'fields': ['brand_ids']}, 
+        
+        {'fields': ['last_updated'], 'expireAfterSeconds': 3600 * 24 * 7}
+    ]}
 
 class ignore_api_functions(Document):
     name = StringField()
