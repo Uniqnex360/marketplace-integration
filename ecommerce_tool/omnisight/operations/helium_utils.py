@@ -838,7 +838,7 @@ def calculate_metricss(
     fulfillment_channel,
     timezone='UTC',
     include_extra_fields=False,
-    use_threads=False
+    use_threads=True
 ):
     gross_revenue = 0
     total_cogs = 0
