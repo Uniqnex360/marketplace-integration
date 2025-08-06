@@ -511,76 +511,105 @@ def RevenueWidgetAPIView(request):
             del data['total']["orders"]
     return data
 @csrf_exempt
+
+
 def updatedRevenueWidgetAPIView(request):
-    from django.utils import timezone
-    import pytz
-    from concurrent.futures import ThreadPoolExecutor
+    """
+    Calculates and returns revenue widget data, optimized for performance.
+    """
+
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
-    compare_startdate = json_request.get("compare_startdate")
-    compare_enddate = json_request.get("compare_enddate")
-    marketplace_id = json_request.get("marketplace_id", None)
-    product_id = json_request.get("product_id", None)
-    brand_id = json_request.get("brand_id", None)
-    manufacturer_name = json_request.get("manufacturer_name", None)
-    fulfillment_channel = json_request.get("fulfillment_channel", None)
-    timezone_str="US/Pacific"
-    start_date = json_request.get("start_date", None)
-    end_date = json_request.get("end_date", None)
-    if start_date != None and start_date != "":
-        start_date, end_date = convertdateTotimezone(start_date,end_date,timezone_str)
+    compare_startdate_str = json_request.get("compare_startdate")  # Keep as string initially
+    compare_enddate_str = json_request.get("compare_enddate")  # Keep as string initially
+    marketplace_id = json_request.get("marketplace_id")
+    product_id = json_request.get("product_id")
+    brand_id = json_request.get("brand_id")
+    manufacturer_name = json_request.get("manufacturer_name")
+    fulfillment_channel = json_request.get("fulfillment_channel")
+    timezone_str = "US/Pacific"
+    start_date_str = json_request.get("start_date")
+    end_date_str = json_request.get("end_date")
+    if start_date_str: # if the date is not none
+        start_date, end_date = convertdateTotimezone(start_date_str, end_date_str, timezone_str)
     else:
-        start_date, end_date = get_date_range(preset,timezone_str)
+        start_date, end_date = get_date_range(preset, timezone_str)
+    #Prefetch the total calculation
+    total = totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id,
+                                            product_id, manufacturer_name, fulfillment_channel, timezone_str)
+    graph_data = get_graph_data(start_date, end_date, preset, marketplace_id, brand_id,
+                                   product_id, manufacturer_name, fulfillment_channel, timezone_str)
     comapre_past = get_previous_periods(start_date, end_date)
-    def fetch_total():
-        return totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id, 
-                                    product_id, manufacturer_name, fulfillment_channel,timezone_str)
-    def fetch_graph_data():
-        return get_graph_data(start_date, end_date, preset, marketplace_id, brand_id, 
-                           product_id, manufacturer_name, fulfillment_channel,timezone_str)
-    def fetch_compare_total():
-        return totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id, 
-                                    brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
-    def fetch_compare_graph_data():
+    compare_total = None
+    compare_graph = None
+    if compare_startdate_str: #Compare start date is not none
+        compare_startdate = datetime.strptime(compare_startdate_str, "%Y-%m-%d").replace(hour=0, minute=0, second=0,
+                                                                                                    microsecond=0)
+        compare_enddate = datetime.strptime(compare_enddate_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59,
+                                                                                                microsecond=0)
+        compare_total = totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id,
+                                                    brand_id, product_id, manufacturer_name, fulfillment_channel,
+                                                    timezone_str)
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
-        return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, 
-                           brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        future_total = executor.submit(fetch_total)
-        future_graph_data = executor.submit(fetch_graph_data)
-        compare_total = None
-        compare_graph = None
-        if compare_startdate and compare_startdate != "":
-            compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
-            compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
-            future_compare_total = executor.submit(fetch_compare_total)
-            future_compare_graph_data = executor.submit(fetch_compare_graph_data)
-            compare_total = future_compare_total.result()
-            compare_graph = future_compare_graph_data.result()
-        total = future_total.result()
-        graph_data = future_graph_data.result()
+        compare_graph = get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id,
+                                           brand_id, product_id, manufacturer_name, fulfillment_channel,
+                                           timezone_str)
+
     updated_graph = {}
-    
-    if compare_startdate and compare_startdate != "":
+    if compare_startdate_str: #Compare start date is not none
+        #Predefine keys to be extracted, prevent extracting this data during the loop
+        compare_graph_values = list(compare_graph.values())
+        compare_graph_keys = list(compare_graph.keys())
+        #Prefetch the length outside of the for loop,
+        compare_graph_len = len(compare_graph_values)
         for index, (key, metrics) in enumerate(graph_data.items()):
-            compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
+            if index < compare_graph_len:
+                compare_metrics = compare_graph_values[index]
+                compare_key = compare_graph_keys[index]
+                #Predefine all keys here for the compareMetrics so that it is not repeatedly extracted
+                c_gross_revenue = compare_metrics.get("gross_revenue", 0)
+                c_net_profit = compare_metrics.get("net_profit", 0)
+                c_profit_margin = compare_metrics.get("profit_margin", 0)
+                c_orders = compare_metrics.get("orders", 0)
+                c_units_sold = compare_metrics.get("units_sold", 0)
+                c_refund_amount = compare_metrics.get("refund_amount", 0)
+                c_refund_quantity = compare_metrics.get("refund_quantity", 0)
+            else:
+                compare_metrics = {}
+                compare_key = None
+                #Set default keys, will prevent potential errors where keys are not defined.
+                c_gross_revenue = 0
+                c_net_profit = 0
+                c_profit_margin = 0
+                c_orders = 0
+                c_units_sold = 0
+                c_refund_amount = 0
+                c_refund_quantity = 0
+            #Extract metrics values during first assignment to prevent repeating extraction of data
+            gross_revenue = metrics.get("gross_revenue", 0)
+            net_profit = metrics.get("net_profit", 0)
+            profit_margin = metrics.get("profit_margin", 0)
+            orders = metrics.get("orders", 0)
+            units_sold = metrics.get("units_sold", 0)
+            refund_amount = metrics.get("refund_amount", 0)
+            refund_quantity = metrics.get("refund_quantity", 0)
             updated_graph[key] = {
                 "current_date": key,
-                "gross_revenue": metrics.get("gross_revenue", 0),
-                "net_profit": metrics.get("net_profit", 0),
-                "profit_margin": metrics.get("profit_margin", 0),
-                "orders": metrics.get("orders", 0),
-                "units_sold": metrics.get("units_sold", 0),
-                "refund_amount": metrics.get("refund_amount", 0),
-                "refund_quantity": metrics.get("refund_quantity", 0),
-                "compare_gross_revenue": compare_metrics.get("gross_revenue", 0),
-                "compare_net_profit": compare_metrics.get("net_profit", 0),
-                "compare_profit_margin": compare_metrics.get("profit_margin", 0),
-                "compare_orders": compare_metrics.get("orders", 0),
-                "compare_units_sold": compare_metrics.get("units_sold", 0),
-                "compare_refund_amount": compare_metrics.get("refund_amount", 0),
-                "compare_refund_quantity": compare_metrics.get("refund_quantity", 0),
-                "compare_date": list(compare_graph.keys())[index] if index < len(compare_graph) else None
+                "gross_revenue": gross_revenue,
+                "net_profit": net_profit,
+                "profit_margin": profit_margin,
+                "orders": orders,
+                "units_sold": units_sold,
+                "refund_amount": refund_amount,
+                "refund_quantity": refund_quantity,
+                "compare_gross_revenue": c_gross_revenue,
+                "compare_net_profit": c_net_profit,
+                "compare_profit_margin": c_profit_margin,
+                "compare_orders":  c_orders,
+                "compare_units_sold": c_units_sold,
+                "compare_refund_amount": c_refund_amount,
+                "compare_refund_quantity": c_refund_quantity,
+                "compare_date": compare_key,
             }
     else:
         for key, metrics in graph_data.items():
@@ -594,32 +623,46 @@ def updatedRevenueWidgetAPIView(request):
                 "refund_amount": metrics.get("refund_amount", 0),
                 "refund_quantity": metrics.get("refund_quantity", 0),
             }
+
     data = {
         "total": total,
         "graph": updated_graph,
         "comapre_past": comapre_past
     }
-    if compare_startdate and compare_startdate != "":
+
+    if compare_startdate_str:#Compare start date is not none
+        #Handle case where values are none to prevent division by zero error
+        compare_gross_revenue = compare_total["gross_revenue"] if compare_total["gross_revenue"] is not None else 1
+        compare_net_profit = compare_total["net_profit"] if compare_total["net_profit"] is not None else 1
+        compare_profit_margin = compare_total["profit_margin"] if compare_total["profit_margin"] is not None else 1
+        compare_orders = compare_total["orders"] if compare_total["orders"] is not None else 1
+        compare_units_sold = compare_total["units_sold"] if compare_total["units_sold"] is not None else 1
+        compare_refund_amount = compare_total["refund_amount"] if compare_total["refund_amount"] is not None else 1
+        compare_refund_quantity = compare_total["refund_quantity"] if compare_total["refund_quantity"] is not None else 1
         difference = {
-            "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
-            "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
-            "profit_margin": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0, 2),
-            "orders": round(((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0, 2),
-            "units_sold": round(((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0, 2),
-            "refund_amount": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0, 2),
-            "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
+            "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_gross_revenue * 100) if compare_gross_revenue else 0, 2),
+            "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_net_profit * 100) if compare_net_profit else 0, 2),
+            "profit_margin": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_profit_margin * 100) if compare_profit_margin else 0, 2),
+            "orders": round(((total["orders"] - compare_total["orders"]) / compare_orders * 100) if compare_orders else 0, 2),
+            "units_sold": round(((total["units_sold"] - compare_total["units_sold"]) / compare_units_sold * 100) if compare_units_sold else 0, 2),
+            "refund_amount": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_refund_amount * 100) if compare_refund_amount else 0, 2),
+            "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_refund_quantity * 100) if compare_refund_quantity else 0, 2),
         }
         data['compare_total'] = difference
+
     name = "Revenue"
     item_pipeline = [{"$match": {"name": name}}]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
     if item_result:
         item_result = item_result[0]
         if not item_result['select_all']:
-            for field in ['gross_revenue', 'units_sold', 'refund_quantity', 
-                         'refund_amount', 'net_profit', 'profit_margin', 'orders']:
-                if not item_result.get(field, True):
-                    data['total'].pop(field, None)
+            # Extract fields to be deleted outside the loop, will reduce operations done during loop
+            fields_to_delete = [field for field in ['gross_revenue', 'units_sold', 'refund_quantity',
+                                                     'refund_amount', 'net_profit', 'profit_margin', 'orders']
+                                 if not item_result.get(field, True)]
+            #Delete from totals instead of looping through and doing multiple operations
+            for field in fields_to_delete:
+                data['total'].pop(field, None)
     return data
 import pytz
 @csrf_exempt
