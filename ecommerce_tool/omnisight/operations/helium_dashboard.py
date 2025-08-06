@@ -1284,8 +1284,15 @@ def clean_json_floats(obj):
     return obj
 @csrf_exempt
 def getPeriodWiseData(request):
+    from datetime import timedelta
+    from rest_framework.parsers import JSONParser
+    from django.http import JsonResponse
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import pytz
+
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
@@ -1293,62 +1300,90 @@ def getPeriodWiseData(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = 'US/Pacific'
-    def calculate_metrics_sync(start_date, end_date):
-        return calculate_metricss(
-            start_date, end_date, 
-            marketplace_id, brand_id, 
-            product_id, manufacturer_name, 
-            fulfillment_channel,
-            timezone_str, False,
-            use_threads=False
-        )
-    def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
-        current_metrics = calculate_metrics_sync(current_start, current_end)
-        period_format = {
-            "current": {"from": to_utc_format(current_start)},
-            "previous": {"from": to_utc_format(prev_start)}
-        }
-        if label not in ['Today', 'Yesterday']:
-            period_format["current"]["to"] = to_utc_format(current_end)
-            period_format["previous"]["to"] = to_utc_format(prev_end)
-        output = {
-            "label": label,
-            "period": period_format
-        }
-        for key in current_metrics:
-            output[key] = {
-                "current": current_metrics[key],
-            }
-        return output
-    date_ranges = {
+
+    # Prepare date ranges
+    periods = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
         "last30Days": get_date_range("Last 30 days", timezone_str),
         "yearToDate": get_date_range("This Year", timezone_str),
         "lastYear": get_date_range("Last Year", timezone_str)
     }
-    period_jobs = [
-        ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
-         date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)),
-        ("last7Days", "Last 7 Days", date_ranges["last7Days"][0], date_ranges["last7Days"][1],
-         date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][0] - timedelta(seconds=1)),
-        ("last30Days", "Last 30 Days", date_ranges["last30Days"][0], date_ranges["last30Days"][1],
-         date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][0] - timedelta(seconds=1)),
-        ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
-         date_ranges["lastYear"][0], date_ranges["lastYear"][1])
-    ]
-    response_data = {}
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        future_to_label = {
-            executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
-            for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
+
+    # Helper to compute previous period ranges
+    def get_previous_range(current_start, current_end):
+        duration = current_end - current_start
+        return current_start - duration, current_end - duration
+
+    # Compute all period jobs
+    period_jobs = {}
+    for key in ["yesterday", "last7Days", "last30Days", "yearToDate"]:
+        cur_start, cur_end = periods[key]
+        if key == "yearToDate":
+            # Use same length from last year
+            duration = cur_end - cur_start
+            prev_start = periods["lastYear"][0]
+            prev_end = prev_start + duration
+        else:
+            prev_start, prev_end = get_previous_range(cur_start, cur_end)
+        period_jobs[key] = {
+            "label": key.replace("last", "Last ").title().replace("Yest", "Yest"),
+            "current_start": cur_start,
+            "current_end": cur_end,
+            "previous_start": prev_start,
+            "previous_end": prev_end
         }
-        for future in as_completed(future_to_label):
-            key = future_to_label[future]
-            try:
-                response_data[key] = future.result()
-            except Exception as exc:
-                response_data[key] = {"error": str(exc)}
+
+    response_data = {}
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        # Submit all calculation futures
+        futures = {}
+        for key, job in period_jobs.items():
+            futures[f"{key}_current"] = executor.submit(
+                calculate_metricss,
+                job["current_start"], job["current_end"],
+                marketplace_id, brand_id, product_id, manufacturer_name,
+                fulfillment_channel, timezone_str, False, False
+            )
+            futures[f"{key}_previous"] = executor.submit(
+                calculate_metricss,
+                job["previous_start"], job["previous_end"],
+                marketplace_id, brand_id, product_id, manufacturer_name,
+                fulfillment_channel, timezone_str, False, False
+            )
+
+        # Wait for all results
+        results = {key: future.result() for key, future in futures.items()}
+
+    # Format output
+    for key, job in period_jobs.items():
+        current_metrics = results[f"{key}_current"]
+        previous_metrics = results[f"{key}_previous"]
+
+        output = {
+            "label": job["label"],
+            "period": {
+                "current": {
+                    "from": to_utc_format(job["current_start"]),
+                    "to": to_utc_format(job["current_end"])
+                },
+                "previous": {
+                    "from": to_utc_format(job["previous_start"]),
+                    "to": to_utc_format(job["previous_end"])
+                }
+            }
+        }
+
+        # Populate metrics
+        for metric in current_metrics:
+            output[metric] = {
+                "current": current_metrics[metric],
+                "previous": previous_metrics.get(metric, 0)
+            }
+
+        response_data[key] = output
+
     return JsonResponse(response_data, safe=False)
 
 @csrf_exempt
