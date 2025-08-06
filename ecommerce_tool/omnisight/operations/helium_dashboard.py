@@ -1274,6 +1274,10 @@ def clean_json_floats(obj):
 def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    # 0. Set a cache validity period (e.g., 1 hour)
+    CACHE_VALIDITY_SECONDS = 3600 # 1 hour
+
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
@@ -1281,24 +1285,123 @@ def getPeriodWiseData(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = 'US/Pacific'
-    def calculate_metrics_sync(start_date, end_date):
-        return calculate_metricss(
-            start_date, end_date, 
-            marketplace_id, brand_id, 
-            product_id, manufacturer_name, 
-            fulfillment_channel,
-            timezone_str, False,
-            use_threads=False
+    
+    # Ensure brand_id, product_id are lists of ObjectIds if not already
+    # This might be needed before passing to cache lookup if cache uses ObjectId
+    if isinstance(brand_id, list):
+        brand_id_oids = [ObjectId(b_id) for b_id in brand_id if ObjectId.is_valid(b_id)]
+    else:
+        brand_id_oids = []
+    
+    if isinstance(product_id, list):
+        product_id_oids = [ObjectId(p_id) for p_id in product_id if ObjectId.is_valid(p_id)]
+    else:
+        product_id_oids = []
+    
+    # Convert marketplace_id to ObjectId if it's a string
+    marketplace_oid = ObjectId(marketplace_id) if marketplace_id and ObjectId.is_valid(marketplace_id) else None
+
+    def get_cached_metrics(current_start, current_end):
+        # Generate a unique cache key based on all parameters
+        cache_key_params = {
+            "marketplace_id": marketplace_oid,
+            "brand_id": sorted([str(x) for x in brand_id_oids]), # Sort to ensure consistent key
+            "product_id": sorted([str(x) for x in product_id_oids]),
+            "manufacturer_name": sorted(manufacturer_name),
+            "fulfillment_channel": fulfillment_channel,
+            "from_date": current_start.isoformat(),
+            "to_date": current_end.isoformat(),
+            "timezone": timezone_str
+        }
+        
+        # Use a hash of the parameters as a unique identifier for the cache entry
+        import hashlib
+        cache_hash = hashlib.md5(str(cache_key_params).encode()).hexdigest()
+
+        # Try to retrieve from cache based on the generated hash and a recent timestamp
+        cached_entry = CachedMetrics.objects.filter(
+            graph_data__cache_hash=cache_hash, # Storing the hash in graph_data or a new field
+            last_updated__gte=datetime.utcnow() - timedelta(seconds=CACHE_VALIDITY_SECONDS)
+        ).first()
+
+        if cached_entry:
+            # Reconstruct the metrics dict from cached fields
+            return {
+                "grossRevenue": cached_entry.gross_revenue,
+                "netProfit": cached_entry.net_profit,
+                "total_orders": cached_entry.total_orders,
+                "total_units": cached_entry.total_units,
+                "refunds": cached_entry.refund,
+                "margin": cached_entry.margin,
+                "total_cogs": cached_entry.total_cogs,
+                # ... add other fields you cache
+            }
+        return None
+
+    def save_cached_metrics(current_start, current_end, metrics_data, cache_hash):
+        # Create a new CachedMetrics entry
+        cached_metric = CachedMetrics(
+            brand_id=brand_id_oids[0] if brand_id_oids else None, # Assuming single brand for simplicity or adjust
+            marketplace_id=marketplace_oid,
+            date=current_end, # Or a representative date for the period
+            gross_revenue=metrics_data["grossRevenue"],
+            net_profit=metrics_data["netProfit"],
+            total_orders=metrics_data["orders"],
+            total_units=metrics_data["unitsSold"],
+            refund=metrics_data["refunds"],
+            margin=metrics_data["margin"],
+            total_cogs=metrics_data["expenses"], # Assuming expenses is total_cogs
+            graph_data={"cache_hash": cache_hash}, # Store the hash for lookup
+            last_updated=datetime.utcnow()
         )
+        try:
+            cached_metric.save()
+        except Exception as e:
+            print(f"Error saving cached metrics: {e}") # Log or handle error
+
+    def calculate_and_cache_metrics(current_start, current_end):
+        # Generate a consistent cache hash for the period
+        cache_key_params = {
+            "marketplace_id": marketplace_oid,
+            "brand_id": sorted([str(x) for x in brand_id_oids]),
+            "product_id": sorted([str(x) for x in product_id_oids]),
+            "manufacturer_name": sorted(manufacturer_name),
+            "fulfillment_channel": fulfillment_channel,
+            "from_date": current_start.isoformat(),
+            "to_date": current_end.isoformat(),
+            "timezone": timezone_str
+        }
+        import hashlib
+        cache_hash = hashlib.md5(str(cache_key_params).encode()).hexdigest()
+
+        cached_data = get_cached_metrics(current_start, current_end)
+        if cached_data:
+            print(f"Serving from cache for period ending {current_end}")
+            return cached_data
+        
+        print(f"Calculating metrics for period ending {current_end}")
+        metrics = calculate_metricss(
+            current_start, current_end, 
+            marketplace_oid, brand_id_oids, # Pass ObjectIds
+            product_id_oids, manufacturer_name, 
+            fulfillment_channel,
+            timezone_str
+        )
+        save_cached_metrics(current_start, current_end, metrics, cache_hash)
+        return metrics
+
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
-        current_metrics = calculate_metrics_sync(current_start, current_end)
+        current_metrics = calculate_and_cache_metrics(current_start, current_end)
+        previous_metrics = calculate_and_cache_metrics(prev_start, prev_end) # Calculate/retrieve previous period too
+        
         period_format = {
             "current": {"from": to_utc_format(current_start)},
             "previous": {"from": to_utc_format(prev_start)}
         }
-        if label not in ['Today', 'Yesterday']:
+        if label not in ['Today', 'Yesterday']: # "Today" and "Yesterday" typically don't have an "end" if it's "to now"
             period_format["current"]["to"] = to_utc_format(current_end)
             period_format["previous"]["to"] = to_utc_format(prev_end)
+        
         output = {
             "label": label,
             "period": period_format
@@ -1306,27 +1409,43 @@ def getPeriodWiseData(request):
         for key in current_metrics:
             output[key] = {
                 "current": current_metrics[key],
+                "previous": previous_metrics.get(key, 0) # Safely get previous, default to 0
             }
+            # Add percentage change if applicable
+            if isinstance(current_metrics[key], (int, float)) and isinstance(previous_metrics.get(key), (int, float)):
+                if previous_metrics.get(key) != 0:
+                    change = ((current_metrics[key] - previous_metrics[key]) / previous_metrics[key]) * 100
+                    output[key]["change_percentage"] = round(change, 2)
+                elif current_metrics[key] != 0: # Previous was 0, current is not
+                     output[key]["change_percentage"] = 100.0 # Infinite or 100% growth from zero
+                else:
+                    output[key]["change_percentage"] = 0.0 # Both are zero
+
         return output
+
+    # Define date ranges, using the get_date_range helper
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
         "last30Days": get_date_range("Last 30 days", timezone_str),
         "yearToDate": get_date_range("This Year", timezone_str),
-        "lastYear": get_date_range("Last Year", timezone_str)
+        "lastYear": get_date_range("Last Year", timezone_str) # Needed for YTD vs Last Year comparison
     }
+
     period_jobs = [
+        # (key, label, current_start, current_end, prev_start, prev_end)
         ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
-         date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)),
+         date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][1] - timedelta(days=1)),
         ("last7Days", "Last 7 Days", date_ranges["last7Days"][0], date_ranges["last7Days"][1],
-         date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][0] - timedelta(seconds=1)),
+         date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][1] - timedelta(days=7)),
         ("last30Days", "Last 30 Days", date_ranges["last30Days"][0], date_ranges["last30Days"][1],
-         date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][0] - timedelta(seconds=1)),
+         date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][1] - timedelta(days=30)),
         ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
-         date_ranges["lastYear"][0], date_ranges["lastYear"][1])
+         date_ranges["lastYear"][0], date_ranges["lastYear"][1]) # Compare YTD with Last Year's full data
     ]
+
     response_data = {}
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor: # Use max_workers based on system core count
         future_to_label = {
             executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
             for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
@@ -1336,6 +1455,7 @@ def getPeriodWiseData(request):
             try:
                 response_data[key] = future.result()
             except Exception as exc:
+                print(f'{key} generated an exception: {exc}') # Log the error
                 response_data[key] = {"error": str(exc)}
     return JsonResponse(response_data, safe=False)
 
