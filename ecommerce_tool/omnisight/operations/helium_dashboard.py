@@ -1284,277 +1284,72 @@ def clean_json_floats(obj):
     return obj
 @csrf_exempt
 def getPeriodWiseData(request):
-    """Optimized version of the period-wise data aggregation endpoint"""
-    
     def to_utc_format(dt):
-        """Helper function for consistent datetime formatting"""
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    
-    try:
-        json_request = JSONParser().parse(request)
-        marketplace_id = json_request.get('marketplace_id')
-        brand_id = json_request.get('brand_id', [])
-        product_id = json_request.get('product_id', [])
-        manufacturer_name = json_request.get('manufacturer_name', [])
-        fulfillment_channel = json_request.get('fulfillment_channel')
-        timezone_str = 'US/Pacific'
-
-
-        # Calculate metrics once and reuse (if possible)
-        def get_cached_metrics(start_date, end_date):
-            return calculate_metricss(
-                start_date=start_date,
-                end_date=end_date,
-                marketplace_id=marketplace_id,
-                brand_id=brand_id,
-                product_id=product_id,
-                manufacturer_name=manufacturer_name,
-                fulfillment_channel=fulfillment_channel,
-                timezone=timezone_str,
-                include_extra_fields=False,
-                use_threads=True  # Enable threading for performance
-            )
-
-        # Generate date ranges for all periods at once
-        date_ranges = {
-            "yesterday": get_date_range("Yesterday", timezone_str),
-            "last7Days": get_date_range("Last 7 days", timezone_str),
-            "last30Days": get_date_range("Last 30 days", timezone_str),
-            "yearToDate": get_date_range("This Year", timezone_str),
-            "lastYear": get_date_range("Last Year", timezone_str)
+    json_request = JSONParser().parse(request)
+    marketplace_id = json_request.get('marketplace_id', None)
+    brand_id = json_request.get('brand_id', [])
+    product_id = json_request.get('product_id', [])
+    manufacturer_name = json_request.get('manufacturer_name', [])
+    fulfillment_channel = json_request.get('fulfillment_channel', None)
+    timezone_str = 'US/Pacific'
+    def calculate_metrics_sync(start_date, end_date):
+        return calculate_metricss(
+            start_date, end_date, 
+            marketplace_id, brand_id, 
+            product_id, manufacturer_name, 
+            fulfillment_channel,
+            timezone_str, False,
+            use_threads=False
+        )
+    def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
+        current_metrics = calculate_metrics_sync(current_start, current_end)
+        period_format = {
+            "current": {"from": to_utc_format(current_start)},
+            "previous": {"from": to_utc_format(prev_start)}
         }
-
-        # Define processing jobs
-        period_jobs = [
-            ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
-             date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)),
-            ("last7Days", "Last 7 Days", date_ranges["last7Days"][0], date_ranges["last7Days"][1],
-             date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][0] - timedelta(seconds=1)),
-            ("last30Days", "Last 30 Days", date_ranges["last30Days"][0], date_ranges["last30Days"][1],
-             date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][0] - timedelta(seconds=1)),
-            ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
-             date_ranges["lastYear"][0], date_ranges["lastYear"][1])
-        ]
-
-        response_data = {}
-        with ThreadPoolExecutor(max_workers=4) as executor:  # Reduced workers based on testing
-            futures = {
-                executor.submit(
-                    lambda args: {
-                        "label": args[1],
-                        "period": {
-                            "current": {"from": to_utc_format(args[2])} if args[1] in ['Today', 'Yesterday'] else 
-                                      {"from": to_utc_format(args[2]), "to": to_utc_format(args[3])},
-                            "previous": {"from": to_utc_format(args[4])} if args[1] in ['Today', 'Yesterday'] else 
-                                        {"from": to_utc_format(args[4]), "to": to_utc_format(args[5])}
-                        },
-                        **get_cached_metrics(args[2], args[3])
-                    },
-                    job
-                ): job[0] for job in period_jobs
+        if label not in ['Today', 'Yesterday']:
+            period_format["current"]["to"] = to_utc_format(current_end)
+            period_format["previous"]["to"] = to_utc_format(prev_end)
+        output = {
+            "label": label,
+            "period": period_format
+        }
+        for key in current_metrics:
+            output[key] = {
+                "current": current_metrics[key],
             }
-            
-            for future in as_completed(futures):
-                key = futures[future]
-                try:
-                    response_data[key] = future.result()
-                except Exception as e:
-                    logger.error(f"Error processing period {key}: {str(e)}")
-                    response_data[key] = {"error": "Failed to process period"}
-
-        return JsonResponse(response_data, safe=False)
-
-    except Exception as e:
-        logger.error(f"Error in getPeriodWiseData: {str(e)}")
-        return JsonResponse({"error": "Internal server error"}, status=500)
-
-
-def calculate_metricss(
-    start_date,
-    end_date,
-    marketplace_id=None,
-    brand_id=None,
-    product_id=None,
-    manufacturer_name=None,
-    fulfillment_channel=None,
-    timezone='UTC',
-    include_extra_fields=False,
-    use_threads=False
-):
-    """Optimized metrics calculation with reduced database queries"""
-    
-    metrics = {
-        'grossRevenue': 0,
-        'total_cogs': 0,
-        'net_profit': 0,
-        'total_units': 0,
-        'vendor_funding': 0,
-        'temp_price': 0,
-        'refund': 0,
-        'tax_price': 0,
-        'sessions': 0,
-        'page_views': 0,
-        'shipping_cost': 0,
-        'sku_set': set(),
-        'p_id': set()
+        return output
+    date_ranges = {
+        "yesterday": get_date_range("Yesterday", timezone_str),
+        "last7Days": get_date_range("Last 7 days", timezone_str),
+        "last30Days": get_date_range("Last 30 days", timezone_str),
+        "yearToDate": get_date_range("This Year", timezone_str),
+        "lastYear": get_date_range("Last Year", timezone_str)
     }
-
-    # Get orders first (batched query)
-    result = grossRevenue(
-        start_date, end_date,
-        marketplace_id, brand_id,
-        product_id, manufacturer_name,
-        fulfillment_channel, timezone
-    )
-    
-    if not result:
-        return {
-            "grossRevenue": 0,
-            "expenses": 0,
-            "netProfit": 0,
-            "roi": 0,
-            "unitsSold": 0,
-            "refunds": 0,
-            "skuCount": 0,
-            "sessions": 0,
-            "pageViews": 0,
-            "unitSessionPercentage": 0,
-            "margin": 0,
-            "orders": 0
-        }
-
-    # Batch process refunds
-    refunds = refundOrder(
-        start_date, end_date,
-        marketplace_id, brand_id,
-        product_id, manufacturer_name,
-        fulfillment_channel, timezone
-    )
-    metrics['refund'] = len(refunds)
-
-    # Convert timezone if needed
-    if timezone != 'UTC':
-        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
-    
-    start_date = start_date.replace(tzinfo=None)
-    end_date = end_date.replace(tzinfo=None)
-
-    # Get all item IDs upfront
-    all_item_ids = [ObjectId(item_id) for order in result for item_id in order['order_items']]
-    
-    # Optimized item details query
-    item_pipeline = [
-        {"$match": {"_id": {"$in": all_item_ids}}},
-        {"$lookup": {
-            "from": "product",
-            "localField": "ProductDetails.product_id",
-            "foreignField": "_id",
-            "as": "product_ins"
-        }},
-        {"$unwind": "$product_ins"},
-        {"$project": {
-            "p_id": "$product_ins._id",
-            "price": "$Pricing.ItemPrice.Amount",
-            "tax_price": "$Pricing.ItemTax.Amount",
-            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-            "sku": "$product_ins.sku",
-            "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-            "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-            "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-            "a_shipping_cost": {"$ifNull": ["$product_ins.a_shipping_cost", 0]},
-            "w_shiping_cost": {"$ifNull": ["$product_ins.w_shiping_cost", 0]}
-        }}
+    period_jobs = [
+        ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
+         date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)),
+        ("last7Days", "Last 7 Days", date_ranges["last7Days"][0], date_ranges["last7Days"][1],
+         date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][0] - timedelta(seconds=1)),
+        ("last30Days", "Last 30 Days", date_ranges["last30Days"][0], date_ranges["last30Days"][1],
+         date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][0] - timedelta(seconds=1)),
+        ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
+         date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
-
-    item_details = {str(item['_id']): item for item in OrderItems.objects.aggregate(*item_pipeline)}
-
-    # Process orders efficiently
-    def process_order(order):
-        order_total = order['order_total']
-        order_items = order['order_items']
-        marketplace = order.get('marketplace_name')
-        
-        metrics['grossRevenue'] += order_total
-        metrics['total_units'] += order['items_order_quantity']
-
-        for item_id in order_items:
-            item = item_details.get(str(item_id))
-            if item:
-                metrics['temp_price'] += item['price']
-                metrics['tax_price'] += item.get('tax_price', 0)
-
-                if marketplace == "Amazon":
-                    metrics['total_cogs'] += item.get('total_cogs', 0)
-                    metrics['shipping_cost'] += item.get('a_shipping_cost', 0)
-                else:
-                    metrics['total_cogs'] += item.get('w_total_cogs', 0)
-                    metrics['shipping_cost'] += item.get('w_shiping_cost', 0)
-
-                metrics['vendor_funding'] += item.get('vendor_funding', 0)
-                
-                if 'sku' in item:
-                    metrics['sku_set'].add(item['sku'])
-                
-                try:
-                    metrics['p_id'].add(item['p_id'])
-                except KeyError:
-                    pass
-
-    # Process orders in parallel if enabled
-    if use_threads:
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            executor.map(process_order, result)
-    else:
-        for order in result:
-            process_order(order)
-
-    # Get page views metrics in a single query
-    if metrics['p_id']:
-        pipeline = [
-            {"$match": {
-                "product_id": {"$in": list(metrics['p_id'])},
-                "date": {"$gte": start_date, "$lte": end_date}
-            }},
-            {"$group": {
-                "_id": None,
-                "page_views": {"$sum": "$page_views"},
-                "sessions": {"$sum": "$sessions"}
-            }}
-        ]
-        p_result = list(pageview_session_count.objects.aggregate(*pipeline))
-        if p_result:
-            metrics['page_views'] = p_result[0].get('page_views', 0)
-            metrics['sessions'] = p_result[0].get('sessions', 0)
-
-    # Final calculations
-    metrics['net_profit'] = (metrics['temp_price'] - metrics['total_cogs']) + metrics['vendor_funding']
-    margin = (metrics['net_profit'] / metrics['grossRevenue']) * 100 if metrics['grossRevenue'] > 0 else 0
-    unit_session_percentage = (metrics['total_units'] / metrics['sessions']) * 100 if metrics['sessions'] else 0
-
-    base_result = {
-        "grossRevenue": round(metrics['grossRevenue'], 2),
-        "expenses": round(metrics['total_cogs'], 2),
-        "netProfit": round(metrics['net_profit'], 2),
-        "roi": round((metrics['net_profit'] / metrics['total_cogs']) * 100, 2) if metrics['total_cogs'] > 0 else 0,
-        "unitsSold": metrics['total_units'],
-        "refunds": metrics['refund'],
-        "skuCount": len(metrics['sku_set']),
-        "sessions": metrics['sessions'],
-        "pageViews": metrics['page_views'],
-        "unitSessionPercentage": round(unit_session_percentage, 2),
-        "margin": round(margin, 2),
-        "orders": len(result)
-    }
-
-    if include_extra_fields:
-        base_result.update({
-            "tax_price": round(metrics['tax_price'], 2),
-            "product_cost": round(metrics['temp_price'], 2),
-            "shipping_cost": round(metrics['shipping_cost'], 2)
-        })
-
-    return base_result
-
+    response_data = {}
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_label = {
+            executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
+            for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
+        }
+        for future in as_completed(future_to_label):
+            key = future_to_label[future]
+            try:
+                response_data[key] = future.result()
+            except Exception as exc:
+                response_data[key] = {"error": str(exc)}
+    return JsonResponse(response_data, safe=False)
 
 @csrf_exempt
 def getPeriodWiseDataXl(request):
