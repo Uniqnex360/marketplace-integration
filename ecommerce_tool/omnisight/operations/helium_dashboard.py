@@ -2922,8 +2922,7 @@ def getProfitAndLossDetails(request):
         for order in result:
             gross_revenue += order['order_total']
             total_units += order['items_order_quantity']
-            # Sum shipping cost ONCE per order (not per item)
-            shipping_cost += order.get('shipping_price', 0) or 0
+            shipping_cost += order.get('shipping_price', 0) or 0 #added shipping cost
 
             for item_id in order['order_items']:
                 item_data = item_lookup.get(item_id)
