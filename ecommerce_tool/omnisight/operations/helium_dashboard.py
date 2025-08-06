@@ -1291,7 +1291,7 @@ def getPeriodWiseData(request):
             product_id, manufacturer_name, 
             fulfillment_channel,
             timezone_str, False,
-            use_threads=False
+            use_threads=True
         )
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
         current_metrics = calculate_metrics_sync(current_start, current_end)
