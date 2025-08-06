@@ -1,6 +1,5 @@
 from __future__ import annotations
 import pandas as pd
-import time
 from mongoengine import Q
 from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund,Brand,inventry_log,productPriceChange
 from mongoengine.queryset.visitor import Q
@@ -533,10 +532,8 @@ def RevenueWidgetAPIView(request):
 def updatedRevenueWidgetAPIView(request):
     from django.utils import timezone
     import pytz
-    start = time.time()
     from concurrent.futures import ThreadPoolExecutor
     json_request = JSONParser().parse(request)
-    print("JSON parsing took", time.time() - start)
     preset = json_request.get("preset", "Today")
     compare_startdate = json_request.get("compare_startdate")
     compare_enddate = json_request.get("compare_enddate")
@@ -566,7 +563,7 @@ def updatedRevenueWidgetAPIView(request):
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
         return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, 
                            brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         future_total = executor.submit(fetch_total)
         future_graph_data = executor.submit(fetch_graph_data)
         compare_total = None
@@ -582,13 +579,6 @@ def updatedRevenueWidgetAPIView(request):
         graph_data = future_graph_data.result()
     updated_graph = {}
     
-
-    
-    total = future_total.result()
-    print("Total revenue calculation took", time.time() - start)
-    start = time.time()
-    graph_data = future_graph_data.result()
-    print("Graph data calculation took", time.time() - start)
     if compare_startdate and compare_startdate != "":
         for index, (key, metrics) in enumerate(graph_data.items()):
             compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
@@ -641,7 +631,6 @@ def updatedRevenueWidgetAPIView(request):
     name = "Revenue"
     item_pipeline = [{"$match": {"name": name}}]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
-    print("Aggregation took", time.time() - start)
     if item_result:
         item_result = item_result[0]
         if not item_result['select_all']:
@@ -649,9 +638,8 @@ def updatedRevenueWidgetAPIView(request):
                          'refund_amount', 'net_profit', 'profit_margin', 'orders']:
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
-    json.dumps(data)
-    print("JSON serialization took", time.time() - start)               
     return data
+import pytz
 @csrf_exempt
 def get_top_products(request):
     json_request = JSONParser().parse(request)
