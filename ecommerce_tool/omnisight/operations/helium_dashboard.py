@@ -1284,40 +1284,57 @@ def clean_json_floats(obj):
     return obj
 @csrf_exempt
 def getPeriodWiseData(request):
-    """
-    Refactored view for faster performance.
-    Key Improvements:
-    1.  Fetches data for current & previous periods in a single operation.
-    2.  Uses caching to return instantly for repeated requests.
-    3.  Simplified parallel execution logic.
-    """
     def to_utc_format(dt):
-        # Returns None if dt is None, otherwise formats it.
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ") if dt else None
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # --- 1. Parse Request and Define Filters ---
+    def shift_range(start, end, delta_days):
+        return start - timedelta(days=delta_days), end - timedelta(days=delta_days)
+
     json_request = JSONParser().parse(request)
-    marketplace_id = json_request.get('marketplace_id')
+    marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
     product_id = json_request.get('product_id', [])
     manufacturer_name = json_request.get('manufacturer_name', [])
-    fulfillment_channel = json_request.get('fulfillment_channel')
+    fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = 'US/Pacific'
 
-    # --- 2. Caching Logic ---
-    # Create a unique cache key from all filters
-    filter_tuple = (
-        marketplace_id, tuple(sorted(brand_id)), tuple(sorted(product_id)),
-        tuple(sorted(manufacturer_name)), fulfillment_channel, timezone_str
-    )
-    cache_key = f"period_data_{hash(filter_tuple)}"
-    
-    cached_data = cache.get(cache_key)
-    if cached_data:
-        print("✅ Returning response from cache.")
-        return JsonResponse(cached_data, safe=False)
+    def calculate_metrics_sync(start_date, end_date):
+        return calculate_metricss(
+            start_date, end_date,
+            marketplace_id, brand_id,
+            product_id, manufacturer_name,
+            fulfillment_channel,
+            timezone_str, False,
+            use_threads=True  # ✅ Enable internal threading
+        )
 
-    # --- 3. Define Date Ranges ---
+    def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
+        start_time = time.perf_counter()
+
+        current_metrics = calculate_metrics_sync(current_start, current_end)
+
+        period_format = {
+            "current": {"from": to_utc_format(current_start)},
+            "previous": {"from": to_utc_format(prev_start)}
+        }
+        if label not in ['Today', 'Yesterday']:
+            period_format["current"]["to"] = to_utc_format(current_end)
+            period_format["previous"]["to"] = to_utc_format(prev_end)
+
+        output = {
+            "label": label,
+            "period": period_format
+        }
+
+        for key in current_metrics:
+            output[key] = {
+                "current": current_metrics[key],
+            }
+
+        end_time = time.perf_counter()
+        print(f"[{label}] Processed in {end_time - start_time:.2f}s")  # ✅ Optional logging
+        return output
+
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1326,112 +1343,38 @@ def getPeriodWiseData(request):
         "lastYear": get_date_range("Last Year", timezone_str)
     }
 
-    # Define jobs. Each job calculates current and previous periods together.
     period_jobs = [
-        # (key, label, current_start, current_end, previous_start, previous_end)
-        ("yesterday", "Yesterday", 
-         date_ranges["yesterday"][0], date_ranges["yesterday"][1], 
-         date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][1] - timedelta(days=1)),
-        
-        ("last7Days", "Last 7 Days", 
-         date_ranges["last7Days"][0], date_ranges["last7Days"][1], 
-         date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][1] - timedelta(days=7)),
+        ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
+         shift_range(date_ranges["yesterday"][0], date_ranges["yesterday"][1], 1)[0],
+         date_ranges["yesterday"][0] - timedelta(seconds=1)),
 
-        ("last30Days", "Last 30 Days", 
-         date_ranges["last30Days"][0], date_ranges["last30Days"][1], 
-         date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][1] - timedelta(days=30)),
+        ("last7Days", "Last 7 Days", date_ranges["last7Days"][0], date_ranges["last7Days"][1],
+         shift_range(date_ranges["last7Days"][0], date_ranges["last7Days"][1], 7)[0],
+         date_ranges["last7Days"][0] - timedelta(seconds=1)),
 
-        ("yearToDate", "Year to Date", 
-         date_ranges["yearToDate"][0], date_ranges["yearToDate"][1], 
+        ("last30Days", "Last 30 Days", date_ranges["last30Days"][0], date_ranges["last30Days"][1],
+         shift_range(date_ranges["last30Days"][0], date_ranges["last30Days"][1], 30)[0],
+         date_ranges["last30Days"][0] - timedelta(seconds=1)),
+
+        ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
 
-    # --- 4. Worker Function for Parallel Execution ---
-    def process_period(label, current_start, current_end, prev_start, prev_end):
-        start_time = time.perf_counter()
-        
-        # 🔥 CRITICAL CHANGE: Fetch data for BOTH periods in ONE call if possible.
-        # This function needs to be smart. It takes the overall range and the "split" date.
-        # Let's assume you have a function that can do this.
-        # It should return a tuple: (current_metrics, previous_metrics)
-        current_metrics, previous_metrics = calculate_metrics_for_both_periods(
-            current_start, current_end, prev_start, prev_end,
-            marketplace_id, brand_id, product_id, manufacturer_name, 
-            fulfillment_channel, timezone_str
-        )
-        
-        # Format the output
-        output = {
-            "label": label,
-            "period": {
-                "current": {"from": to_utc_format(current_start), "to": to_utc_format(current_end)},
-                "previous": {"from": to_utc_format(prev_start), "to": to_utc_format(prev_end)}
-            }
-        }
-        
-        # Merge metric results
-        for key in current_metrics:
-            output[key] = {
-                "current": current_metrics.get(key, 0),
-                "previous": previous_metrics.get(key, 0)
-            }
-        
-        print(f"[{label}] Processed in {time.perf_counter() - start_time:.2f}s")
-        return output
-
-    # --- 5. Execute in Parallel ---
     response_data = {}
-    with ThreadPoolExecutor(max_workers=4) as executor: # Reduced workers to avoid overwhelming the DB
-        future_to_job = {
-            executor.submit(process_period, label, cur_s, cur_e, prev_s, prev_e): key
-            for key, label, cur_s, cur_e, prev_s, prev_e in period_jobs
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_label = {
+            executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
+            for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
         }
 
-        for future in as_completed(future_to_job):
-            key = future_to_job[future]
+        for future in as_completed(future_to_label):
+            key = future_to_label[future]
             try:
-                response_data[key] = future.result(timeout=30)
+                response_data[key] = future.result(timeout=30)  # ✅ Add timeout per task
             except Exception as exc:
-                print(f"Error processing job {key}: {exc}")
                 response_data[key] = {"error": str(exc)}
 
-    # --- 6. Cache the result before returning ---
-    cache.set(cache_key, response_data, timeout=3600) # Cache for 1 hour
-
     return JsonResponse(response_data, safe=False)
-
-
-# --- You would need to implement this helper function ---
-def calculate_metrics_for_both_periods(current_start, current_end, prev_start, prev_end, **filters):
-    """
-    A more efficient function that calculates metrics for two date ranges.
-    Ideally, it makes ONE database query for the combined date range and splits the results.
-    """
-    # Example logic for a single combined query
-    # This is a conceptual example for a Django ORM
-    
-    # 1. Find the absolute start and end dates
-    total_start = min(current_start, prev_start)
-    total_end = max(current_end, prev_end)
-    
-    # 2. Make ONE database call for the entire range
-    # Use database-level aggregation for performance!
-    # all_data = YourModel.objects.filter(
-    #     date_field__range=(total_start, total_end),
-    #     **orm_filters
-    # ).values('date_field').annotate(
-    #     total_sales=Sum('sales'),
-    #     total_orders=Count('order_id')
-    # )
-    
-    # This is a placeholder for your actual metric calculation logic
-    # In a real scenario, you'd process `all_data` here
-    
-    # Let's simulate the old behavior but within one function call
-    current_metrics = calculate_metricss(current_start, current_end, **filters)
-    previous_metrics = calculate_metricss(prev_start, prev_end, **filters)
-    
-    return current_metrics, previous_metrics
 
 @csrf_exempt
 def getPeriodWiseDataXl(request):
