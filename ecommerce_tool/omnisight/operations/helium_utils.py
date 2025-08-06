@@ -740,7 +740,9 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     return converted_graph_data
 
 
-def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None,timezone_str="UTC"):
+def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"):
+    from collections import defaultdict
+
     total = dict()
     gross_revenue = 0
     total_cogs = 0
@@ -752,83 +754,64 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     vendor_funding = 0
     refund_quantity_ins = 0
 
-    result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
-    refund_ins = refundOrder(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
+    # Step 1: Fetch all orders and refunds
+    orders = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+    refund_ins = refundOrder(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
 
+    # Step 2: Calculate refund metrics
     if refund_ins:
         for ins in refund_ins:
             refund += ins['order_total']
             refund_quantity_ins += len(ins['order_items'])
 
-    total_orders = len(result)
-
-    def process_order(order):
-        nonlocal gross_revenue, total_cogs, total_units, temp_other_price, vendor_funding
-
-        tax_price = 0
+    # Step 3: Accumulate all order item IDs and other quick metrics
+    all_item_ids = []
+    for order in orders:
         gross_revenue += order['order_total']
         total_units += order['items_order_quantity']
+        total_orders += 1
+        all_item_ids.extend(order['order_items'])
 
-        for j in order['order_items']:
-            pipeline = [
-                {
-                    "$match": {
-                        "_id": j
-                    }
-                },
-                {
-                    "$lookup": {
-                        "from": "product",
-                        "localField": "ProductDetails.product_id",
-                        "foreignField": "_id",
-                        "as": "product_ins"
-                    }
-                },
-                {
-                    "$unwind": {
-                        "path": "$product_ins",
-                        "preserveNullAndEmptyArrays": True
-                    }
-                },
-                {
-                    "$project": {
-                        "_id": 0,
-                        "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                        "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
-                        "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                        "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                        "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                    }
-                }
-            ]
-            result = list(OrderItems.objects.aggregate(*pipeline))
-            if result:
-                tax_price += result[0]['tax_price']
-                temp_other_price += result[0]['price']
+    # Step 4: Single bulk aggregation for all order items
+    pipeline = [
+        {"$match": {"_id": {"$in": all_item_ids}}},
+        {
+            "$lookup": {
+                "from": "product",
+                "localField": "ProductDetails.product_id",
+                "foreignField": "_id",
+                "as": "product_ins"
+            }
+        },
+        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+        {
+            "$project": {
+                "_id": 0,
+                "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
+                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                "marketplace_name": {"$ifNull": ["$marketplace_name", ""]},
+            }
+        }
+    ]
 
-                if order['marketplace_name'] == "Amazon":
-                    total_cogs += result[0]['total_cogs']
-                else:
-                    total_cogs += result[0]['w_total_cogs']
-                
-                vendor_funding += result[0]['vendor_funding']
+    item_results = list(OrderItems.objects.aggregate(*pipeline))
 
-    # Create threads for processing orders
-    threads = []
-    for order in result:
-        thread = threading.Thread(target=process_order, args=(order,))
-        threads.append(thread)
-        thread.start()
+    # Step 5: Aggregate calculated fields
+    for item in item_results:
+        temp_other_price += item['price']
+        if item['marketplace_name'] == "Amazon":
+            total_cogs += item['total_cogs']
+        else:
+            total_cogs += item['w_total_cogs']
+        vendor_funding += item['vendor_funding']
 
-    # Wait for all threads to complete
-    for thread in threads:
-        thread.join()
-
-    # Calculate net profit
+    # Step 6: Final net profit calculation
     net_profit = (temp_other_price - total_cogs) + vendor_funding
 
-    # Total values
+    # Step 7: Final response
     total = {
         "gross_revenue": round(gross_revenue, 2),
         "net_profit": round(net_profit, 2),
@@ -838,8 +821,8 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
         "refund_amount": round(refund, 2),
         "refund_quantity": refund_quantity_ins
     }
-    return total
 
+    return total
 
 def calculate_metricss(
     from_date,
