@@ -639,6 +639,7 @@ def updatedRevenueWidgetAPIView(request):
     name = "Revenue"
     item_pipeline = [{"$match": {"name": name}}]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
+    print("Aggregation took", time.time() - start)
     if item_result:
         item_result = item_result[0]
         if not item_result['select_all']:
