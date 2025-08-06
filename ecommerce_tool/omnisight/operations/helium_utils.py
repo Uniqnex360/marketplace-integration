@@ -745,6 +745,8 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
 
 from bson import ObjectId
 
+from bson import ObjectId
+
 def totalRevenueCalculation(
     start_date, end_date, marketplace_id=None, brand_id=None, product_id=None,
     manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"
@@ -792,7 +794,7 @@ def totalRevenueCalculation(
     # --- Batch fetch all Product IDs ---
     product_ids = set()
     for item in item_docs:
-        pid = item.get('ProductDetails', {}).get('product_id')
+        pid = getattr(item.ProductDetails, 'product_id', None) if item.ProductDetails else None
         if pid:
             product_ids.add(pid)
     product_ids = [ObjectId(i) if not isinstance(i, ObjectId) else i for i in product_ids]
@@ -810,14 +812,25 @@ def totalRevenueCalculation(
             item = item_dict.get(str(item_id))
             if not item:
                 continue
-            product_id = item.get('ProductDetails', {}).get('product_id')
+
+            # Get product_id from ProductDetails
+            product_id = getattr(item.ProductDetails, 'product_id', None) if item.ProductDetails else None
             product = product_dict.get(str(product_id))
-            price = item.get('Pricing', {}).get('ItemPrice', {}).get('Amount', 0)
-            tax_price = item.get('Pricing', {}).get('ItemTax', {}).get('Amount', 0)
-            cogs = product.get('cogs', 0.0) if product else 0.0
-            total_cogs_val = product.get('total_cogs', 0) if product else 0
-            w_total_cogs = product.get('w_total_cogs', 0) if product else 0
-            vendor_funding_val = product.get('vendor_funding', 0) if product else 0
+
+            # Get price and tax_price from Pricing
+            price = 0
+            tax_price = 0
+            if item.Pricing:
+                if getattr(item.Pricing, 'ItemPrice', None):
+                    price = getattr(item.Pricing.ItemPrice, 'Amount', 0)
+                if getattr(item.Pricing, 'ItemTax', None):
+                    tax_price = getattr(item.Pricing.ItemTax, 'Amount', 0)
+
+            # Get product-related values
+            cogs = getattr(product, 'cogs', 0.0) if product else 0.0
+            total_cogs_val = getattr(product, 'total_cogs', 0) if product else 0
+            w_total_cogs = getattr(product, 'w_total_cogs', 0) if product else 0
+            vendor_funding_val = getattr(product, 'vendor_funding', 0) if product else 0
 
             temp_other_price += price
             if order['marketplace_name'] == "Amazon":
@@ -840,7 +853,6 @@ def totalRevenueCalculation(
         "refund_quantity": refund_quantity_ins
     }
     return total
-
 def calculate_metricss(
     from_date,
     to_date,
