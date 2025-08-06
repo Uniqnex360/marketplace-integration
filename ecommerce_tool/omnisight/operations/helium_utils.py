@@ -743,6 +743,8 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     return converted_graph_data
 
 
+from bson import ObjectId
+
 def totalRevenueCalculation(
     start_date, end_date, marketplace_id=None, brand_id=None, product_id=None,
     manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"
@@ -780,13 +782,12 @@ def totalRevenueCalculation(
     all_item_ids = []
     for order in result:
         all_item_ids.extend(order['order_items'])
-
-    # Remove duplicates, just in case
     all_item_ids = list(set(all_item_ids))
+    all_item_ids = [ObjectId(i) if not isinstance(i, ObjectId) else i for i in all_item_ids]
 
     # --- Batch fetch all OrderItems ---
-    item_docs = list(OrderItems.objects.filter(_id__in=all_item_ids))
-    item_dict = {str(item['_id']): item for item in item_docs}
+    item_docs = list(OrderItems.objects.filter(id__in=all_item_ids))
+    item_dict = {str(item.id): item for item in item_docs}
 
     # --- Batch fetch all Product IDs ---
     product_ids = set()
@@ -794,10 +795,11 @@ def totalRevenueCalculation(
         pid = item.get('ProductDetails', {}).get('product_id')
         if pid:
             product_ids.add(pid)
+    product_ids = [ObjectId(i) if not isinstance(i, ObjectId) else i for i in product_ids]
 
     # --- Batch fetch all Products ---
-    product_docs = list(Product.objects.filter(_id__in=list(product_ids)))
-    product_dict = {str(prod['_id']): prod for prod in product_docs}
+    product_docs = list(Product.objects.filter(id__in=list(product_ids)))
+    product_dict = {str(prod.id): prod for prod in product_docs}
 
     # --- Process orders ---
     for order in result:
