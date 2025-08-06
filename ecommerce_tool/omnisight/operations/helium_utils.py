@@ -221,16 +221,19 @@ def get_date_range(preset, time_zone_str="UTC"):
 
 
 def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None, 
-                product_id=None, manufacuture_name=[], fulfillment_channel=None, 
-                timezone='UTC'):    
-    # Convert local timezone dates to UTC
+                 product_id=None, manufacuture_name=[], fulfillment_channel=None, 
+                 timezone='UTC'):
+    from collections import defaultdict
+
+    # 1. Convert local timezone dates to UTC
     if timezone != 'UTC':
-        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
-    
+        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
+
     start_date = start_date.replace(tzinfo=None)
     end_date = end_date.replace(tzinfo=None)
-    
-    pipeline = [
+
+    # 2. Get marketplace names
+    marketplace_pipeline = [
         {
             "$project": {
                 "_id": 1,
@@ -239,18 +242,20 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
             }
         }
     ]
-    marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
-    
-    match = dict()
-    match['order_date'] = {"$gte": start_date, "$lte": end_date}
-    match['order_status'] = {"$nin": ["Canceled", "Cancelled"]}
-    match['order_total'] = {"$gt": 0}
-    
+    marketplace_list = list(Marketplace.objects.aggregate(*marketplace_pipeline))
+    marketplace_map = {str(m['_id']): m['name'] for m in marketplace_list}
+
+    # 3. Build filters
+    match = {
+        'order_date': {"$gte": start_date, "$lte": end_date},
+        'order_status': {"$nin": ["Canceled", "Cancelled"]},
+        'order_total': {"$gt": 0}
+    }
+
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id not in [None, "", "all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
-    
     if manufacuture_name not in [None, "", []]:
         ids = getproductIdListBasedonManufacture(manufacuture_name, start_date, end_date)
         match["_id"] = {"$in": ids}
@@ -262,37 +267,54 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
         brand_id = [ObjectId(bid) for bid in brand_id]
         ids = getproductIdListBasedonbrand(brand_id, start_date, end_date)
         match["_id"] = {"$in": ids}
-    
-    pipeline = [
-        {
-            "$match": match
-        },
-        {
-            "$project": {
-                "_id": 1,
-                "order_date": 1,
-                "order_items": 1,
-                "order_total": 1,
-                "marketplace_id": 1,
-                "currency": 1,
-                "shipping_address": 1,
-                "shipping_information": 1,
-                "shipping_price": {"$ifNull": ["$shipping_price", 0.0]},
-                "items_order_quantity": {"$ifNull": ["$items_order_quantity", 0]},
-            }
-        }
+
+    # 4. Get orders
+    order_pipeline = [
+        {"$match": match},
+        {"$project": {
+            "_id": 1,
+            "order_date": 1,
+            "order_items": 1,
+            "order_total": 1,
+            "marketplace_id": 1,
+            "currency": 1,
+            "shipping_address": 1,
+            "shipping_information": 1,
+            "shipping_price": {"$ifNull": ["$shipping_price", 0.0]},
+            "items_order_quantity": {"$ifNull": ["$items_order_quantity", 0]},
+        }}
     ]
-    
-    order_list = list(Order.objects.aggregate(*pipeline))
-    
-    for order_ins in order_list:
-        for marketplace in marketplace_list:
-            order_ins['marketplace_name'] = marketplace['name']
-        tax=order_ins.get('TaxAmount',0.0)
-        if isinstance(tax,dict):
-            tax=tax.get('Amount',0.0)
-        order_ins['order_total']=round(order_ins.get('order_total',0.0)-tax,2)
-    
+    order_list = list(Order.objects.aggregate(*order_pipeline))
+
+    # 5. Map order to item IDs
+    all_item_ids = []
+    order_to_items_map = {}
+    for order in order_list:
+        item_ids = order.get('order_items', [])
+        order_to_items_map[order['_id']] = item_ids
+        all_item_ids.extend(item_ids)
+
+    # 6. Fetch OrderItems and get product price
+    item_pipeline = [
+        {"$match": {"_id": {"$in": all_item_ids}}},
+        {"$project": {
+            "_id": 1,
+            "product_amount": {"$ifNull": ["$Pricing.Product.Amount", 0.0]}
+        }}
+    ]
+    item_docs = list(OrderItems.objects.aggregate(*item_pipeline))
+
+    # 7. Map item ID to product cost
+    item_cost_map = {item['_id']: item['product_amount'] for item in item_docs}
+
+    # 8. Compute product total per order and assign marketplace name
+    for order in order_list:
+        item_ids = order_to_items_map.get(order['_id'], [])
+        product_total = sum(item_cost_map.get(item_id, 0.0) for item_id in item_ids)
+        order['order_total'] = round(product_total, 2)
+
+        order['marketplace_name'] = marketplace_map.get(str(order.get('marketplace_id')), 'Unknown')
+
     return order_list
 
 
