@@ -535,6 +535,7 @@ def updatedRevenueWidgetAPIView(request):
     import pytz
     from concurrent.futures import ThreadPoolExecutor
     json_request = JSONParser().parse(request)
+    print("JSON parsing took", time.time() - start)
     preset = json_request.get("preset", "Today")
     compare_startdate = json_request.get("compare_startdate")
     compare_enddate = json_request.get("compare_enddate")
@@ -647,6 +648,8 @@ def updatedRevenueWidgetAPIView(request):
                          'refund_amount', 'net_profit', 'profit_margin', 'orders']:
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
+    json.dumps(data)
+    print("JSON serialization took", time.time() - start)               
     return data
 @csrf_exempt
 def get_top_products(request):
