@@ -514,9 +514,9 @@ def RevenueWidgetAPIView(request):
 @csrf_exempt
 def updatedRevenueWidgetAPIView(request):
     from django.utils import timezone
-    from datetime import datetime
-    from concurrent.futures import ThreadPoolExecutor
     import pytz
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import datetime
 
     json_request = JSONParser().parse(request)
     preset = json_request.get("preset", "Today")
@@ -527,116 +527,125 @@ def updatedRevenueWidgetAPIView(request):
     brand_id = json_request.get("brand_id", None)
     manufacturer_name = json_request.get("manufacturer_name", None)
     fulfillment_channel = json_request.get("fulfillment_channel", None)
+
     timezone_str = "US/Pacific"
     start_date = json_request.get("start_date", None)
     end_date = json_request.get("end_date", None)
 
-    # Convert date ranges
     if start_date not in [None, ""]:
         start_date, end_date = convertdateTotimezone(start_date, end_date, timezone_str)
     else:
         start_date, end_date = get_date_range(preset, timezone_str)
 
-    # Parse compare date if available
     compare_enabled = compare_startdate not in [None, ""]
     if compare_enabled:
-        compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(hour=0, minute=0, second=0, microsecond=0)
-        compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(hour=23, minute=59, second=59, microsecond=0)
+        compare_startdate = datetime.strptime(compare_startdate, "%Y-%m-%d").replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        compare_enddate = datetime.strptime(compare_enddate, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, microsecond=0
+        )
 
     comapre_past = get_previous_periods(start_date, end_date)
 
-    # Define workers
     def fetch_total():
-        return totalRevenueCalculation(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        return totalRevenueCalculation(
+            start_date, end_date, marketplace_id, brand_id,
+            product_id, manufacturer_name, fulfillment_channel, timezone_str
+        )
 
     def fetch_graph_data():
-        return get_graph_data(start_date, end_date, preset, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        return get_graph_data(
+            start_date, end_date, preset, marketplace_id, brand_id,
+            product_id, manufacturer_name, fulfillment_channel, timezone_str
+        )
 
     def fetch_compare_total():
-        return totalRevenueCalculation(compare_startdate, compare_enddate, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        return totalRevenueCalculation(
+            compare_startdate, compare_enddate, marketplace_id,
+            brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
+        )
 
     def fetch_compare_graph_data():
         initial = "Today" if compare_startdate.date() == compare_enddate.date() else None
-        return get_graph_data(compare_startdate, compare_enddate, initial, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
+        return get_graph_data(
+            compare_startdate, compare_enddate, initial, marketplace_id,
+            brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str
+        )
 
-    # Run all tasks concurrently
     with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            'total': executor.submit(fetch_total),
-            'graph': executor.submit(fetch_graph_data),
-        }
-        if compare_enabled:
-            futures['compare_total'] = executor.submit(fetch_compare_total)
-            futures['compare_graph'] = executor.submit(fetch_compare_graph_data)
+        future_total = executor.submit(fetch_total)
+        future_graph_data = executor.submit(fetch_graph_data)
+        future_compare_total = executor.submit(fetch_compare_total) if compare_enabled else None
+        future_compare_graph_data = executor.submit(fetch_compare_graph_data) if compare_enabled else None
 
-        total = futures['total'].result()
-        graph_data = futures['graph'].result()
-        compare_total = futures.get('compare_total').result() if compare_enabled else None
-        compare_graph = futures.get('compare_graph').result() if compare_enabled else None
+        total = future_total.result()
+        graph_data = future_graph_data.result()
+        compare_total = future_compare_total.result() if compare_enabled else None
+        compare_graph = future_compare_graph_data.result() if compare_enabled else None
 
-    # Helper to merge current & compare graph data
-    def merge_metrics(key, current, previous=None):
-        merged = {
-            "current_date": key,
-            "gross_revenue": current.get("gross_revenue", 0),
-            "net_profit": current.get("net_profit", 0),
-            "profit_margin": current.get("profit_margin", 0),
-            "orders": current.get("orders", 0),
-            "units_sold": current.get("units_sold", 0),
-            "refund_amount": current.get("refund_amount", 0),
-            "refund_quantity": current.get("refund_quantity", 0),
-        }
-        if previous:
-            merged.update({
-                "compare_gross_revenue": previous.get("gross_revenue", 0),
-                "compare_net_profit": previous.get("net_profit", 0),
-                "compare_profit_margin": previous.get("profit_margin", 0),
-                "compare_orders": previous.get("orders", 0),
-                "compare_units_sold": previous.get("units_sold", 0),
-                "compare_refund_amount": previous.get("refund_amount", 0),
-                "compare_refund_quantity": previous.get("refund_quantity", 0),
-                "compare_date": key  # assumes key is shared between graph and compare
-            })
-        return merged
-
-    # Build graph
     updated_graph = {}
-    for key, metrics in graph_data.items():
-        compare_metrics = compare_graph.get(key) if compare_enabled and compare_graph else None
-        updated_graph[key] = merge_metrics(key, metrics, compare_metrics)
 
-    # Prepare response
+    if compare_enabled:
+        for index, (key, metrics) in enumerate(graph_data.items()):
+            compare_metrics = list(compare_graph.values())[index] if index < len(compare_graph) else {}
+            updated_graph[key] = {
+                "current_date": key,
+                "gross_revenue": metrics.get("gross_revenue", 0),
+                "net_profit": metrics.get("net_profit", 0),
+                "profit_margin": metrics.get("profit_margin", 0),
+                "orders": metrics.get("orders", 0),
+                "units_sold": metrics.get("units_sold", 0),
+                "refund_amount": metrics.get("refund_amount", 0),
+                "refund_quantity": metrics.get("refund_quantity", 0),
+                "compare_gross_revenue": compare_metrics.get("gross_revenue", 0),
+                "compare_net_profit": compare_metrics.get("net_profit", 0),
+                "compare_profit_margin": compare_metrics.get("profit_margin", 0),
+                "compare_orders": compare_metrics.get("orders", 0),
+                "compare_units_sold": compare_metrics.get("units_sold", 0),
+                "compare_refund_amount": compare_metrics.get("refund_amount", 0),
+                "compare_refund_quantity": compare_metrics.get("refund_quantity", 0),
+                "compare_date": list(compare_graph.keys())[index] if index < len(compare_graph) else None,
+            }
+    else:
+        for key, metrics in graph_data.items():
+            updated_graph[key] = {
+                "current_date": key,
+                "gross_revenue": metrics.get("gross_revenue", 0),
+                "net_profit": metrics.get("net_profit", 0),
+                "profit_margin": metrics.get("profit_margin", 0),
+                "orders": metrics.get("orders", 0),
+                "units_sold": metrics.get("units_sold", 0),
+                "refund_amount": metrics.get("refund_amount", 0),
+                "refund_quantity": metrics.get("refund_quantity", 0),
+            }
+
     data = {
         "total": total,
         "graph": updated_graph,
         "comapre_past": comapre_past,
     }
 
-    if compare_enabled and compare_total:
-        def calc_diff(metric):
-            cur = total.get(metric, 0)
-            prev = compare_total.get(metric, 0)
-            return round(((cur - prev) / prev * 100), 2) if prev else 0
-
+    if compare_enabled:
         difference = {
-            "gross_revenue": calc_diff("gross_revenue"),
-            "net_profit": calc_diff("net_profit"),
-            "profit_margin": calc_diff("profit_margin"),
-            "orders": calc_diff("orders"),
-            "units_sold": calc_diff("units_sold"),
-            "refund_amount": calc_diff("refund_amount"),
-            "refund_quantity": calc_diff("refund_quantity"),
+            "gross_revenue": round(((total["gross_revenue"] - compare_total["gross_revenue"]) / compare_total["gross_revenue"] * 100) if compare_total["gross_revenue"] else 0, 2),
+            "net_profit": round(((total["net_profit"] - compare_total["net_profit"]) / compare_total["net_profit"] * 100) if compare_total["net_profit"] else 0, 2),
+            "profit_margin": round(((total["profit_margin"] - compare_total["profit_margin"]) / compare_total["profit_margin"] * 100) if compare_total["profit_margin"] else 0, 2),
+            "orders": round(((total["orders"] - compare_total["orders"]) / compare_total["orders"] * 100) if compare_total["orders"] else 0, 2),
+            "units_sold": round(((total["units_sold"] - compare_total["units_sold"]) / compare_total["units_sold"] * 100) if compare_total["units_sold"] else 0, 2),
+            "refund_amount": round(((total["refund_amount"] - compare_total["refund_amount"]) / compare_total["refund_amount"] * 100) if compare_total["refund_amount"] else 0, 2),
+            "refund_quantity": round(((total["refund_quantity"] - compare_total["refund_quantity"]) / compare_total["refund_quantity"] * 100) if compare_total["refund_quantity"] else 0, 2),
         }
-        data["compare_total"] = difference
+        data['compare_total'] = difference
 
-    # Field filtering
     name = "Revenue"
     item_pipeline = [{"$match": {"name": name}}]
     item_result = list(chooseMatrix.objects.aggregate(*item_pipeline))
     if item_result:
         item_result = item_result[0]
-        if not item_result.get('select_all', True):
-            for field in ['gross_revenue', 'units_sold', 'refund_quantity', 'refund_amount', 'net_profit', 'profit_margin', 'orders']:
+        if not item_result['select_all']:
+            for field in ['gross_revenue', 'units_sold', 'refund_quantity',
+                          'refund_amount', 'net_profit', 'profit_margin', 'orders']:
                 if not item_result.get(field, True):
                     data['total'].pop(field, None)
 
@@ -1277,6 +1286,10 @@ def clean_json_floats(obj):
 def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def shift_range(start, end, delta_days):
+        return start - timedelta(days=delta_days), end - timedelta(days=delta_days)
+
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
@@ -1284,17 +1297,22 @@ def getPeriodWiseData(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = 'US/Pacific'
+
     def calculate_metrics_sync(start_date, end_date):
         return calculate_metricss(
-            start_date, end_date, 
-            marketplace_id, brand_id, 
-            product_id, manufacturer_name, 
+            start_date, end_date,
+            marketplace_id, brand_id,
+            product_id, manufacturer_name,
             fulfillment_channel,
             timezone_str, False,
-            use_threads=True
+            use_threads=True  # ✅ Enable internal threading
         )
+
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
+        start_time = time.perf_counter()
+
         current_metrics = calculate_metrics_sync(current_start, current_end)
+
         period_format = {
             "current": {"from": to_utc_format(current_start)},
             "previous": {"from": to_utc_format(prev_start)}
@@ -1302,15 +1320,21 @@ def getPeriodWiseData(request):
         if label not in ['Today', 'Yesterday']:
             period_format["current"]["to"] = to_utc_format(current_end)
             period_format["previous"]["to"] = to_utc_format(prev_end)
+
         output = {
             "label": label,
             "period": period_format
         }
+
         for key in current_metrics:
             output[key] = {
                 "current": current_metrics[key],
             }
+
+        end_time = time.perf_counter()
+        print(f"[{label}] Processed in {end_time - start_time:.2f}s")  # ✅ Optional logging
         return output
+
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1318,28 +1342,38 @@ def getPeriodWiseData(request):
         "yearToDate": get_date_range("This Year", timezone_str),
         "lastYear": get_date_range("Last Year", timezone_str)
     }
+
     period_jobs = [
         ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
-         date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)),
+         shift_range(date_ranges["yesterday"][0], date_ranges["yesterday"][1], 1)[0],
+         date_ranges["yesterday"][0] - timedelta(seconds=1)),
+
         ("last7Days", "Last 7 Days", date_ranges["last7Days"][0], date_ranges["last7Days"][1],
-         date_ranges["last7Days"][0] - timedelta(days=7), date_ranges["last7Days"][0] - timedelta(seconds=1)),
+         shift_range(date_ranges["last7Days"][0], date_ranges["last7Days"][1], 7)[0],
+         date_ranges["last7Days"][0] - timedelta(seconds=1)),
+
         ("last30Days", "Last 30 Days", date_ranges["last30Days"][0], date_ranges["last30Days"][1],
-         date_ranges["last30Days"][0] - timedelta(days=30), date_ranges["last30Days"][0] - timedelta(seconds=1)),
+         shift_range(date_ranges["last30Days"][0], date_ranges["last30Days"][1], 30)[0],
+         date_ranges["last30Days"][0] - timedelta(seconds=1)),
+
         ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
+
     response_data = {}
     with ThreadPoolExecutor(max_workers=8) as executor:
         future_to_label = {
             executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
             for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
         }
+
         for future in as_completed(future_to_label):
             key = future_to_label[future]
             try:
-                response_data[key] = future.result()
+                response_data[key] = future.result(timeout=30)  # ✅ Add timeout per task
             except Exception as exc:
                 response_data[key] = {"error": str(exc)}
+
     return JsonResponse(response_data, safe=False)
 
 @csrf_exempt
