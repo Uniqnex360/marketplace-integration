@@ -533,6 +533,7 @@ def RevenueWidgetAPIView(request):
 def updatedRevenueWidgetAPIView(request):
     from django.utils import timezone
     import pytz
+    start = time.time()
     from concurrent.futures import ThreadPoolExecutor
     json_request = JSONParser().parse(request)
     print("JSON parsing took", time.time() - start)
@@ -582,7 +583,7 @@ def updatedRevenueWidgetAPIView(request):
     updated_graph = {}
     
 
-    start = time.time()
+    
     total = future_total.result()
     print("Total revenue calculation took", time.time() - start)
     start = time.time()
