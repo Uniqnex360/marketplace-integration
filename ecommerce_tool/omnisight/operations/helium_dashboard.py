@@ -1,8 +1,6 @@
 from __future__ import annotations
 import pandas as pd
 from mongoengine import Q
-import logging
-import hashlib
 from omnisight.models import OrderItems,Order,Marketplace,Product,CityDetails,user,notes_data,chooseMatrix,Fee,Refund,Brand,inventry_log,productPriceChange
 from mongoengine.queryset.visitor import Q
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -50,6 +48,7 @@ from concurrent.futures import ThreadPoolExecutor
 import math
 from omnisight.models import *
 from django.utils import timezone
+from concurrent.futures import ThreadPoolExecutor
 from rest_framework.parsers import JSONParser
 from datetime import datetime
 from datetime import datetime, timedelta
@@ -1271,12 +1270,10 @@ def clean_json_floats(obj):
     elif isinstance(obj, list):
         return [clean_json_floats(i) for i in obj]
     return obj
-
 @csrf_exempt
 def getPeriodWiseData(request):
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     brand_id = json_request.get('brand_id', [])
@@ -1284,77 +1281,33 @@ def getPeriodWiseData(request):
     manufacturer_name = json_request.get('manufacturer_name', [])
     fulfillment_channel = json_request.get('fulfillment_channel', None)
     timezone_str = 'US/Pacific'
-    
-    # Create cache key for the request parameters
-    cache_params = f"{marketplace_id}_{brand_id}_{product_id}_{manufacturer_name}_{fulfillment_channel}_{timezone_str}"
-    cache_key_base = hashlib.md5(cache_params.encode()).hexdigest()
-    
-    def get_cached_or_calculate_metrics(start_date, end_date, cache_suffix=""):
-        """Get metrics from cache or calculate if not cached"""
-        cache_key = f"metrics_{cache_key_base}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}_{cache_suffix}"
-        
-        cached_result = cache.get(cache_key)
-        if cached_result is not None:
-            return cached_result
-        logger = logging.getLogger(__name__)
-
-# In your cached function:
-        if cached_result is not None:
-            logger.info(f"Cache HIT for {cache_key}")
-        else:
-            logger.info(f"Cache MISS for {cache_key}")
-        # Calculate metrics with threading enabled for better performance
-        result = calculate_metricss(
+    def calculate_metrics_sync(start_date, end_date):
+        return calculate_metricss(
             start_date, end_date, 
             marketplace_id, brand_id, 
             product_id, manufacturer_name, 
             fulfillment_channel,
             timezone_str, False,
-            use_threads=True  # Enable threading for individual calculations
+            use_threads=False
         )
-        
-        # Cache historical data for longer (they don't change)
-        # Cache recent data for shorter periods (they might change)
-        if end_date < datetime.now().replace(tzinfo=start_date.tzinfo) - timedelta(days=2):
-            cache_timeout = 86400  # 24 hours for historical data
-        else:
-            cache_timeout = 1800   # 30 minutes for recent data
-            
-        cache.set(cache_key, result, cache_timeout)
-        return result
-
     def format_period_metrics(label, current_start, current_end, prev_start, prev_end):
-        # Use parallel execution for current and previous period calculations
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            current_future = executor.submit(get_cached_or_calculate_metrics, current_start, current_end, "current")
-            previous_future = executor.submit(get_cached_or_calculate_metrics, prev_start, prev_end, "previous")
-            
-            current_metrics = current_future.result()
-            previous_metrics = previous_future.result()
-        
+        current_metrics = calculate_metrics_sync(current_start, current_end)
         period_format = {
             "current": {"from": to_utc_format(current_start)},
             "previous": {"from": to_utc_format(prev_start)}
         }
-        
         if label not in ['Today', 'Yesterday']:
             period_format["current"]["to"] = to_utc_format(current_end)
             period_format["previous"]["to"] = to_utc_format(prev_end)
-        
         output = {
             "label": label,
             "period": period_format
         }
-        
-        # Combine current and previous metrics
         for key in current_metrics:
             output[key] = {
                 "current": current_metrics[key],
-                "previous": previous_metrics.get(key, 0)  # Add previous for comparison
             }
-        
         return output
-
     date_ranges = {
         "yesterday": get_date_range("Yesterday", timezone_str),
         "last7Days": get_date_range("Last 7 days", timezone_str),
@@ -1362,7 +1315,6 @@ def getPeriodWiseData(request):
         "yearToDate": get_date_range("This Year", timezone_str),
         "lastYear": get_date_range("Last Year", timezone_str)
     }
-
     period_jobs = [
         ("yesterday", "Yesterday", date_ranges["yesterday"][0], date_ranges["yesterday"][1],
          date_ranges["yesterday"][0] - timedelta(days=1), date_ranges["yesterday"][0] - timedelta(seconds=1)),
@@ -1373,23 +1325,18 @@ def getPeriodWiseData(request):
         ("yearToDate", "Year to Date", date_ranges["yearToDate"][0], date_ranges["yearToDate"][1],
          date_ranges["lastYear"][0], date_ranges["lastYear"][1])
     ]
-
     response_data = {}
-    
-    # Process all periods in parallel
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         future_to_label = {
             executor.submit(format_period_metrics, label, cur_start, cur_end, prev_start, prev_end): key
             for key, label, cur_start, cur_end, prev_start, prev_end in period_jobs
         }
-        
         for future in as_completed(future_to_label):
             key = future_to_label[future]
             try:
                 response_data[key] = future.result()
             except Exception as exc:
                 response_data[key] = {"error": str(exc)}
-
     return JsonResponse(response_data, safe=False)
 
 @csrf_exempt
@@ -1532,6 +1479,11 @@ def exportPeriodWiseCSV(request):
     return response
 @csrf_exempt
 def getPeriodWiseDataCustom(request):
+    import pytz
+    from datetime import datetime, timedelta
+    from rest_framework.parsers import JSONParser
+    from django.http import JsonResponse
+    from concurrent.futures import ThreadPoolExecutor
     
     def to_utc_format(dt):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2878,125 +2830,104 @@ def getProfitAndLossDetails(request):
         from_date, to_date = get_date_range(preset, timezone)
 
     def pLcalculate_metrics(start_date, end_date, marketplace_id, brand_id, product_id,
-                        manufacturer_name, fulfillment_channel, timezone):
-    # Initialize variables
+                            manufacturer_name, fulfillment_channel, timezone):
         gross_revenue = total_cogs = refund = net_profit = margin = total_units = 0
         shipping_cost = channel_fee = product_cost = vendor_funding = tax_price = temp_price = 0
         sku_set = set()
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
 
-    # Fetch gross revenue data
         result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id,
-                          manufacturer_name, fulfillment_channel, timezone)
-
-    # Collect all item IDs
+                              manufacturer_name, fulfillment_channel, timezone)
         all_item_ids = []
         for order in result:
             all_item_ids.extend(order['order_items'])
 
-    # Use a cursor to stream data instead of loading all into memory
         item_pipeline = [
             {"$match": {"_id": {"$in": all_item_ids}}},
             {"$lookup": {
                 "from": "product",
                 "localField": "ProductDetails.product_id",
-            "foreignField": "_id",
-            "as": "product_ins"
-        }},
-        {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
-        {"$project": {
-            "_id": 1,
-            "price": "$Pricing.ItemPrice.Amount",
-            "tax_price": "$Pricing.ItemTax.Amount",
-            "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-            "sku": "$product_ins.sku",
-            "category": "$product_ins.category",
-            "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-            "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-            "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-            "a_shipping_cost": {"$ifNull": ["$product_ins.a_shipping_cost", 0]},
-            "w_shiping_cost": {"$ifNull": ["$product_ins.w_shiping_cost", 0]},
-            "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
-            "walmart_fee": {"$ifNull": ["$product_ins.walmart_fee", 0]},
-            "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
-            "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]}
-        }}
-    ]
+                "foreignField": "_id",
+                "as": "product_ins"
+            }},
+            {"$unwind": {"path": "$product_ins", "preserveNullAndEmptyArrays": True}},
+            {"$project": {
+                "_id": 1,
+                "price": "$Pricing.ItemPrice.Amount",
+                "tax_price": "$Pricing.ItemTax.Amount",
+                "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
+                "sku": "$product_ins.sku",
+                "category": "$product_ins.category",
+                "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
+                "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                "a_shipping_cost": {"$ifNull": ["$product_ins.a_shipping_cost", 0]},
+                "w_shiping_cost": {"$ifNull": ["$product_ins.w_shiping_cost", 0]},
+                "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
+                "walmart_fee": {"$ifNull": ["$product_ins.walmart_fee", 0]},
+                "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
+                "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]}
+            }}
+        ]
+        item_results = list(OrderItems.objects.aggregate(*item_pipeline))
+        item_lookup = {item['_id']: item for item in item_results}
 
-    # Use a cursor to stream data
-        item_cursor = OrderItems.objects.aggregate(item_pipeline, allowDiskUse=True)
-        item_lookup = {}
-
-    # Process data in batches
-        batch_size = 1000
-        batch = []
-        for item in item_cursor:
-            batch.append(item)
-        if len(batch) >= batch_size:
-            # Process batch
-            for item in batch:
-                item_lookup[item['_id']] = item
-            batch = []
-
-    # Process remaining items in the last batch
-        for item in batch:
-            item_lookup[item['_id']] = item
-
-    # Rest of the processing logic remains the same
         for order in result:
             gross_revenue += order['order_total']
             total_units += order['items_order_quantity']
+            # Sum shipping cost ONCE per order (not per item)
             shipping_cost += order.get('shipping_price', 0) or 0
 
-        for item_id in order['order_items']:
-            item_data = item_lookup.get(item_id)
-            if not item_data:
-                continue
-            temp_price += item_data['price']
-            tax_price += item_data['tax_price']
-            if order['marketplace_name'] == "Amazon":
-                total_cogs += item_data['total_cogs']
-                channel_fee += item_data['referral_fee']
-                product_cost += item_data['product_cost']
-            else:
-                total_cogs += item_data['w_total_cogs']
-                channel_fee += item_data['walmart_fee']
-                product_cost += item_data['w_product_cost']
-            vendor_funding += item_data['vendor_funding']
-            sku_set.add(item_data.get('sku'))
-            category = item_data.get('category', 'Unknown')
-            product_categories[category] = product_categories.get(category, 0) + 1
-            if item_data['price'] and item_data['total_cogs'] and item_data.get('sku'):
-                product_completeness["complete"] += 1
-            else:
-                product_completeness["incomplete"] += 1
+            for item_id in order['order_items']:
+                item_data = item_lookup.get(item_id)
+                if not item_data:
+                    continue
+                temp_price += item_data['price']
+                tax_price += item_data['tax_price']
+                if order['marketplace_name'] == "Amazon":
+                    total_cogs += item_data['total_cogs']
+                    channel_fee += item_data['referral_fee']
+                    product_cost += item_data['product_cost']
+                else:
+                    total_cogs += item_data['w_total_cogs']
+                    channel_fee += item_data['walmart_fee']
+                    product_cost += item_data['w_product_cost']
+                vendor_funding += item_data['vendor_funding']
+                sku_set.add(item_data.get('sku'))
+                category = item_data.get('category', 'Unknown')
+                product_categories[category] = product_categories.get(category, 0) + 1
+                if item_data['price'] and item_data['total_cogs'] and item_data.get('sku'):
+                    product_completeness["complete"] += 1
+                else:
+                    product_completeness["incomplete"] += 1
 
         net_profit = (temp_price - total_cogs) + vendor_funding
         margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
 
         return {
             "grossRevenue": round(gross_revenue, 2),
-        "expenses": round(total_cogs, 2),
-        "netProfit": round(net_profit, 2),
-        "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs else 0,
-        "unitsSold": total_units,
-        "refunds": refund,
-        "skuCount": len(sku_set),
-        "sessions": 0,
-        "pageViews": 0,
-        "unitSessionPercentage": 0,
-        "margin": round(margin, 2),
-        "seller": "",
-        "tax_price": tax_price,
-        "total_cogs": total_cogs,
-        "product_cost": product_cost,
-        "shipping_cost": shipping_cost,
-        "productCategories": product_categories,
-        "productCompleteness": product_completeness,
-        "base_price": temp_price,
-        "channel_fee": channel_fee
-    }
+            "expenses": round(total_cogs, 2),
+            "netProfit": round(net_profit, 2),
+            "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs else 0,
+            "unitsSold": total_units,
+            "refunds": refund,
+            "skuCount": len(sku_set),
+            "sessions": 0,
+            "pageViews": 0,
+            "unitSessionPercentage": 0,
+            "margin": round(margin, 2),
+            "seller": "",
+            "tax_price": tax_price,
+            "total_cogs": total_cogs,
+            "product_cost": product_cost,
+            "shipping_cost": shipping_cost,
+            "productCategories": product_categories,
+            "productCompleteness": product_completeness,
+            "base_price": temp_price,
+            "channel_fee": channel_fee
+        }
+
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to,
                                marketplace_id, brand_id, product_id,
                                manufacturer_name, fulfillment_channel, preset, timezone):
