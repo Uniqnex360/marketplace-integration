@@ -743,7 +743,10 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     return converted_graph_data
 
 
-def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None,timezone_str="UTC"):
+def totalRevenueCalculation(
+    start_date, end_date, marketplace_id=None, brand_id=None, product_id=None,
+    manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"
+):
     total = dict()
     gross_revenue = 0
     total_cogs = 0
@@ -755,9 +758,17 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     vendor_funding = 0
     refund_quantity_ins = 0
 
-    result = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
-    refund_ins = refundOrder(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone_str)
+    # Fetch all orders and refunds
+    result = grossRevenue(
+        start_date, end_date, marketplace_id, brand_id, product_id,
+        manufacturer_name, fulfillment_channel, timezone_str
+    )
+    refund_ins = refundOrder(
+        start_date, end_date, marketplace_id, brand_id, product_id,
+        manufacturer_name, fulfillment_channel, timezone_str
+    )
 
+    # Calculate refund totals
     if refund_ins:
         for ins in refund_ins:
             refund += ins['order_total']
@@ -765,68 +776,53 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
 
     total_orders = len(result)
 
-    def process_order(order):
-        nonlocal gross_revenue, total_cogs, total_units, temp_other_price, vendor_funding
+    # --- Batch fetch all order item IDs ---
+    all_item_ids = []
+    for order in result:
+        all_item_ids.extend(order['order_items'])
 
-        tax_price = 0
+    # Remove duplicates, just in case
+    all_item_ids = list(set(all_item_ids))
+
+    # --- Batch fetch all OrderItems ---
+    item_docs = list(OrderItems.objects.filter(_id__in=all_item_ids))
+    item_dict = {str(item['_id']): item for item in item_docs}
+
+    # --- Batch fetch all Product IDs ---
+    product_ids = set()
+    for item in item_docs:
+        pid = item.get('ProductDetails', {}).get('product_id')
+        if pid:
+            product_ids.add(pid)
+
+    # --- Batch fetch all Products ---
+    product_docs = list(Product.objects.filter(_id__in=list(product_ids)))
+    product_dict = {str(prod['_id']): prod for prod in product_docs}
+
+    # --- Process orders ---
+    for order in result:
         gross_revenue += order['order_total']
         total_units += order['items_order_quantity']
 
-        for j in order['order_items']:
-            pipeline = [
-                {
-                    "$match": {
-                        "_id": j
-                    }
-                },
-                {
-                    "$lookup": {
-                        "from": "product",
-                        "localField": "ProductDetails.product_id",
-                        "foreignField": "_id",
-                        "as": "product_ins"
-                    }
-                },
-                {
-                    "$unwind": {
-                        "path": "$product_ins",
-                        "preserveNullAndEmptyArrays": True
-                    }
-                },
-                {
-                    "$project": {
-                        "_id": 0,
-                        "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
-                        "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
-                        "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
-                        "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
-                        "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
-                        "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                    }
-                }
-            ]
-            result = list(OrderItems.objects.aggregate(*pipeline))
-            if result:
-                tax_price += result[0]['tax_price']
-                temp_other_price += result[0]['price']
+        for item_id in order['order_items']:
+            item = item_dict.get(str(item_id))
+            if not item:
+                continue
+            product_id = item.get('ProductDetails', {}).get('product_id')
+            product = product_dict.get(str(product_id))
+            price = item.get('Pricing', {}).get('ItemPrice', {}).get('Amount', 0)
+            tax_price = item.get('Pricing', {}).get('ItemTax', {}).get('Amount', 0)
+            cogs = product.get('cogs', 0.0) if product else 0.0
+            total_cogs_val = product.get('total_cogs', 0) if product else 0
+            w_total_cogs = product.get('w_total_cogs', 0) if product else 0
+            vendor_funding_val = product.get('vendor_funding', 0) if product else 0
 
-                if order['marketplace_name'] == "Amazon":
-                    total_cogs += result[0]['total_cogs']
-                else:
-                    total_cogs += result[0]['w_total_cogs']
-                
-                vendor_funding += result[0]['vendor_funding']
-
-    # Create threads for processing orders
-    threads = []
-    for order in result:
-        thread = threading.Thread(target=process_order, args=(order,))
-        threads.append(thread)
-        thread.start()
-
-    # Wait for all threads to complete
-    for thread in threads:
-        thread.join()
+            temp_other_price += price
+            if order['marketplace_name'] == "Amazon":
+                total_cogs += total_cogs_val
+            else:
+                total_cogs += w_total_cogs
+            vendor_funding += vendor_funding_val
 
     # Calculate net profit
     net_profit = (temp_other_price - total_cogs) + vendor_funding
@@ -842,7 +838,6 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
         "refund_quantity": refund_quantity_ins
     }
     return total
-
 
 def calculate_metricss(
     from_date,
