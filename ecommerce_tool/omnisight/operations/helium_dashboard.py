@@ -2945,7 +2945,11 @@ def getProfitAndLossDetails(request):
         for order in result:
             gross_revenue += order['order_total']
             total_units += order['items_order_quantity']
-            shipping_cost += order.get('shipping_price', 0) or 0 #added shipping cost
+            order_shipping_cost = order.get('shipping_price', 0) or 0
+            shipping_cost += order_shipping_cost  # Track total shipping cost
+            
+            # Add shipping cost to total_cogs
+            total_cogs += order_shipping_cost
 
             for item_id in order['order_items']:
                 item_data = item_lookup.get(item_id)
@@ -2954,11 +2958,11 @@ def getProfitAndLossDetails(request):
                 temp_price += item_data['price']
                 tax_price += item_data['tax_price']
                 if order['marketplace_name'] == "Amazon":
-                    total_cogs += item_data['total_cogs']
+                    total_cogs += item_data['product_cost']  # Changed to product_cost
                     channel_fee += item_data['referral_fee']
                     product_cost += item_data['product_cost']
                 else:
-                    total_cogs += item_data['w_total_cogs']
+                    total_cogs += item_data['w_product_cost']  # Changed to w_product_cost
                     channel_fee += item_data['walmart_fee']
                     product_cost += item_data['w_product_cost']
                 vendor_funding += item_data['vendor_funding']
