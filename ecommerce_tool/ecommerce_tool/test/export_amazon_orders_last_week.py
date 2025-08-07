@@ -191,6 +191,35 @@ def load_report_to_dataframe(file_path):
     return df
 
 # # Main execution
+def create_order_report(access_token, start_date, end_date):
+    """Create an order report with all available fields"""
+    url = "https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports"
+    
+    headers = {
+        "x-amz-access-token": access_token,
+        "Content-Type": "application/json"
+    }
+    
+    # Request GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL report type
+    # This includes shipping costs and fees
+    payload = {
+        "reportType": "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
+        "dataStartTime": start_date,
+        "dataEndTime": end_date,
+        "marketplaceIds": ["ATVPDKIKX0DER"]  # US marketplace
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    
+    if response.status_code == 202:
+        report_id = response.json()["reportId"]
+        print(f"✅ Report created with ID: {report_id}")
+        return report_id
+    else:
+        print(f"❌ Failed to create report: {response.status_code}")
+        print(response.text)
+        return None
+
 def get_amazon_orders_report(start_date: datetime, end_date: datetime):
     access_token = get_amazon_access_token()
     if not access_token:
@@ -232,8 +261,52 @@ def get_amazon_orders_report(start_date: datetime, end_date: datetime):
 
     if 'purchase-date' in df.columns:
         df_today = df[df['purchase-date'].apply(is_today_pacific)]
+        
+        # Print available columns to see what fields we have
+        print("\n📊 Available columns in the report:")
+        print(df.columns.tolist())
+        
+        # Key fields to look for:
+        # - shipping-price: Shipping charged to customer
+        # - shipping-tax: Tax on shipping
+        # - item-price: Product price
+        # - item-tax: Tax on product
+        # - item-promotion-discount: Promotional discounts
+        # - ship-promotion-discount: Shipping promotional discounts
+        # - commission: Amazon's commission fee
+        # - fba-fees: Fulfillment by Amazon fees
+        
+        # Save with all columns
         df_today.to_excel(filename.replace(".tsv", "_today.xlsx"), index=False)
-        print(f"📁 Excel saved: {filename.replace('.tsv', '_today.xlsx')}")
+        print(f"📁 Excel saved with all fields: {filename.replace('.tsv', '_today.xlsx')}")
+        
+        # Create a summary with key financial fields
+        financial_columns = [
+            'amazon-order-id', 'purchase-date', 'order-status',
+            'sku', 'product-name', 'quantity-purchased',
+            'item-price', 'item-tax', 'shipping-price', 'shipping-tax',
+            'item-promotion-discount', 'ship-promotion-discount',
+            'currency'
+        ]
+        
+        # Only include columns that exist in the dataframe
+        available_financial_cols = [col for col in financial_columns if col in df_today.columns]
+        df_summary = df_today[available_financial_cols].copy()
+        
+        # Calculate total per order if price columns exist
+        if 'item-price' in df_summary.columns and 'shipping-price' in df_summary.columns:
+            df_summary['total-charged'] = (
+                df_summary['item-price'].fillna(0) + 
+                df_summary['shipping-price'].fillna(0) +
+                df_summary['item-tax'].fillna(0) +
+                df_summary['shipping-tax'].fillna(0) -
+                df_summary['item-promotion-discount'].fillna(0) -
+                df_summary['ship-promotion-discount'].fillna(0)
+            )
+        
+        df_summary.to_excel(filename.replace(".tsv", "_financial_summary.xlsx"), index=False)
+        print(f"📁 Financial summary saved: {filename.replace('.tsv', '_financial_summary.xlsx')}")
+        
         return df_today
     else:
         print("❌ 'purchase-date' column not found in report.")

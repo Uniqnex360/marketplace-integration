@@ -706,16 +706,13 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
 
         graph_data[time_key] = {
             "gross_revenue": round(gross_revenue, 2),
-            "gross_revenue_with_tax": round(gross_revenue, 2),        # or update this if actual tax breakdown is available
-            "gross_revenue_without_tax": round(gross_revenue, 2),     # or subtract tax if tax amount is calculated
             "net_profit": round(net_profit, 2),
             "profit_margin": profit_margin,
             "orders": len(bucket_orders),
             "units_sold": total_units,
             "refund_amount": round(refund_amount, 2),
             "refund_quantity": refund_quantity
-}
-
+        }
 
     # Process time buckets with limited threading
     from concurrent.futures import ThreadPoolExecutor
@@ -825,17 +822,18 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     # Step 4: Aggregate with marketplace-aware COGS logic
     for item in item_results:
         item_id = str(item["_id"])
-        temp_other_price += item["product_cost"]
-        total_price += item["price"]
+        temp_other_price += item["price"]
+
+        # total_price += item["price"]
         marketplace = item_marketplace_map.get(item_id, "")
         if marketplace == "Amazon":
             total_cogs += item["total_cogs"]
         else:
             total_cogs += item["w_total_cogs"]
         vendor_funding += item.get("vendor_funding", 0)
-        vendor_discount += item.get("vendor_discount", 0)
+        # vendor_discount += item.get("vendor_discount", 0)
 
-    
+    # Step 5: Net profit (your custom logic)
     net_profit = (temp_other_price - total_cogs) + vendor_funding
 
     # Step 6: Final totals
