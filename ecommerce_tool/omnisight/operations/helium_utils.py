@@ -223,7 +223,6 @@ def get_date_range(preset, time_zone_str="UTC"):
 def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None, 
                 product_id=None, manufacuture_name=[], fulfillment_channel=None, 
                 timezone='UTC'):    
-    # Convert local timezone dates to UTC
     if timezone != 'UTC':
         start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
     
@@ -285,13 +284,26 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     
     order_list = list(Order.objects.aggregate(*pipeline))
     
+    all_order_item_ids = []
+    for order_ins in order_list:
+        all_order_item_ids.extend(order_ins['order_items'])
+    
+    order_items_lookup = {}
+    if all_order_item_ids:
+        order_items = OrderItems.objects(id__in=all_order_item_ids)
+        for item in order_items:
+            order_items_lookup[item.id] = item
+    
     for order_ins in order_list:
         for marketplace in marketplace_list:
             order_ins['marketplace_name'] = marketplace['name']
-        tax=order_ins.get('TaxAmount',0.0)
-        if isinstance(tax,dict):
-            tax=tax.get('Amount',0.0)
-        order_ins['order_total']=round(order_ins.get('order_total',0.0)-tax,2)
+        tax_sum = 0.0
+        base_price=0.0
+        for item_id in order_ins['order_items']:
+            item = order_items_lookup.get(item_id)
+            if item and item.Pricing and item.Pricing.ItemTax and item.Pricing.ItemTax.Amount:
+                tax_sum += item.Pricing.ItemTax.Amount
+        order_ins['order_total'] = round(order_ins.get('order_total', 0.0) - tax_sum, 2)
     
     return order_list
 
