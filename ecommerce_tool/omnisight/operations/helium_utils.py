@@ -706,13 +706,16 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
 
         graph_data[time_key] = {
             "gross_revenue": round(gross_revenue, 2),
+            "gross_revenue_with_tax": round(gross_revenue, 2),        # or update this if actual tax breakdown is available
+            "gross_revenue_without_tax": round(gross_revenue, 2),     # or subtract tax if tax amount is calculated
             "net_profit": round(net_profit, 2),
             "profit_margin": profit_margin,
             "orders": len(bucket_orders),
             "units_sold": total_units,
             "refund_amount": round(refund_amount, 2),
             "refund_quantity": refund_quantity
-        }
+}
+
 
     # Process time buckets with limited threading
     from concurrent.futures import ThreadPoolExecutor
