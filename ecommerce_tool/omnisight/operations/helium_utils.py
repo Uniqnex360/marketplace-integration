@@ -957,13 +957,14 @@ def calculate_metricss(
                     item_platform_fees = (item_data.get('channel_fee', 0) + 
                                          item_data.get('fullfillment_by_channel_fee', 0) + 
                                          item_data.get('referral_fee', 0))
-                    item_shipping_cost = item_data.get('a_shipping_cost', 0)
+                    item_shipping_cost = item_data.get('shipping_price', 0)  # Order shipping price
+                    if not item_shipping_cost:
+                        item_shipping_cost = item_data.get('a_shipping_cost', 0)  # Product shipping cost
                     
                 else:
-                    # Walmart: w_product_cost + walmart_fee + w_shipping_cost
-                    item_product_cost = item_data.get('w_product_cost', 0)
-                    item_platform_fees = item_data.get('walmart_fee', 0)
-                    item_shipping_cost = item_data.get('w_shiping_cost', 0)
+                    item_shipping_cost = item_data.get('shipping_price', 0)  # Order shipping price  
+                    if not item_shipping_cost:
+                        item_shipping_cost = item_data.get('w_shiping_cost', 0)  # Product shipping cost
 
                 # Calculate total expense per unit
                 item_unit_expense = item_product_cost + item_platform_fees + item_shipping_cost
