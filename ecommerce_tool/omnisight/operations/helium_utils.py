@@ -850,7 +850,7 @@ def calculate_metricss(
     fulfillment_channel,
     timezone='UTC',
     include_extra_fields=False,
-    use_threads=True
+    use_threads=False
 ):
     gross_revenue = 0
     total_cogs = 0
@@ -1000,8 +1000,6 @@ def calculate_metricss(
         })
 
     return base_result
-
-
 
 def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None,timezone_str="UTC"):
     total = dict()
