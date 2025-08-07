@@ -969,7 +969,7 @@ def calculate_metricss(
                 item_unit_expense = item_product_cost + item_platform_fees + item_shipping_cost
                 
                 # Multiply by quantity ordered
-                item_total_expense = item_unit_expense * quantity_ordered+shipping_price
+                item_total_expense = item_unit_expense * quantity_ordered
                 
                 # Add to totals
                 total_expenses += item_total_expense
