@@ -599,6 +599,9 @@ def updatedRevenueWidgetAPIView(request):
             updated_graph[key] = {
                 "current_date": key,
                 "gross_revenue": metrics.get("gross_revenue_without_tax", 0),
+                "gross_revenue": metrics.get("gross_revenue_without_tax", 0),
+            "gross_revenue_with_tax": metrics.get("gross_revenue_with_tax", 0),
+            "gross_revenue_without_tax": metrics.get("gross_revenue_without_tax", 0),
                 "net_profit": metrics.get("net_profit", 0),
                 "profit_margin": metrics.get("profit_margin", 0),
                 "orders": metrics.get("orders", 0),
