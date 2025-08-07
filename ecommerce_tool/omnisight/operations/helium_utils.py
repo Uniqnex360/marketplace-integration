@@ -924,7 +924,7 @@ def calculate_metricss(
     item_details_map = {str(item['_id']): item for item in OrderItems.objects.aggregate(*item_pipeline)}
 
     def process_order(order):
-        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost,p_id
+        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost, p_id, total_expenses
 
         gross_revenue += order['order_total']
         total_units += order['items_order_quantity']
@@ -936,27 +936,25 @@ def calculate_metricss(
                 shipping_price = item_data.get("shipping_price", 0)
                 if not shipping_price:
                     shipping_price = item_data.get("a_shipping_cost", 0) or item_data.get("w_shiping_cost", 0)
-                shipping_cost += shipping_price
-                product_cost = item_data.get("product_cost", 0)
-                referral_fee = item_data.get("referral_fee", 0)
-                total_expenses += product_cost + referral_fee + shipping_price
-                if order.get('marketplace_name') == "Amazon":
-                    total_cogs += item_data.get('total_cogs', 0)
-                    shipping_cost += item_data.get('a_shipping_cost', 0)
-                else:
-                    total_cogs += item_data.get('w_total_cogs', 0)
-                    shipping_cost += item_data.get('w_shiping_cost', 0)
+            shipping_cost += shipping_price
+            product_cost = item_data.get("product_cost", 0)
+            referral_fee = item_data.get("referral_fee", 0)
+            total_expenses += product_cost + referral_fee + shipping_price
 
-                vendor_funding += item_data.get('vendor_funding', 0)
-                
+            if order.get('marketplace_name') == "Amazon":
+                total_cogs += item_data.get('total_cogs', 0)
+            else:
+                total_cogs += item_data.get('w_total_cogs', 0)
 
-                if item_data.get('sku'):
-                    sku_set.add(item_data['sku'])
+            vendor_funding += item_data.get('vendor_funding', 0)
 
-                try:
-                    p_id.add(item_data['p_id'])
-                except:
-                    pass
+            if item_data.get('sku'):
+                sku_set.add(item_data['sku'])
+
+            try:
+                p_id.add(item_data['p_id'])
+            except:
+                pass
 
     # Modified threading approach
     if use_threads:
