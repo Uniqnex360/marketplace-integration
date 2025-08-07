@@ -1776,7 +1776,7 @@ def allMarketplaceData(request):
                         continue
                     temp_price += item_data['price']
                     tax_price += item_data['tax_price']
-                    cogs_value = item_data['total_cogs'] if marketplace_name == "Amazon" else item_data['w_total_cogs']
+                    cogs_value = item_data['product_ins.product_cost'] if marketplace_name == "Amazon" else item_data['product_ins.w_product_cost']
                     total_cogs += cogs_value
                     vendor_funding += item_data['vendor_funding']
                     total_product_cost += item_data['price']
