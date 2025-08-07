@@ -2945,11 +2945,11 @@ def getProfitAndLossDetails(request):
         for order in result:
             gross_revenue += order['order_total']
             total_units += order['items_order_quantity']
-            order_shipping_cost = order.get('shipping_price', 0) or 0
-            shipping_cost += order_shipping_cost  # Track total shipping cost
+            shipping_price = order.get('shipping_price', 0)  # Get shipping from order
+            shipping_cost += shipping_price  # Track total shipping cost
             
             # Add shipping cost to total_cogs
-            total_cogs += order_shipping_cost
+            total_cogs += shipping_price
 
             for item_id in order['order_items']:
                 item_data = item_lookup.get(item_id)
@@ -2958,11 +2958,11 @@ def getProfitAndLossDetails(request):
                 temp_price += item_data['price']
                 tax_price += item_data['tax_price']
                 if order['marketplace_name'] == "Amazon":
-                    total_cogs += item_data['product_cost']  # Changed to product_cost
+                    total_cogs += item_data['product_cost']
                     channel_fee += item_data['referral_fee']
                     product_cost += item_data['product_cost']
                 else:
-                    total_cogs += item_data['w_product_cost']  # Changed to w_product_cost
+                    total_cogs += item_data['w_product_cost']
                     channel_fee += item_data['walmart_fee']
                     product_cost += item_data['w_product_cost']
                 vendor_funding += item_data['vendor_funding']
@@ -3000,6 +3000,7 @@ def getProfitAndLossDetails(request):
             "channel_fee": channel_fee
         }
 
+    # Rest of the function remains unchanged
     def create_period_response(label, cur_from, cur_to, prev_from, prev_to,
                                marketplace_id, brand_id, product_id,
                                manufacturer_name, fulfillment_channel, preset, timezone):
