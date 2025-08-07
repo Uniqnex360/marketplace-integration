@@ -199,7 +199,8 @@ def get_metrics_by_date_range(request):
     for item in bulk_results:
         order_items_lookup[item['_id']] = item
     for key, date_range in date_filters.items():
-        gross_revenue = 0
+        gross_revenue_without_tax = 0  
+        gross_revenue_with_tax = 0 
         total_cogs = 0
         refund = 0
         margin = 0
