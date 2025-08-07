@@ -948,6 +948,7 @@ def calculate_metricss(
                 
                 temp_price += item_data['price'] * quantity_ordered
                 tax_price += item_data.get('tax_price', 0) * quantity_ordered
+                shipping_price+=item_data.get('shipping_price',0)
 
                 # NEW EXPENSE CALCULATION LOGIC
                 if order.get('marketplace_name') == "Amazon":
@@ -968,7 +969,7 @@ def calculate_metricss(
                 item_unit_expense = item_product_cost + item_platform_fees + item_shipping_cost
                 
                 # Multiply by quantity ordered
-                item_total_expense = item_unit_expense * quantity_ordered
+                item_total_expense = item_unit_expense * quantity_ordered+shipping_price
                 
                 # Add to totals
                 total_expenses += item_total_expense
