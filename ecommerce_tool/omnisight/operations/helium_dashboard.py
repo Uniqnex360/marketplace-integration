@@ -1741,6 +1741,7 @@ def allMarketplaceData(request):
                     "sku": "$product_ins.sku",
                     "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
                     "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
+                        "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]}, # Add this line
 
                     "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                     "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
@@ -1772,13 +1773,16 @@ def allMarketplaceData(request):
             for order in order_list:
                 gross_revenue += order["order_total"]
                 total_units += order['items_order_quantity']
+                shipping_price = order.get('shipping_price', 0)  # Get shipping from order
+                total_cogs += shipping_price 
                 for item_id in order['order_items']:
                     item_data = item_map.get(item_id)
                     if not item_data:
                         continue
                     temp_price += item_data['price']
                     tax_price += item_data['tax_price']
-                    cogs_value = item_data['product_ins.product_cost'] if marketplace_name == "Amazon" else item_data['product_ins.w_product_cost']
+                    cogs_value = item_data['product_cost'] if marketplace_name == "Amazon" else item_data['w_product_cost']
+
                     total_cogs += cogs_value
                     vendor_funding += item_data['vendor_funding']
                     total_product_cost += item_data['price']
@@ -1833,18 +1837,23 @@ def allMarketplaceData(request):
         sku_set = set()
         vendor_funding = 0
         tax_price = 0
+        shipping_price=0
         for order in orders:
             gross_revenue += order['order_total']
             total_units += order['items_order_quantity']
+            shipping_price = order.get('shipping_price', 0) 
+            total_cogs+=shipping_price
             for item_id in order['order_items']:
                 item_data = item_map.get(item_id)
                 if not item_data:
                     continue
                 temp_price += item_data['price']
                 tax_price += item_data['tax_price']
+                shipping_price += item_data.get('shipping_price', 0)  # Use get with default
                 marketplace_name = order.get("marketplace_name", "Amazon")
                 total_cogs += item_data['product_cost'] if marketplace_name == "Amazon" else item_data['w_product_cost']
                 vendor_funding += item_data['vendor_funding']
+                total_cogs+=shipping_price
                 if item_data.get('sku'):
                     sku_set.add(item_data['sku'])
         net_profit = (temp_price - total_cogs) + vendor_funding
