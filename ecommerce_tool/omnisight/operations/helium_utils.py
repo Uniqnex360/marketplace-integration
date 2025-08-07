@@ -297,16 +297,17 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     for order_ins in order_list:
         for marketplace in marketplace_list:
             order_ins['marketplace_name'] = marketplace['name']
-        tax_sum = 0.0
-        base_price=0.0
-        for item_id in order_ins['order_items']:
-            item = order_items_lookup.get(item_id)
-            if item and item.Pricing and item.Pricing.ItemTax and item.Pricing.ItemTax.Amount:
-                tax_sum += item.Pricing.ItemTax.Amount
-        original_order_total = order_ins.get('order_total', 0.0)
-        order_ins=['original_order_total']=round(order_ins.get('original_order_total',0.0))
-        order_ins['order_total'] = round(order_ins.get('order_total', 0.0) - tax_sum, 2)
-    
+
+    tax_sum = 0.0
+    for item_id in order_ins['order_items']:
+        item = order_items_lookup.get(item_id)
+        if item and item.Pricing and item.Pricing.ItemTax and item.Pricing.ItemTax.Amount:
+            tax_sum += item.Pricing.ItemTax.Amount
+
+    original_order_total = order_ins.get('order_total', 0.0)
+    order_ins['original_order_total'] = round(original_order_total, 2)
+    order_ins['order_total'] = round(original_order_total - tax_sum, 2)
+
     return order_list
 
 
