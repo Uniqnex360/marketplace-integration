@@ -219,21 +219,16 @@ def get_date_range(preset, time_zone_str="UTC"):
     return today, (today + timedelta(days=1)).replace(hour=23, minute=59, second=59)
 
 
-
 def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None, 
-                 product_id=None, manufacuture_name=[], fulfillment_channel=None, 
-                 timezone='UTC'):
-    from collections import defaultdict
-
-    # Convert local timezone dates to UTC
+                product_id=None, manufacuture_name=[], fulfillment_channel=None, 
+                timezone='UTC'):    
     if timezone != 'UTC':
-        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
-
+        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
+    
     start_date = start_date.replace(tzinfo=None)
     end_date = end_date.replace(tzinfo=None)
-
-    # Step 1: Get marketplace info
-    marketplace_pipeline = [
+    
+    pipeline = [
         {
             "$project": {
                 "_id": 1,
@@ -242,20 +237,18 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
             }
         }
     ]
-    marketplace_list = list(Marketplace.objects.aggregate(*marketplace_pipeline))
-    marketplace_map = {str(m['_id']): m['name'] for m in marketplace_list}
-
-    # Step 2: Build order match filter
-    match = {
-        'order_date': {"$gte": start_date, "$lte": end_date},
-        'order_status': {"$nin": ["Canceled", "Cancelled"]},
-        'order_total': {"$gt": 0}
-    }
-
+    marketplace_list = list(Marketplace.objects.aggregate(*(pipeline)))
+    
+    match = dict()
+    match['order_date'] = {"$gte": start_date, "$lte": end_date}
+    match['order_status'] = {"$nin": ["Canceled", "Cancelled"]}
+    match['order_total'] = {"$gt": 0}
+    
     if fulfillment_channel:
         match['fulfillment_channel'] = fulfillment_channel
     if marketplace_id not in [None, "", "all", "custom"]:
         match['marketplace_id'] = ObjectId(marketplace_id)
+    
     if manufacuture_name not in [None, "", []]:
         ids = getproductIdListBasedonManufacture(manufacuture_name, start_date, end_date)
         match["_id"] = {"$in": ids}
@@ -267,61 +260,56 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
         brand_id = [ObjectId(bid) for bid in brand_id]
         ids = getproductIdListBasedonbrand(brand_id, start_date, end_date)
         match["_id"] = {"$in": ids}
-
-    # Step 3: Get matching orders
-    order_pipeline = [
-        {"$match": match},
-        {"$project": {
-            "_id": 1,
-            "order_date": 1,
-            "order_items": 1,
-            "order_total": 1,
-            "marketplace_id": 1,
-            "currency": 1,
-            "shipping_address": 1,
-            "shipping_information": 1,
-            "shipping_price": {"$ifNull": ["$shipping_price", 0.0]},
-            "items_order_quantity": {"$ifNull": ["$items_order_quantity", 0]},
-        }}
+    
+    pipeline = [
+        {
+            "$match": match
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "order_date": 1,
+                "order_items": 1,
+                "order_total": 1,
+                "marketplace_id": 1,
+                "currency": 1,
+                "shipping_address": 1,
+                "shipping_information": 1,
+                "shipping_price": {"$ifNull": ["$shipping_price", 0.0]},
+                "items_order_quantity": {"$ifNull": ["$items_order_quantity", 0]},
+            }
+        }
     ]
+    
+    order_list = list(Order.objects.aggregate(*pipeline))
+    
+    all_order_item_ids = []
+    for order_ins in order_list:
+        all_order_item_ids.extend(order_ins['order_items'])
+    
+    order_items_lookup = {}
+    if all_order_item_ids:
+        order_items = OrderItems.objects(id__in=all_order_item_ids)
+        for item in order_items:
+            order_items_lookup[item.id] = item
+    
+    for order_ins in order_list:
+        for marketplace in marketplace_list:
+            order_ins['marketplace_name'] = marketplace['name']
 
-    order_list = list(Order.objects.aggregate(*order_pipeline))
+    tax_sum = 0.0
+    for item_id in order_ins['order_items']:
+        item = order_items_lookup.get(item_id)
+        if item and item.Pricing and item.Pricing.ItemTax and item.Pricing.ItemTax.Amount:
+            tax_sum += item.Pricing.ItemTax.Amount
 
-    # Step 4: Collect all item IDs and map them to their orders
-    all_item_ids = []
-    order_id_to_items = {}
-    for order in order_list:
-        items = order.get('order_items', [])
-        order_id_to_items[order['_id']] = items
-        all_item_ids.extend(items)
-
-    # Step 5: Fetch tax info from order items
-    item_pipeline = [
-        {"$match": {"_id": {"$in": all_item_ids}}},
-        {"$project": {
-            "_id": 1,
-            "tax_amount": {"$ifNull": ["$Pricing.ItemTax.Amount", 0.0]}
-        }}
-    ]
-    item_results = list(OrderItems.objects.aggregate(*item_pipeline))
-
-    # Step 6: Map item ID to tax
-    item_tax_map = {item['_id']: item['tax_amount'] for item in item_results}
-
-    # Step 7: Subtract total tax from each order and assign marketplace name
-    for order in order_list:
-        order_id = order['_id']
-        item_ids = order_id_to_items.get(order_id, [])
-        total_tax = sum(item_tax_map.get(item_id, 0.0) for item_id in item_ids)
-
-        # Subtract tax from order total
-        order['order_total'] = round(order.get('order_total', 0.0) - total_tax, 2)
-
-        # Assign marketplace name
-        marketplace_id = order.get('marketplace_id')
-        order['marketplace_name'] = marketplace_map.get(str(marketplace_id), 'Unknown')
+    original_order_total = order_ins.get('order_total', 0.0)
+    order_ins['original_order_total'] = round(original_order_total, 2)
+    order_ins['order_total'] = round(original_order_total - tax_sum, 2)
 
     return order_list
+
+
 def get_previous_periods(current_start, current_end):
     # Calculate the duration of the current period
     period_duration = current_end - current_start
