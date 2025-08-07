@@ -1720,6 +1720,7 @@ def allMarketplaceData(request):
     marketplace_dict = {
         str(mp.id): mp.name for mp in Marketplace.objects.only("id", "name")
     }
+    
     def fetch_item_details_bulk(item_ids):
         pipeline = [
             {"$match": {"_id": {"$in": item_ids}}},
@@ -1741,10 +1742,11 @@ def allMarketplaceData(request):
                     "sku": "$product_ins.sku",
                     "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
                     "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
-                        "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]}, # Add this line
-
+                    "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]},
                     "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                     "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                    "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
+                    "walmart_fee": {"$ifNull": ["$product_ins.walmart_fee", 0]},
                 }
             }
         ]
@@ -1752,6 +1754,7 @@ def allMarketplaceData(request):
             item["_id"]: item
             for item in OrderItems.objects.aggregate(*pipeline)
         }
+    
     def process_orders(orders):
         all_item_ids = [item_id for order in orders for item_id in order["order_items"]]
         item_map = fetch_item_details_bulk(all_item_ids)
@@ -1759,39 +1762,58 @@ def allMarketplaceData(request):
         for order in orders:
             key = (order.get("marketplace_id"), order.get("currency"))
             grouped_orders[key].append(order)
+
         marketplace_metrics = defaultdict(lambda: {"currency_list": []})
         for (mp_id, currency), order_list in grouped_orders.items():
             gross_revenue = 0
             total_cogs = 0
             total_units = 0
             tax_price = 0
-            total_product_cost = 0
             temp_price = 0
             vendor_funding = 0
+            channel_fee = 0
+            shipping_cost = 0
+            product_cost = 0
             sku_set = set()
             marketplace_name = marketplace_dict.get(str(mp_id), "")
+
             for order in order_list:
                 gross_revenue += order["order_total"]
                 total_units += order['items_order_quantity']
-                shipping_price = order.get('shipping_price', 0)  # Get shipping from order
-                total_cogs += shipping_price 
+                
+                # Add shipping cost once per order (not per item)
+                order_shipping_price = order.get('shipping_price', 0)
+                shipping_cost += order_shipping_price
+                total_cogs += order_shipping_price
+
                 for item_id in order['order_items']:
                     item_data = item_map.get(item_id)
                     if not item_data:
                         continue
+                        
                     temp_price += item_data['price']
                     tax_price += item_data['tax_price']
-                    cogs_value = item_data['product_cost'] if marketplace_name == "Amazon" else item_data['w_product_cost']
-
-                    total_cogs += cogs_value
+                    
+                    # Marketplace-specific cost calculation
+                    if marketplace_name == "Amazon":
+                        total_cogs += item_data['product_cost']
+                        channel_fee += item_data['referral_fee']
+                        product_cost += item_data['product_cost']
+                    else:  # Walmart
+                        total_cogs += item_data['w_product_cost']
+                        channel_fee += item_data['walmart_fee']
+                        product_cost += item_data['w_product_cost']
+                    
                     vendor_funding += item_data['vendor_funding']
-                    total_product_cost += item_data['price']
+                    
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
+
             expenses = total_cogs
             net_profit = (temp_price - expenses) + vendor_funding
             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
+
             currency_data = {
                 "currency": currency,
                 "grossRevenue": round(gross_revenue, 2),
@@ -1808,10 +1830,12 @@ def allMarketplaceData(request):
                 "seller": "",
                 "tax_price": round(tax_price, 2),
                 "total_cogs": round(total_cogs, 2),
-                "product_cost": round(total_product_cost, 2),
-                "shipping_cost": 0
+                "product_cost": round(product_cost, 2),
+                "shipping_cost": round(shipping_cost, 2),
+                "channel_fee": round(channel_fee, 2)
             }
             marketplace_metrics[marketplace_name]["currency_list"].append(currency_data)
+            
         return [
             {
                 "image": (
@@ -1825,40 +1849,60 @@ def allMarketplaceData(request):
             }
             for mp, data in marketplace_metrics.items()
         ]
+    
     def calculate_metrics(orders):
         all_item_ids = [item_id for order in orders for item_id in order["order_items"]]
         item_map = fetch_item_details_bulk(all_item_ids)
+        
         gross_revenue = 0
         total_cogs = 0
-        net_profit = 0
-        margin = 0
         total_units = 0
         temp_price = 0
         sku_set = set()
         vendor_funding = 0
         tax_price = 0
-        shipping_price=0
+        shipping_cost = 0
+        product_cost = 0
+        channel_fee = 0
+
         for order in orders:
             gross_revenue += order['order_total']
             total_units += order['items_order_quantity']
-            shipping_price = order.get('shipping_price', 0) 
-            total_cogs+=shipping_price
+            
+            # Add shipping cost once per order
+            order_shipping_price = order.get('shipping_price', 0)
+            shipping_cost += order_shipping_price
+            total_cogs += order_shipping_price
+            
+            marketplace_name = order.get("marketplace_name", "Amazon")
+
             for item_id in order['order_items']:
                 item_data = item_map.get(item_id)
                 if not item_data:
                     continue
+                    
                 temp_price += item_data['price']
                 tax_price += item_data['tax_price']
-                shipping_price += item_data.get('shipping_price', 0)  # Use get with default
-                marketplace_name = order.get("marketplace_name", "Amazon")
-                total_cogs += item_data['product_cost'] if marketplace_name == "Amazon" else item_data['w_product_cost']
+                
+                # Marketplace-specific cost calculation
+                if marketplace_name == "Amazon":
+                    total_cogs += item_data['product_cost']
+                    channel_fee += item_data['referral_fee']
+                    product_cost += item_data['product_cost']
+                else:  # Walmart
+                    total_cogs += item_data['w_product_cost']
+                    channel_fee += item_data['walmart_fee']
+                    product_cost += item_data['w_product_cost']
+                
                 vendor_funding += item_data['vendor_funding']
-                total_cogs+=shipping_price
+                
                 if item_data.get('sku'):
                     sku_set.add(item_data['sku'])
+
         net_profit = (temp_price - total_cogs) + vendor_funding
         margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
         roi = (net_profit / total_cogs) * 100 if total_cogs > 0 else 0
+        
         return {
             "grossRevenue": round(gross_revenue, 2),
             "expenses": round(total_cogs, 2),
@@ -1874,20 +1918,24 @@ def allMarketplaceData(request):
             "seller": "",
             "tax_price": round(tax_price, 2),
             "total_cogs": round(total_cogs, 2),
-            "product_cost": round(gross_revenue, 2),
-            "shipping_cost": 0
+            "product_cost": round(product_cost, 2),
+            "shipping_cost": round(shipping_cost, 2),
+            "channel_fee": round(channel_fee, 2)
         }
+    
     def create_period_response(cur_from, cur_to, prev_from, prev_to):
         current_orders = grossRevenue(cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
         previous_orders = grossRevenue(prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
         current = calculate_metrics(current_orders)
         previous = calculate_metrics(previous_orders)
+        
         def with_delta(metric):
             return {
                 "current": current[metric],
                 "previous": previous[metric],
                 "delta": round(current[metric] - previous[metric], 2)
             }
+        
         return {
             "all_marketplace": {
                 metric: with_delta(metric) for metric in [
@@ -1897,14 +1945,17 @@ def allMarketplaceData(request):
             },
             "marketplace_list": process_orders(current_orders)
         }
+    
     custom_duration = to_date - from_date
     prev_from_date = from_date - custom_duration
     prev_to_date = to_date - custom_duration
+    
     response_data = {
         "custom": create_period_response(from_date, to_date, prev_from_date, prev_to_date),
         "from_date": from_date,
         "to_date": to_date
     }
+    
     return JsonResponse(response_data, safe=False)
 @csrf_exempt
 def allMarketplaceDataxl(request):
