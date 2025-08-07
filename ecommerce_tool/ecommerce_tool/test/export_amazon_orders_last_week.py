@@ -98,20 +98,20 @@
 # # print(f"   • Fee records found: {fees_today.count()}")
 # # if sku_qty_map:
 # #     print(f"   • Sample SKU quantities: {dict(list(sku_qty_map.items())[:3])}")
-# import os
-# import json
-# import time
-# import requests
-# import pandas as pd
-# from datetime import datetime
-# import pytz
-# from ecommerce_tool.settings import (
-#     AMAZON_API_KEY,
-#     AMAZON_SECRET_KEY,
-#     REFRESH_TOKEN,
-#     MARKETPLACE_ID
-# )
-# pacific = pytz.timezone("US/Pacific")
+import os
+import json
+import time
+import requests
+import pandas as pd
+from datetime import datetime
+import pytz
+from ecommerce_tool.settings import (
+    AMAZON_API_KEY,
+    AMAZON_SECRET_KEY,
+    REFRESH_TOKEN,
+    MARKETPLACE_ID
+)
+pacific = pytz.timezone("US/Pacific")
 
 # # Step 1: Get access token
 def get_amazon_access_token():
@@ -133,99 +133,121 @@ def get_amazon_access_token():
         return None
 
 # # Step 2: Request report generation
-# def create_order_report(access_token, start_time, end_time):
-#     url = "https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports"
-#     headers = {
-#         "x-amz-access-token": access_token,
-#         "Content-Type": "application/json"
-#     }
-#     body = {
-#         "reportType": "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
-#         "marketplaceIds": [MARKETPLACE_ID],
-#         "dataStartTime": start_time,
-#         "dataEndTime": end_time
-#     }
+def create_order_report(access_token, start_time, end_time):
+    url = "https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports"
+    headers = {
+        "x-amz-access-token": access_token,
+        "Content-Type": "application/json"
+    }
+    body = {
+        "reportType": "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
+        "marketplaceIds": [MARKETPLACE_ID],
+        "dataStartTime": start_time,
+        "dataEndTime": end_time
+    }
 
-#     response = requests.post(url, headers=headers, data=json.dumps(body))
-#     response.raise_for_status()
-#     return response.json().get("reportId")
+    response = requests.post(url, headers=headers, data=json.dumps(body))
+    response.raise_for_status()
+    return response.json().get("reportId")
 
-# # Step 3: Poll until report is done
-# def poll_report(access_token, report_id):
-#     url = f"https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports/{report_id}"
-#     headers = {"x-amz-access-token": access_token}
+# Step 3: Poll until report is done
+def poll_report(access_token, report_id):
+    url = f"https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/reports/{report_id}"
+    headers = {"x-amz-access-token": access_token}
 
-#     while True:
-#         response = requests.get(url, headers=headers)
-#         response.raise_for_status()
-#         status = response.json().get("processingStatus")
-#         print(f"⏳ Report status: {status}")
-#         if status == "DONE":
-#             return response.json().get("reportDocumentId")
-#         elif status in ["CANCELLED", "FATAL"]:
-#             print(f"❌ Report generation failed with status: {status}")
-#             return None
-#         time.sleep(30)
+    while True:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        status = response.json().get("processingStatus")
+        print(f"⏳ Report status: {status}")
+        if status == "DONE":
+            return response.json().get("reportDocumentId")
+        elif status in ["CANCELLED", "FATAL"]:
+            print(f"❌ Report generation failed with status: {status}")
+            return None
+        time.sleep(30)
 
-# # Step 4: Download the report file
-# def download_report(access_token, document_id, output_filename):
-#     url = f"https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/documents/{document_id}"
-#     headers = {"x-amz-access-token": access_token}
-#     response = requests.get(url, headers=headers)
-#     response.raise_for_status()
-#     doc_info = response.json()
+# Step 4: Download the report file
+def download_report(access_token, document_id, output_filename):
+    url = f"https://sellingpartnerapi-na.amazon.com/reports/2021-06-30/documents/{document_id}"
+    headers = {"x-amz-access-token": access_token}
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    doc_info = response.json()
 
-#     download_url = doc_info["url"]
-#     file_response = requests.get(download_url)
+    download_url = doc_info["url"]
+    file_response = requests.get(download_url)
 
-#     with open(output_filename, "wb") as f:
-#         f.write(file_response.content)
-#     print(f"✅ Report downloaded to {output_filename}")
+    with open(output_filename, "wb") as f:
+        f.write(file_response.content)
+    print(f"✅ Report downloaded to {output_filename}")
 
-#     return output_filename
+    return output_filename
 
-# # Optional: Load to pandas DataFrame
-# def load_report_to_dataframe(file_path):
-#     df = pd.read_csv(file_path, sep="\t", dtype=str)
-#     print(f"📄 Report loaded with {len(df)} rows")
-#     return df
+# Optional: Load to pandas DataFrame
+def load_report_to_dataframe(file_path):
+    df = pd.read_csv(file_path, sep="\t", dtype=str)
+    print(f"📄 Report loaded with {len(df)} rows")
+    return df
 
 # # Main execution
-# def get_amazon_orders_report(start_date: datetime, end_date: datetime):
-#     access_token = get_amazon_access_token()
-#     if not access_token:
-#         return
+def get_amazon_orders_report(start_date: datetime, end_date: datetime):
+    access_token = get_amazon_access_token()
+    if not access_token:
+        return
 
-#     iso_start = start_date.strftime('%Y-%m-%dT%H:%M:%SZ')
-#     iso_end = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+    iso_start = start_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+    iso_end = end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
 
-#     print(f"📦 Requesting Amazon orders report from {iso_start} to {iso_end}")
-#     report_id = create_order_report(access_token, iso_start, iso_end)
-#     if not report_id:
-#         return
+    print(f"📦 Requesting Amazon orders report from {iso_start} to {iso_end}")
+    report_id = create_order_report(access_token, iso_start, iso_end)
+    if not report_id:
+        return
 
-#     document_id = poll_report(access_token, report_id)
-#     if not document_id:
-#         return
+    document_id = poll_report(access_token, report_id)
+    if not document_id:
+        return
 
-#     filename = f"amazon_orders_{start_date.strftime('%Y-%m-%d')}.tsv"
-#     download_report(access_token, document_id, filename)
+    filename = f"amazon_orders_{start_date.strftime('%Y-%m-%d')}.tsv"
+    download_report(access_token, document_id, filename)
 
-#     df = load_report_to_dataframe(filename)
-#     # Optional: save as Excel
-#     df.to_excel(filename.replace(".tsv", ".xlsx"), index=False)
-#     print(f"📁 Excel saved: {filename.replace('.tsv', '.xlsx')}")
-#     return df
+    df = load_report_to_dataframe(filename)
+    if df is None:
+        return
+
+    # Filter for today's orders in US/Pacific
+    import pytz
+    from datetime import datetime
+
+    pacific = pytz.timezone("US/Pacific")
+    today_pacific = datetime.now(pacific).date()
+
+    def is_today_pacific(purchase_date_str):
+        try:
+            dt_utc = datetime.strptime(purchase_date_str, "%Y-%m-%dT%H:%M:%S%z")
+            dt_pacific = dt_utc.astimezone(pacific)
+            return dt_pacific.date() == today_pacific
+        except Exception:
+            return False
+
+    if 'purchase-date' in df.columns:
+        df_today = df[df['purchase-date'].apply(is_today_pacific)]
+        df_today.to_excel(filename.replace(".tsv", "_today.xlsx"), index=False)
+        print(f"📁 Excel saved: {filename.replace('.tsv', '_today.xlsx')}")
+        return df_today
+    else:
+        print("❌ 'purchase-date' column not found in report.")
+        return df
 # if __name__ == "__main__":
-#     # Example: Fetch for July 9 and 10, 2025
-#     for date_str in ["2025-07-28"]:
-#         start = datetime.strptime(date_str, "%Y-%m-%d")
-#         end = start.replace(hour=23, minute=59, second=59)
-#         start_pacific=pacific.localize(start)
-#         end_pacific=pacific.localize(end)
-#         start_utc=start_pacific.astimezone(pytz.utc)
-#         end_utc=end_pacific.astimezone(pytz.utc)
-#         get_amazon_orders_report(start_utc, end_utc)
+    # Example: Fetch for July 9 and 10, 2025
+    for date_str in ["2025-07-28"]:
+        start = datetime.strptime(date_str, "%Y-%m-%d")
+        end = start.replace(hour=23, minute=59, second=59)
+        start_pacific=pacific.localize(start)
+        end_pacific=pacific.localize(end)
+        start_utc=start_pacific.astimezone(pytz.utc)
+        end_utc=end_pacific.astimezone(pytz.utc)
+        get_amazon_orders_report(start_utc, end_utc)
 import os
 import json
 import time
@@ -600,11 +622,23 @@ def get_fba_shipping_and_fee_report(start_date: datetime, end_date: datetime):
     print(df.head())
 
     return df
+# if __name__ == "__main__":
+#     from datetime import timedelta
+
+#     # Yesterday's report
+#     end_date = datetime.now(pytz.utc).replace(hour=23, minute=59, second=59)
+#     start_date = end_date - timedelta(days=1)
+
+#     get_fba_shipping_and_fee_report(start_date, end_date)
 if __name__ == "__main__":
-    from datetime import timedelta
+    import pytz
+    from datetime import datetime
 
-    # Yesterday's report
-    end_date = datetime.now(pytz.utc).replace(hour=23, minute=59, second=59)
-    start_date = end_date - timedelta(days=1)
+    pacific = pytz.timezone("US/Pacific")
+    today = datetime.now(pacific)
+    start_of_day = today.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_day = today.replace(hour=23, minute=59, second=59, microsecond=999999)
+    start_utc = start_of_day.astimezone(pytz.utc)
+    end_utc = end_of_day.astimezone(pytz.utc)
 
-    get_fba_shipping_and_fee_report(start_date, end_date)
+    get_amazon_orders_report(start_utc, end_utc)

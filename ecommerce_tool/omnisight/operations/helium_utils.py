@@ -757,14 +757,16 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
 
 def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"):
     total = dict()
-    gross_revenue = 0
-    total_cogs = 0
+    gross_revenue_without_tax = 0
+    gross_revenue_with_tax = 0
     refund = 0
     net_profit = 0
     total_units = 0
     total_orders = 0
     temp_other_price = 0
     vendor_funding = 0
+    vendor_discount = 0
+    total_price = 0
     refund_quantity_ins = 0
 
     # Step 1: Fetch orders and refunds
@@ -780,7 +782,8 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     all_item_ids = []
     item_marketplace_map = {}
     for order in orders:
-        gross_revenue += order['order_total']
+        gross_revenue_without_tax += order['order_total']
+        gross_revenue_with_tax += order.get('original_order_total', order.get('order_total', 0))
         total_units += order['items_order_quantity']
         total_orders += 1
         for item_id in order['order_items']:
@@ -803,10 +806,12 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
             "$project": {
                 "_id": 1,
                 "price": {"$ifNull": ["$Pricing.ItemPrice.Amount", 0]},
+                "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
                 "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
                 "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
                 "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                 "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
             }
         }
     ]
@@ -816,25 +821,25 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     # Step 4: Aggregate with marketplace-aware COGS logic
     for item in item_results:
         item_id = str(item["_id"])
-        temp_other_price += item["price"]
-
-        # Correctly choose COGS based on marketplace
+        temp_other_price += item["product_cost"]
+        total_price += item["price"]
         marketplace = item_marketplace_map.get(item_id, "")
         if marketplace == "Amazon":
             total_cogs += item["total_cogs"]
         else:
             total_cogs += item["w_total_cogs"]
+        vendor_funding += item.get("vendor_funding", 0)
+        vendor_discount += item.get("vendor_discount", 0)
 
-        vendor_funding += item["vendor_funding"]
-
-    # Step 5: Net profit
-    net_profit = (temp_other_price - total_cogs) + vendor_funding
+    # Step 5: Net profit (your custom logic)
+    net_profit = (temp_other_price - total_cogs) + vendor_funding + vendor_discount + total_price
 
     # Step 6: Final totals
     total = {
-        "gross_revenue": round(gross_revenue, 2),
+        "gross_revenue_with_tax": round(gross_revenue_with_tax, 2),
+        "gross_revenue_without_tax": round(gross_revenue_without_tax, 2),
         "net_profit": round(net_profit, 2),
-        "profit_margin": round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0,
+        "profit_margin": round((net_profit / gross_revenue_without_tax) * 100, 2) if gross_revenue_without_tax else 0,
         "orders": total_orders,
         "units_sold": total_units,
         "refund_amount": round(refund, 2),
