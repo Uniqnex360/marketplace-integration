@@ -832,8 +832,8 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
         vendor_funding += item.get("vendor_funding", 0)
         vendor_discount += item.get("vendor_discount", 0)
 
-    # Step 5: Net profit (your custom logic)
-    net_profit = (temp_other_price - total_cogs) + vendor_funding + vendor_discount + total_price
+    
+    net_profit = (temp_other_price - total_cogs) + vendor_funding
 
     # Step 6: Final totals
     total = {
@@ -862,7 +862,7 @@ def calculate_metricss(
     use_threads=True
 ):
     gross_revenue = 0
-    total_expenses = 0  # Changed from total_cogs to total_expenses
+    total_cogs = 0
     net_profit = 0
     total_units = 0
     vendor_funding = 0
@@ -875,11 +875,6 @@ def calculate_metricss(
     unitSessionPercentage = 0
     sku_set = set()
     p_id = set()
-    
-    # Additional tracking for the new expense components
-    total_product_cost = 0
-    total_platform_fees = 0
-    total_shipping_cost = 0
 
     result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone)
     all_item_ids = [ObjectId(item_id) for order in result for item_id in order['order_items']]
@@ -910,23 +905,13 @@ def calculate_metricss(
                 "p_id" : "$product_ins._id",
                 "price": "$Pricing.ItemPrice.Amount",
                 "tax_price": "$Pricing.ItemTax.Amount",
-                "quantity_ordered": "$ProductDetails.QuantityOrdered",  # ADD QUANTITY
                 "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
                 "sku": "$product_ins.sku",
                 "total_cogs": { "$ifNull": ["$product_ins.total_cogs", 0] },
                 "w_total_cogs": { "$ifNull": ["$product_ins.w_total_cogs", 0] },
                 "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] },
                 "a_shipping_cost" : {"$ifNull":["$product_ins.a_shipping_cost",0]},
-                "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
-                "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
-                "shipping_price": {"$ifNull": ["$Pricing.ShippingPrice.Amount", 0]},
                 "w_shiping_cost" : {"$ifNull":["$product_ins.w_shiping_cost",0]},
-                # Amazon-specific fees
-                "channel_fee": {"$ifNull": ["$product_ins.channel_fee", 0]},
-                "fullfillment_by_channel_fee": {"$ifNull": ["$product_ins.fullfillment_by_channel_fee", 0]},
-                # Walmart-specific fees
-                "walmart_fee": {"$ifNull": ["$product_ins.walmart_fee", 0]},
-                "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]},
             }
         }
     ]
@@ -934,54 +919,26 @@ def calculate_metricss(
     item_details_map = {str(item['_id']): item for item in OrderItems.objects.aggregate(*item_pipeline)}
 
     def process_order(order):
-        nonlocal gross_revenue, temp_price, tax_price, total_expenses, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost, p_id
-        nonlocal total_product_cost, total_platform_fees, total_shipping_cost
+        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost,p_id
 
         gross_revenue += order['order_total']
         total_units += order['items_order_quantity']
-        
         for item_id in order['order_items']:
             item_data = item_details_map.get(str(item_id))
             if item_data:
-                # Get quantity ordered for this item
-                quantity_ordered = item_data.get('quantity_ordered', 1)
-                
-                temp_price += item_data['price'] * quantity_ordered
-                tax_price += item_data.get('tax_price', 0) * quantity_ordered
+                temp_price += item_data['price']
+                tax_price += item_data.get('tax_price', 0)
 
-                # NEW EXPENSE CALCULATION LOGIC
                 if order.get('marketplace_name') == "Amazon":
-                    # Amazon: product_cost + amazon_fees + shipping_cost
-                    item_product_cost = item_data.get('product_cost', 0)
-                    item_platform_fees = (item_data.get('channel_fee', 0) + 
-                                         item_data.get('fullfillment_by_channel_fee', 0) + 
-                                         item_data.get('referral_fee', 0))
-                    item_shipping_cost = item_data.get('shipping_price', 0)  # Order shipping price
-                    if not item_shipping_cost:
-                        item_shipping_cost = item_data.get('a_shipping_cost', 0)  # Product shipping cost
-                    
+                    total_cogs += item_data.get('total_cogs', 0)
+                    shipping_cost += item_data.get('a_shipping_cost', 0)
                 else:
-                    item_shipping_cost = item_data.get('shipping_price', 0)  # Order shipping price  
-                    if not item_shipping_cost:
-                        item_shipping_cost = item_data.get('w_shiping_cost', 0)  # Product shipping cost
+                    total_cogs += item_data.get('w_total_cogs', 0)
+                    shipping_cost += item_data.get('w_shiping_cost', 0)
 
-                # Calculate total expense per unit
-                item_unit_expense = item_product_cost + item_platform_fees + item_shipping_cost
+                vendor_funding += item_data.get('vendor_funding', 0)
                 
-                # Multiply by quantity ordered
-                item_total_expense = item_unit_expense * quantity_ordered
-                
-                # Add to totals
-                total_expenses += item_total_expense
-                total_product_cost += item_product_cost * quantity_ordered
-                total_platform_fees += item_platform_fees * quantity_ordered
-                total_shipping_cost += item_shipping_cost * quantity_ordered
-                
-                # Keep shipping_cost for backward compatibility (if needed elsewhere)
-                shipping_cost += item_shipping_cost * quantity_ordered
 
-                vendor_funding += item_data.get('vendor_funding', 0) * quantity_ordered
-                
                 if item_data.get('sku'):
                     sku_set.add(item_data['sku'])
 
@@ -1003,7 +960,6 @@ def calculate_metricss(
         # Process sequentially
         for order in result:
             process_order(order)
-            
     pipeline = [
         {
             "$match": {
@@ -1024,16 +980,15 @@ def calculate_metricss(
         page_views += P_ins.get('page_views', 0)
         sessions += P_ins.get('sessions', 0)
 
-    # Updated net profit calculation using new expense formula
-    net_profit = (temp_price - total_expenses) + vendor_funding
+    net_profit = (temp_price - total_cogs) + vendor_funding
     margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
     unitSessionPercentage = (total_units / sessions) * 100 if sessions else 0
 
     base_result = {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round(total_expenses, 2),  # Now using the new formula
+        "expenses": round(total_cogs, 2),
         "netProfit": round(net_profit, 2),
-        "roi": round((net_profit / total_expenses) * 100, 2) if total_expenses > 0 else 0,  # Updated ROI calculation
+        "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs > 0 else 0,
         "unitsSold": total_units,
         "refunds": refund,
         "skuCount": len(sku_set),
@@ -1048,16 +1003,14 @@ def calculate_metricss(
         base_result.update({
             "seller": "",
             "tax_price": round(tax_price, 2),
-            "total_cogs": round(total_expenses, 2),  # Keep for backward compatibility
+            "total_cogs": round(total_cogs, 2),
             "product_cost": round(temp_price, 2),
-            "shipping_cost": round(shipping_cost, 2),
-            # New detailed expense breakdown
-            "total_product_cost": round(total_product_cost, 2),
-            "total_platform_fees": round(total_platform_fees, 2),
-            "total_shipping_cost": round(total_shipping_cost, 2),
+            "shipping_cost": round(shipping_cost,2),
         })
 
     return base_result
+
+
 
 def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None,timezone_str="UTC"):
     total = dict()
