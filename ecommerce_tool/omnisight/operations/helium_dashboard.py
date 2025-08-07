@@ -1740,6 +1740,8 @@ def allMarketplaceData(request):
                     "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                     "sku": "$product_ins.sku",
                     "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                    "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
+
                     "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                     "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
                 }
@@ -1841,7 +1843,7 @@ def allMarketplaceData(request):
                 temp_price += item_data['price']
                 tax_price += item_data['tax_price']
                 marketplace_name = order.get("marketplace_name", "Amazon")
-                total_cogs += item_data['total_cogs'] if marketplace_name == "Amazon" else item_data['w_total_cogs']
+                total_cogs += item_data['product_cost'] if marketplace_name == "Amazon" else item_data['w_product_cost']
                 vendor_funding += item_data['vendor_funding']
                 if item_data.get('sku'):
                     sku_set.add(item_data['sku'])
