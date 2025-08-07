@@ -9,7 +9,6 @@ import math
 import logging
 logger = logging.getLogger(__name__)
 import pandas as pd
-from ecommerce_tool.util.shipping_price import get_shipping_price
 from pytz import timezone
 
 def convertdateTotimezone(start_date,end_date,timezone_str):
@@ -862,8 +861,6 @@ def calculate_metricss(
     include_extra_fields=False,
     use_threads=True
 ):
-    from bson import ObjectId
-
     gross_revenue = 0
     total_cogs = 0
     net_profit = 0
@@ -878,15 +875,17 @@ def calculate_metricss(
     unitSessionPercentage = 0
     sku_set = set()
     p_id = set()
-    total_expenses = 0  # <-- For your custom expense calculation
 
-    result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
+    result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone)
     all_item_ids = [ObjectId(item_id) for order in result for item_id in order['order_items']]
-    refund_ins = refundOrder(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
+    refund_ins = refundOrder(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone)
     refund = len(refund_ins)
-
+    
+    
     if timezone != 'UTC':
         from_date, to_date = convertLocalTimeToUTC(from_date, to_date, timezone)
+    
+    # Remove timezone info for MongoDB query (assuming your MongoDB driver expects naive UTC)
     from_date = from_date.replace(tzinfo=None)
     to_date = to_date.replace(tzinfo=None)
 
@@ -911,9 +910,6 @@ def calculate_metricss(
                 "total_cogs": { "$ifNull": ["$product_ins.total_cogs", 0] },
                 "w_total_cogs": { "$ifNull": ["$product_ins.w_total_cogs", 0] },
                 "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] },
-                "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]}, 
-                "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]}, 
-                "shipping_price": {"$ifNull": ["$Pricing.ShippingPrice.Amount", 0]},  
                 "a_shipping_cost" : {"$ifNull":["$product_ins.a_shipping_cost",0]},
                 "w_shiping_cost" : {"$ifNull":["$product_ins.w_shiping_cost",0]},
             }
@@ -923,7 +919,7 @@ def calculate_metricss(
     item_details_map = {str(item['_id']): item for item in OrderItems.objects.aggregate(*item_pipeline)}
 
     def process_order(order):
-        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost, p_id, total_expenses
+        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost,p_id
 
         gross_revenue += order['order_total']
         total_units += order['items_order_quantity']
@@ -933,21 +929,15 @@ def calculate_metricss(
                 temp_price += item_data['price']
                 tax_price += item_data.get('tax_price', 0)
 
-                # Use the helper to get the correct shipping price
-                shipping_price = get_shipping_price(order, item_data)
-                shipping_cost += shipping_price
-
-                # For expenses, sum up product_cost + referral_fee + shipping_price
-                product_cost = item_data.get("product_cost", 0)
-                referral_fee = item_data.get("referral_fee", 0)
-                total_expenses += product_cost + referral_fee + shipping_price
-
                 if order.get('marketplace_name') == "Amazon":
                     total_cogs += item_data.get('total_cogs', 0)
+                    shipping_cost += item_data.get('a_shipping_cost', 0)
                 else:
                     total_cogs += item_data.get('w_total_cogs', 0)
+                    shipping_cost += item_data.get('w_shiping_cost', 0)
 
                 vendor_funding += item_data.get('vendor_funding', 0)
+                
 
                 if item_data.get('sku'):
                     sku_set.add(item_data['sku'])
@@ -957,18 +947,19 @@ def calculate_metricss(
                 except:
                     pass
 
-    # Threaded or sequential processing
+    # Modified threading approach
     if use_threads:
+        # Use a ThreadPool with limited workers
         from concurrent.futures import ThreadPoolExecutor, as_completed
+        
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = [executor.submit(process_order, order) for order in result]
             for future in as_completed(futures):
-                future.result()
+                future.result()  # This will raise exceptions if any occurred
     else:
+        # Process sequentially
         for order in result:
             process_order(order)
-
-    # Sessions and page views aggregation (unchanged)
     pipeline = [
         {
             "$match": {
@@ -989,15 +980,15 @@ def calculate_metricss(
         page_views += P_ins.get('page_views', 0)
         sessions += P_ins.get('sessions', 0)
 
-    net_profit = (temp_price - total_expenses) + vendor_funding
+    net_profit = (temp_price - total_cogs) + vendor_funding
     margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
     unitSessionPercentage = (total_units / sessions) * 100 if sessions else 0
 
     base_result = {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round(total_expenses, 2),
+        "expenses": round(total_cogs, 2),
         "netProfit": round(net_profit, 2),
-        "roi": round((net_profit / total_expenses) * 100, 2) if total_expenses > 0 else 0,
+        "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs > 0 else 0,
         "unitsSold": total_units,
         "refunds": refund,
         "skuCount": len(sku_set),
@@ -1018,6 +1009,7 @@ def calculate_metricss(
         })
 
     return base_result
+
 
 
 def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None,timezone_str="UTC"):
