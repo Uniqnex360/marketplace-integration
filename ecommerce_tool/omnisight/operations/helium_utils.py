@@ -767,6 +767,7 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     vendor_funding = 0
     vendor_discount = 0
     total_price = 0
+    total_cogs=0
     refund_quantity_ins = 0
 
     # Step 1: Fetch orders and refunds
