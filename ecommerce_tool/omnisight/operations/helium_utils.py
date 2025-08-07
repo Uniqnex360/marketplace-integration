@@ -303,7 +303,8 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
             item = order_items_lookup.get(item_id)
             if item and item.Pricing and item.Pricing.ItemTax and item.Pricing.ItemTax.Amount:
                 tax_sum += item.Pricing.ItemTax.Amount
-        order_ins=['original_order_total']=round(order_ins.get('order_total',0.0))
+        original_order_total = order_ins.get('order_total', 0.0)
+        order_ins=['original_order_total']=round(order_ins.get('original_order_total',0.0))
         order_ins['order_total'] = round(order_ins.get('order_total', 0.0) - tax_sum, 2)
     
     return order_list
