@@ -863,6 +863,8 @@ def calculate_metricss(
 ):
     gross_revenue = 0
     total_cogs = 0
+    total_expenses = 0
+
     net_profit = 0
     total_units = 0
     vendor_funding = 0
@@ -911,6 +913,9 @@ def calculate_metricss(
                 "w_total_cogs": { "$ifNull": ["$product_ins.w_total_cogs", 0] },
                 "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] },
                 "a_shipping_cost" : {"$ifNull":["$product_ins.a_shipping_cost",0]},
+                "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
+        "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
+        "shipping_price": {"$ifNull": ["$Pricing.ShippingPrice.Amount", 0]},
                 "w_shiping_cost" : {"$ifNull":["$product_ins.w_shiping_cost",0]},
             }
         }
@@ -928,7 +933,13 @@ def calculate_metricss(
             if item_data:
                 temp_price += item_data['price']
                 tax_price += item_data.get('tax_price', 0)
-
+                shipping_price = item_data.get("shipping_price", 0)
+                if not shipping_price:
+                    shipping_price = item_data.get("a_shipping_cost", 0) or item_data.get("w_shiping_cost", 0)
+                shipping_cost += shipping_price
+                product_cost = item_data.get("product_cost", 0)
+                referral_fee = item_data.get("referral_fee", 0)
+                total_expenses += product_cost + referral_fee + shipping_price
                 if order.get('marketplace_name') == "Amazon":
                     total_cogs += item_data.get('total_cogs', 0)
                     shipping_cost += item_data.get('a_shipping_cost', 0)
@@ -986,7 +997,7 @@ def calculate_metricss(
 
     base_result = {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round(total_cogs, 2),
+         "expenses": round(total_expenses, 2),
         "netProfit": round(net_profit, 2),
         "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs > 0 else 0,
         "unitsSold": total_units,
