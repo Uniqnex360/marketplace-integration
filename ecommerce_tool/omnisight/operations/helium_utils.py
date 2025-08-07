@@ -910,6 +910,7 @@ def calculate_metricss(
                 "p_id" : "$product_ins._id",
                 "price": "$Pricing.ItemPrice.Amount",
                 "tax_price": "$Pricing.ItemTax.Amount",
+                "quantity_ordered": "$ProductDetails.QuantityOrdered",  # ADD QUANTITY
                 "cogs": { "$ifNull": ["$product_ins.cogs", 0.0] },
                 "sku": "$product_ins.sku",
                 "total_cogs": { "$ifNull": ["$product_ins.total_cogs", 0] },
@@ -942,8 +943,11 @@ def calculate_metricss(
         for item_id in order['order_items']:
             item_data = item_details_map.get(str(item_id))
             if item_data:
-                temp_price += item_data['price']
-                tax_price += item_data.get('tax_price', 0)
+                # Get quantity ordered for this item
+                quantity_ordered = item_data.get('quantity_ordered', 1)
+                
+                temp_price += item_data['price'] * quantity_ordered
+                tax_price += item_data.get('tax_price', 0) * quantity_ordered
 
                 # NEW EXPENSE CALCULATION LOGIC
                 if order.get('marketplace_name') == "Amazon":
@@ -960,19 +964,22 @@ def calculate_metricss(
                     item_platform_fees = item_data.get('walmart_fee', 0)
                     item_shipping_cost = item_data.get('w_shiping_cost', 0)
 
-                # Calculate total expense for this item
-                item_total_expense = item_product_cost + item_platform_fees + item_shipping_cost
+                # Calculate total expense per unit
+                item_unit_expense = item_product_cost + item_platform_fees + item_shipping_cost
+                
+                # Multiply by quantity ordered
+                item_total_expense = item_unit_expense * quantity_ordered
                 
                 # Add to totals
                 total_expenses += item_total_expense
-                total_product_cost += item_product_cost
-                total_platform_fees += item_platform_fees
-                total_shipping_cost += item_shipping_cost
+                total_product_cost += item_product_cost * quantity_ordered
+                total_platform_fees += item_platform_fees * quantity_ordered
+                total_shipping_cost += item_shipping_cost * quantity_ordered
                 
                 # Keep shipping_cost for backward compatibility (if needed elsewhere)
-                shipping_cost += item_shipping_cost
+                shipping_cost += item_shipping_cost * quantity_ordered
 
-                vendor_funding += item_data.get('vendor_funding', 0)
+                vendor_funding += item_data.get('vendor_funding', 0) * quantity_ordered
                 
                 if item_data.get('sku'):
                     sku_set.add(item_data['sku'])
