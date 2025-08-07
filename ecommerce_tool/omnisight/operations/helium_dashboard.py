@@ -513,6 +513,7 @@ def RevenueWidgetAPIView(request):
 @csrf_exempt
 def updatedRevenueWidgetAPIView(request):
     from django.utils import timezone
+    import pytz
     from concurrent.futures import ThreadPoolExecutor
     from datetime import datetime
 
