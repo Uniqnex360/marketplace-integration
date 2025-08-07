@@ -223,7 +223,7 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
                 product_id=None, manufacuture_name=[], fulfillment_channel=None, 
                 timezone='UTC'):    
     if timezone != 'UTC':
-        start_date,end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
+        start_date, end_date = convertLocalTimeToUTC(start_date, end_date, timezone)
     
     start_date = start_date.replace(tzinfo=None)
     end_date = end_date.replace(tzinfo=None)
@@ -294,21 +294,22 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
             order_items_lookup[item.id] = item
     
     for order_ins in order_list:
+        # Set marketplace name (if needed)
         for marketplace in marketplace_list:
             order_ins['marketplace_name'] = marketplace['name']
 
-    tax_sum = 0.0
-    for item_id in order_ins['order_items']:
-        item = order_items_lookup.get(item_id)
-        if item and item.Pricing and item.Pricing.ItemTax and item.Pricing.ItemTax.Amount:
-            tax_sum += item.Pricing.ItemTax.Amount
+        # Calculate tax for this order
+        tax_sum = 0.0
+        for item_id in order_ins['order_items']:
+            item = order_items_lookup.get(item_id)
+            if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemTax') and hasattr(item.Pricing.ItemTax, 'Amount'):
+                tax_sum += item.Pricing.ItemTax.Amount
 
-    original_order_total = order_ins.get('order_total', 0.0)
-    order_ins['original_order_total'] = round(original_order_total, 2)
-    order_ins['order_total'] = round(original_order_total - tax_sum, 2)
+        original_order_total = order_ins.get('order_total', 0.0)
+        order_ins['original_order_total'] = round(original_order_total, 2)
+        order_ins['order_total'] = round(original_order_total - tax_sum, 2)
 
     return order_list
-
 
 def get_previous_periods(current_start, current_end):
     # Calculate the duration of the current period
