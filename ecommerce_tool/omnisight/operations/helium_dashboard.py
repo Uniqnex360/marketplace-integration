@@ -1771,6 +1771,7 @@ def allMarketplaceData(request):
             total_product_cost = 0
             temp_price = 0
             referral_fee_total = 0
+            referral_fee=0
 
             vendor_funding = 0
             sku_set = set()
@@ -1841,7 +1842,6 @@ def allMarketplaceData(request):
         sku_set = set()
         vendor_funding = 0
         referral_fee_total = 0
-
         tax_price = 0
         for order in orders:
             gross_revenue += order['original_order_total']
@@ -1851,19 +1851,21 @@ def allMarketplaceData(request):
                 if not item_data:
                     continue
                 temp_price += item_data['price']
-                referral_fee+=item_data['referral_fee']
+                referral_fee = float(item_data.get('referral_fee', 0) or 0)
+                referral_fee_total += referral_fee
                 tax_price += item_data['tax_price']
                 marketplace_name = order.get("marketplace_name", "Amazon")
                 total_cogs += item_data['total_cogs'] if marketplace_name == "Amazon" else item_data['w_total_cogs']
                 vendor_funding += item_data['vendor_funding']
                 if item_data.get('sku'):
                     sku_set.add(item_data['sku'])
-        net_profit = (temp_price - total_cogs) + vendor_funding
+        expenses = total_cogs + referral_fee_total
+        net_profit = (temp_price - expenses) + vendor_funding
         margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
-        roi = (net_profit / total_cogs) * 100 if total_cogs > 0 else 0
+        roi = (net_profit / expenses) * 100 if expenses > 0 else 0
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round(total_cogs, 2),
+            "expenses": round(expenses, 2),
             "netProfit": round(net_profit, 2),
             "roi": round(roi, 2),
             "unitsSold": total_units,
@@ -1878,7 +1880,7 @@ def allMarketplaceData(request):
             "total_cogs": round(total_cogs, 2),
             "product_cost": round(gross_revenue, 2),
             "shipping_cost": 0
-        }
+    }
     def create_period_response(cur_from, cur_to, prev_from, prev_to):
         current_orders = grossRevenue(cur_from, cur_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
         previous_orders = grossRevenue(prev_from, prev_to, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
