@@ -1749,6 +1749,8 @@ def allMarketplaceData(request):
                     "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
                     "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                     "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                    "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
+
                 }
             }
         ]
@@ -1773,29 +1775,34 @@ def allMarketplaceData(request):
             temp_price = 0
             referral_fee_total = 0
             referral_fee=0
-
+            shipping_cost=0
+            channel_fee=0
             vendor_funding = 0
+            vendor_discount=0
             sku_set = set()
             marketplace_name = marketplace_dict.get(str(mp_id), "")
             for order in order_list:
                 gross_revenue += order["original_order_total"]
                 total_units += order['items_order_quantity']
+                shipping_cost += order.get('shipping_price', 0) or 0  
                 for item_id in order['order_items']:
                     item_data = item_map.get(item_id)
                     if not item_data:
                         continue
                     temp_price += item_data['price']
                     referral_fee = float(item_data.get('referral_fee', 0) or 0)
+
                     referral_fee_total += referral_fee
                     tax_price += item_data['tax_price']
                     cogs_value = item_data['total_cogs'] if marketplace_name == "Amazon" else item_data['w_total_cogs']
                     total_cogs += cogs_value
                     vendor_funding += item_data['vendor_funding']
+                    vendor_discount += float(item_data.get('vendor_discount', 0) or 0)
                     total_product_cost += item_data['price']
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
             expenses = total_cogs + referral_fee_total
-            net_profit = (temp_price - expenses) + vendor_funding
+            net_profit = (temp_price+ shipping_cost+ vendor_funding- (referral_fee_total + total_cogs + vendor_discount))
             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
             currency_data = {
