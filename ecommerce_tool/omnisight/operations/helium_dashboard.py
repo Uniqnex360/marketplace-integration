@@ -2912,7 +2912,7 @@ def getProfitAndLossDetails(request):
     def pLcalculate_metrics(start_date, end_date, marketplace_id, brand_id, product_id,
                             manufacturer_name, fulfillment_channel, timezone):
         gross_revenue = total_cogs = refund = net_profit = margin = total_units = 0
-        shipping_cost = channel_fee = product_cost = vendor_funding = tax_price = temp_price = 0
+        shipping_cost = channel_fee = product_cost = vendor_funding = tax_price = temp_price = vendor_discount=0
         sku_set = set()
         product_categories = {}
         product_completeness = {"complete": 0, "incomplete": 0}
@@ -2942,6 +2942,7 @@ def getProfitAndLossDetails(request):
                 "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
                 "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                 "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
                 "a_shipping_cost": {"$ifNull": ["$product_ins.a_shipping_cost", 0]},
                 "w_shiping_cost": {"$ifNull": ["$product_ins.w_shiping_cost", 0]},
                 "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
@@ -2973,6 +2974,7 @@ def getProfitAndLossDetails(request):
                     channel_fee += item_data['walmart_fee']
                     product_cost += item_data['w_product_cost']
                 vendor_funding += item_data['vendor_funding']
+                vendor_discount+=item_data['vendor_discount']
                 sku_set.add(item_data.get('sku'))
                 category = item_data.get('category', 'Unknown')
                 product_categories[category] = product_categories.get(category, 0) + 1
@@ -2981,7 +2983,7 @@ def getProfitAndLossDetails(request):
                 else:
                     product_completeness["incomplete"] += 1
 
-        net_profit = (temp_price - total_cogs) + vendor_funding
+        net_profit = (temp_price+ shipping_cost+ vendor_funding- (channel_fee + total_cogs + vendor_discount))
         margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
 
         return {
