@@ -1769,7 +1769,7 @@ def allMarketplaceData(request):
             sku_set = set()
             marketplace_name = marketplace_dict.get(str(mp_id), "")
             for order in order_list:
-                gross_revenue += order["order_total"]
+                gross_revenue += order["original_order_total"]
                 total_units += order['items_order_quantity']
                 for item_id in order['order_items']:
                     item_data = item_map.get(item_id)
@@ -1833,7 +1833,7 @@ def allMarketplaceData(request):
         vendor_funding = 0
         tax_price = 0
         for order in orders:
-            gross_revenue += order['order_total']
+            gross_revenue += order['original_order_total']
             total_units += order['items_order_quantity']
             for item_id in order['order_items']:
                 item_data = item_map.get(item_id)
