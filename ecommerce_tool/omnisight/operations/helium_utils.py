@@ -864,6 +864,8 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
         marketplace = item_marketplace_map.get(item_id, "")
 
         vendor_discount += float(item.get("vendor_discount", 0) or 0)
+        vendor_funding += float(item.get("vendor_funding", 0) or 0)
+
         if marketplace == "Amazon":
             total_cogs += item["total_cogs"]
             channel_fee += referral_fee
@@ -874,7 +876,7 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
         # vendor_discount += item.get("vendor_discount", 0)
 
     # Step 5: Net profit (your custom logic)
-    net_profit = (temp_other_price + shipping_price + vendor_funding - (channel_fee + total_cogs + vendor_discount))
+    net_profit = (temp_other_price + shipping_price +    - (channel_fee + total_cogs + vendor_discount))
 
     # Step 6: Final totals
     total = {
