@@ -898,6 +898,7 @@ def calculate_metricss(
     net_profit = 0
     total_units = 0
     vendor_funding = 0
+    vendor_discount=0
     temp_price = 0
     refund = 0
     tax_price = 0
@@ -941,6 +942,7 @@ def calculate_metricss(
                 "total_cogs": { "$ifNull": ["$product_ins.total_cogs", 0] },
                 "w_total_cogs": { "$ifNull": ["$product_ins.w_total_cogs", 0] },
                 "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] },
+                "vendor_discount": { "$ifNull": ["$product_ins.vendor_discount", 0] },
                 "a_shipping_cost" : {"$ifNull":["$product_ins.a_shipping_cost",0]},
                 "w_shiping_cost" : {"$ifNull":["$product_ins.w_shiping_cost",0]},
                 "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
@@ -951,10 +953,11 @@ def calculate_metricss(
     item_details_map = {str(item['_id']): item for item in OrderItems.objects.aggregate(*item_pipeline)}
 
     def process_order(order):
-        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost, p_id, referral_fee_total
+        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding,vendor_discount, total_units, sku_set, page_views, sessions, shipping_cost, p_id, referral_fee_total
 
         gross_revenue += order.get('original_order_total')
         total_units += order['items_order_quantity']
+        shipping_cost+=order.get('shipping_price')
         for item_id in order['order_items']:
             item_data = item_details_map.get(str(item_id))
             if item_data:
@@ -966,12 +969,13 @@ def calculate_metricss(
 
                 if order.get('marketplace_name') == "Amazon":
                     total_cogs += item_data.get('total_cogs', 0)
-                    shipping_cost += item_data.get('a_shipping_cost', 0)
+                    # shipping_cost += item_data.get('a_shipping_cost', 0)
                 else:
                     total_cogs += item_data.get('w_total_cogs', 0)
-                    shipping_cost += item_data.get('w_shiping_cost', 0)
+                    # shipping_cost += item_data.get('w_shiping_cost', 0)
 
                 vendor_funding += item_data.get('vendor_funding', 0)
+                vendor_discount+=item_data.get('vendor_discount',0)
                 # REMOVED: total_cogs += referral_fee_total
                 if item_data.get('sku'):
                     sku_set.add(item_data['sku'])
@@ -1015,7 +1019,7 @@ def calculate_metricss(
     # Add referral_fee_total to total_cogs to get expenses
     expenses = total_cogs + referral_fee_total
 
-    net_profit = (temp_price - expenses) + vendor_funding
+    net_profit = (temp_price + shipping_cost + vendor_funding - (referral_fee_total + total_cogs + vendor_discount))
     margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
     unitSessionPercentage = (total_units / sessions) * 100 if sessions else 0
 
