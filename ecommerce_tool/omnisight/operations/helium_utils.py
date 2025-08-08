@@ -597,6 +597,8 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         time_key = dt.strftime(time_format)
         graph_data[time_key] = {
             "gross_revenue": 0,
+            'gross_revenue_with_tax':0,
+            'gross_revenue_without_tax':0,
             "net_profit": 0,
             "profit_margin": 0,
             "orders": 0,
@@ -658,6 +660,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
 
         bucket_orders = orders_by_bucket.get(time_key, [])
         gross_revenue = 0
+        gross_revenue_with_tax = 0
         total_cogs = 0
         refund_amount = 0
         refund_quantity = 0
@@ -706,6 +709,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                 result = list(OrderItems.objects.aggregate(*pipeline))
                 if result:
                     temp_other_price += result[0]['price']
+                    gross_revenue_with_tax += result[0]['price'] + result[0]['tax_price']
                     total_cogs += result[0]['total_cogs'] if order.marketplace_id.name == "Amazon" else result[0]['w_total_cogs']
                     vendor_funding += result[0]['vendor_funding']
 
@@ -715,6 +719,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
 
         graph_data[time_key] = {
             "gross_revenue": round(gross_revenue, 2),
+            "gross_revenue_with_tax": round(gross_revenue_with_tax, 2),
             "net_profit": round(net_profit, 2),
             "profit_margin": profit_margin,
             "orders": len(bucket_orders),
