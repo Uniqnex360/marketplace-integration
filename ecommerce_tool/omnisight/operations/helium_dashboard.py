@@ -228,8 +228,8 @@ def get_metrics_by_date_range(request):
                         tax_price += item_result['tax_price']
                         temp_other_price += item_result['price']
                         product_cost = float(item_result.get('price', 0) or 0)
-                        shipping_cost = get_shipping_price(ins, item_result)
-                        total_cogs += product_cost + shipping_cost
+                        # shipping_cost = get_shipping_price(ins, item_result)
+                        total_cogs += product_cost 
 
                         # if ins['marketplace_name'] == "Amazon":
                         #     total_cogs += item_result['total_cogs']
