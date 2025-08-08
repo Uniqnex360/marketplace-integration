@@ -785,7 +785,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     return converted_graph_data
 
 
-def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"):
+def otalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"):
     total = dict()
     gross_revenue_without_tax = 0
     gross_revenue_with_tax = 0
@@ -876,7 +876,7 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
         # vendor_discount += item.get("vendor_discount", 0)
 
     # Step 5: Net profit (your custom logic)
-    net_profit = (temp_other_price + shipping_price +    - (channel_fee + total_cogs + vendor_discount))
+    net_profit = (temp_other_price + shipping_price + vendor_funding- (channel_fee + total_cogs + vendor_discount))
 
     # Step 6: Final totals
     total = {
