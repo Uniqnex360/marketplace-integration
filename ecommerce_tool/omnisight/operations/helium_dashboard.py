@@ -9,6 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime,timedelta
 from bson.son import SON
 from bson import ObjectId
+from ecommerce_tool.util.shipping_price import get_shipping_price
 import numpy as np
 import json
 import time
@@ -226,10 +227,14 @@ def get_metrics_by_date_range(request):
                     if item_result:
                         tax_price += item_result['tax_price']
                         temp_other_price += item_result['price']
-                        if ins['marketplace_name'] == "Amazon":
-                            total_cogs += item_result['total_cogs']
-                        else:
-                            total_cogs += item_result['w_total_cogs']
+                        product_cost = float(item_result.get('price', 0) or 0)
+                        shipping_cost = get_shipping_price(ins, item_result)
+                        total_cogs += product_cost + shipping_cost
+
+                        # if ins['marketplace_name'] == "Amazon":
+                        #     total_cogs += item_result['total_cogs']
+                        # else:
+                        #     total_cogs += item_result['w_total_cogs']
                         vendor_funding += item_result['vendor_funding']
             net_profit = (temp_other_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue_without_tax) * 100 if gross_revenue_without_tax != 0 else 0
@@ -1765,6 +1770,8 @@ def allMarketplaceData(request):
             tax_price = 0
             total_product_cost = 0
             temp_price = 0
+            referral_fee_total = 0
+
             vendor_funding = 0
             sku_set = set()
             marketplace_name = marketplace_dict.get(str(mp_id), "")

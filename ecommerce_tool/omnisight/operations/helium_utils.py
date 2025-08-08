@@ -894,6 +894,7 @@ def calculate_metricss(
 ):
     gross_revenue = 0
     total_cogs = 0
+    referral_fee_total = 0
     net_profit = 0
     total_units = 0
     vendor_funding = 0
@@ -907,11 +908,10 @@ def calculate_metricss(
     sku_set = set()
     p_id = set()
 
-    result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone)
+    result = grossRevenue(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
     all_item_ids = [ObjectId(item_id) for order in result for item_id in order['order_items']]
-    refund_ins = refundOrder(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel,timezone)
+    refund_ins = refundOrder(from_date, to_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone)
     refund = len(refund_ins)
-    
     
     if timezone != 'UTC':
         from_date, to_date = convertLocalTimeToUTC(from_date, to_date, timezone)
@@ -943,6 +943,7 @@ def calculate_metricss(
                 "vendor_funding": { "$ifNull": ["$product_ins.vendor_funding", 0] },
                 "a_shipping_cost" : {"$ifNull":["$product_ins.a_shipping_cost",0]},
                 "w_shiping_cost" : {"$ifNull":["$product_ins.w_shiping_cost",0]},
+                "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
             }
         }
     ]
@@ -950,7 +951,7 @@ def calculate_metricss(
     item_details_map = {str(item['_id']): item for item in OrderItems.objects.aggregate(*item_pipeline)}
 
     def process_order(order):
-        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost,p_id
+        nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost, p_id, referral_fee_total
 
         gross_revenue += order.get('original_order_total')
         total_units += order['items_order_quantity']
@@ -959,6 +960,9 @@ def calculate_metricss(
             if item_data:
                 temp_price += item_data['price']
                 tax_price += item_data.get('tax_price', 0)
+                product_cost = float(item_data.get('price', 0) or 0)
+                referral_fee = float(item_data.get('referral_fee', 0) or 0)
+                referral_fee_total += referral_fee
 
                 if order.get('marketplace_name') == "Amazon":
                     total_cogs += item_data.get('total_cogs', 0)
@@ -968,8 +972,7 @@ def calculate_metricss(
                     shipping_cost += item_data.get('w_shiping_cost', 0)
 
                 vendor_funding += item_data.get('vendor_funding', 0)
-                
-
+                # REMOVED: total_cogs += referral_fee_total
                 if item_data.get('sku'):
                     sku_set.add(item_data['sku'])
 
@@ -980,17 +983,15 @@ def calculate_metricss(
 
     # Modified threading approach
     if use_threads:
-        # Use a ThreadPool with limited workers
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = [executor.submit(process_order, order) for order in result]
             for future in as_completed(futures):
-                future.result()  # This will raise exceptions if any occurred
+                future.result()
     else:
-        # Process sequentially
         for order in result:
             process_order(order)
+
     pipeline = [
         {
             "$match": {
@@ -1011,15 +1012,19 @@ def calculate_metricss(
         page_views += P_ins.get('page_views', 0)
         sessions += P_ins.get('sessions', 0)
 
-    net_profit = (temp_price - total_cogs) + vendor_funding
+    # Add referral_fee_total to total_cogs to get expenses
+    expenses = total_cogs + referral_fee_total
+
+    net_profit = (temp_price - expenses) + vendor_funding
     margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
     unitSessionPercentage = (total_units / sessions) * 100 if sessions else 0
 
     base_result = {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round(total_cogs, 2),
+        "expenses": round(expenses, 2),
+        "referral_fee": round(referral_fee_total, 2),
         "netProfit": round(net_profit, 2),
-        "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs > 0 else 0,
+        "roi": round((net_profit / expenses) * 100, 2) if expenses > 0 else 0,
         "unitsSold": total_units,
         "refunds": refund,
         "skuCount": len(sku_set),
@@ -1036,12 +1041,10 @@ def calculate_metricss(
             "tax_price": round(tax_price, 2),
             "total_cogs": round(total_cogs, 2),
             "product_cost": round(temp_price, 2),
-            "shipping_cost": round(shipping_cost,2),
+            "shipping_cost": round(shipping_cost, 2),
         })
 
     return base_result
-
-
 
 def totalRevenueCalculationForProduct(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None,timezone_str="UTC"):
     total = dict()
