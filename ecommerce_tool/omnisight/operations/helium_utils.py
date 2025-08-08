@@ -294,11 +294,9 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
             order_items_lookup[item.id] = item
     
     for order_ins in order_list:
-        # Set marketplace name (if needed)
         for marketplace in marketplace_list:
             order_ins['marketplace_name'] = marketplace['name']
 
-        # Calculate tax for this order
         tax_sum = 0.0
         item_price=0.0
         for item_id in order_ins['order_items']:
@@ -311,8 +309,9 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
         original_order_total = order_ins.get('order_total', 0.0)
         order_ins['original_order_total'] = round(item_price, 2)
         order_ins['order_total'] = round(original_order_total - tax_sum, 2)
-
-    return order_list
+    gross_revenue = sum(order['original_order_total'] for order in order_list)
+    return gross_revenue
+    
 
 def get_previous_periods(current_start, current_end):
     # Calculate the duration of the current period

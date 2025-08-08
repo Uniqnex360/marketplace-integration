@@ -73,7 +73,7 @@ def calculate_margin(records):
     net=sum(r['net_profit'] for r in records)
     return round((net/gross)*100,2) if gross else 0
 @csrf_exempt
-def get_metrics_by_date_range(request):
+def     get_metrics_by_date_range(request):
     json_request = JSONParser().parse(request)
     marketplace_id = json_request.get('marketplace_id', None)
     target_date_str = json_request.get('target_date')
