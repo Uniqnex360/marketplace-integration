@@ -304,14 +304,14 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
             if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemTax') and hasattr(item.Pricing.ItemTax, 'Amount'):
                 tax_sum += item.Pricing.ItemTax.Amount
             if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemPrice') and hasattr(item.Pricing.ItemPrice, 'Amount'):
+                print("Fetched item price:", item.Pricing.ItemPrice.Amount)
                 item_price += item.Pricing.ItemPrice.Amount
 
         original_order_total = order_ins.get('order_total', 0.0)
         order_ins['original_order_total'] = round(item_price, 2)
         order_ins['order_total'] = round(original_order_total - tax_sum, 2)
-    gross_revenue = sum(order['original_order_total'] for order in order_list)
-    return gross_revenue
     
+    return order_list
 
 def get_previous_periods(current_start, current_end):
     # Calculate the duration of the current period
