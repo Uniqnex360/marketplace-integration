@@ -301,8 +301,17 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
         item_price=0.0
         for item_id in order_ins['order_items']:
             item = order_items_lookup.get(item_id)
+            tax=0.0
             if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemTax') and hasattr(item.Pricing.ItemTax, 'Amount'):
-                tax_sum += item.Pricing.ItemTax.Amount
+                tax_val=item.Pricing.ItemTax.Amount
+                if isinstance(tax_val,(int,float,str)):
+                    try:
+                        tax=float(tax_val)
+                    except Exception:
+                        tax=0.0
+                else:
+                    tax=0.0
+            tax_sum+=tax
             if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemPrice') and hasattr(item.Pricing.ItemPrice, 'Amount'):
                 item_price += item.Pricing.ItemPrice.Amount
 
