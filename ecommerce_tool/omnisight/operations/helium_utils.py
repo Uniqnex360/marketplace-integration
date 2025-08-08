@@ -289,9 +289,15 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
     
     order_items_lookup = {}
     if all_order_item_ids:
-        order_items = OrderItems.objects(id__in=all_order_item_ids)
-        for item in order_items:
-            order_items_lookup[item.id] = item
+        try:
+            order_items = OrderItems.objects(id__in=all_order_item_ids)
+            for item in order_items:
+                order_items_lookup[item.id] = item
+        except TypeError as e:
+            if "float() argument must be a string or a real number, not 'dict'" in str(e):
+                print(f"Warning: Skipping corrupted OrderItems due to data type error: {e}")
+            else:
+                raise
     
     for order_ins in order_list:
         # Set marketplace name (if needed)
@@ -303,14 +309,17 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
         for item_id in order_ins['order_items']:
             item = order_items_lookup.get(item_id)
             if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemTax') and hasattr(item.Pricing.ItemTax, 'Amount'):
-                tax_sum += item.Pricing.ItemTax.Amount
+                try:
+                    tax_sum += item.Pricing.ItemTax.Amount
+                except TypeError:
+                    # Skip if Amount is not a valid number
+                    continue
 
         original_order_total = order_ins.get('order_total', 0.0)
         order_ins['original_order_total'] = round(original_order_total, 2)
         order_ins['order_total'] = round(original_order_total - tax_sum, 2)
 
     return order_list
-
 def get_previous_periods(current_start, current_end):
     # Calculate the duration of the current period
     period_duration = current_end - current_start
