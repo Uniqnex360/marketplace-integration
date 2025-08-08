@@ -799,6 +799,9 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     total_price = 0
     total_cogs=0
     refund_quantity_ins = 0
+    shipping_price=0
+    channel_fee = 0
+
 
     # Step 1: Fetch orders and refunds
     orders = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
@@ -815,6 +818,7 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     for order in orders:
         gross_revenue_without_tax += order['order_total']
         gross_revenue_with_tax += order.get('original_order_total', order.get('order_total', 0))
+        shipping_price+=order.get('shipping_price')
         total_units += order['items_order_quantity']
         total_orders += 1
         for item_id in order['order_items']:
@@ -840,9 +844,11 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
                 "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
                 "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
                 "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
+                "walmart_fee": {"$ifNull": ["$product_ins.walmart_fee", 0]},
+                "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
                 "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                 "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
-                "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
             }
         }
     ]
@@ -853,18 +859,22 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     for item in item_results:
         item_id = str(item["_id"])
         temp_other_price += item["price"]
-
-        # total_price += item["price"]
+        referral_fee = float(item.get("referral_fee", 0) or 0)
+        walmart_fee = float(item.get("walmart_fee", 0) or 0)
         marketplace = item_marketplace_map.get(item_id, "")
+
+        vendor_discount += float(item.get("vendor_discount", 0) or 0)
         if marketplace == "Amazon":
             total_cogs += item["total_cogs"]
+            channel_fee += referral_fee
         else:
             total_cogs += item["w_total_cogs"]
-        vendor_funding += item.get("vendor_funding", 0)
+            channel_fee += walmart_fee
+        # total_price += item["price"]
         # vendor_discount += item.get("vendor_discount", 0)
 
     # Step 5: Net profit (your custom logic)
-    net_profit = (temp_other_price - total_cogs) + vendor_funding
+    net_profit = (temp_other_price + shipping_price + vendor_funding - (channel_fee + total_cogs + vendor_discount))
 
     # Step 6: Final totals
     total = {
