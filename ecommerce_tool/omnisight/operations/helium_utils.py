@@ -924,7 +924,7 @@ def calculate_metricss(
     def process_order(order):
         nonlocal gross_revenue, temp_price, tax_price, total_cogs, vendor_funding, total_units, sku_set, page_views, sessions, shipping_cost,p_id
 
-        gross_revenue += order['order_total']
+        gross_revenue += order.get('original_order_total')
         total_units += order['items_order_quantity']
         for item_id in order['order_items']:
             item_data = item_details_map.get(str(item_id))
