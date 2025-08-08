@@ -785,7 +785,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     return converted_graph_data
 
 
-def otalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"):
+def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"):
     total = dict()
     gross_revenue_without_tax = 0
     gross_revenue_with_tax = 0
