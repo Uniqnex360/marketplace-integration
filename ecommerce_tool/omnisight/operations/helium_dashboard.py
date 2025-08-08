@@ -1783,6 +1783,8 @@ def allMarketplaceData(request):
                     if not item_data:
                         continue
                     temp_price += item_data['price']
+                    referral_fee = float(item_data.get('referral_fee', 0) or 0)
+                    referral_fee_total += referral_fee
                     tax_price += item_data['tax_price']
                     cogs_value = item_data['total_cogs'] if marketplace_name == "Amazon" else item_data['w_total_cogs']
                     total_cogs += cogs_value
@@ -1790,7 +1792,7 @@ def allMarketplaceData(request):
                     total_product_cost += item_data['price']
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
-            expenses = total_cogs
+            expenses = total_cogs + referral_fee_total
             net_profit = (temp_price - expenses) + vendor_funding
             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
             margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
@@ -1838,6 +1840,8 @@ def allMarketplaceData(request):
         temp_price = 0
         sku_set = set()
         vendor_funding = 0
+        referral_fee_total = 0
+
         tax_price = 0
         for order in orders:
             gross_revenue += order['original_order_total']
@@ -1847,6 +1851,7 @@ def allMarketplaceData(request):
                 if not item_data:
                     continue
                 temp_price += item_data['price']
+                referral_fee+=item_data['referral_fee']
                 tax_price += item_data['tax_price']
                 marketplace_name = order.get("marketplace_name", "Amazon")
                 total_cogs += item_data['total_cogs'] if marketplace_name == "Amazon" else item_data['w_total_cogs']
@@ -2799,6 +2804,8 @@ def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,ma
     tax_price = 0
     temp_price = 0
     vendor_funding = 0
+    referral_fee_total = 0
+    referral_fee=0
     if result:
         for order in result:
             gross_revenue += order['order_total']
@@ -2841,6 +2848,9 @@ def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,ma
                     else:
                         total_cogs += item_data['w_total_cogs']
                     vendor_funding += item_data['vendor_funding']
+                    referral_fee = float(item_data.get('referral_fee', 0) or 0)
+                    referral_fee_total += referral_fee
+
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
                     category = item_data.get('category', 'Unknown')
@@ -2852,11 +2862,12 @@ def calculate_metrics(start_date, end_date,marketplace_id,brand_id,product_id,ma
                         product_completeness["complete"] += 1
                     else:
                         product_completeness["incomplete"] += 1
+        expenses = total_cogs + referral_fee_total
         net_profit = (temp_price -  total_cogs) + vendor_funding
         margin = (net_profit / gross_revenue) * 100 if gross_revenue > 0 else 0
     return {
         "grossRevenue": round(gross_revenue, 2),
-        "expenses": round(total_cogs, 2),
+        "expenses": round(expenses, 2),
         "netProfit": round(net_profit, 2),
         "roi": round((net_profit / (total_cogs)) * 100, 2) if total_cogs > 0 else 0,
         "unitsSold": total_units,
