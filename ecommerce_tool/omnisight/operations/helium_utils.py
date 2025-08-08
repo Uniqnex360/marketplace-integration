@@ -304,7 +304,6 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
             if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemTax') and hasattr(item.Pricing.ItemTax, 'Amount'):
                 tax_sum += item.Pricing.ItemTax.Amount
             if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemPrice') and hasattr(item.Pricing.ItemPrice, 'Amount'):
-                print("Fetched item price:", item.Pricing.ItemPrice.Amount)
                 item_price += item.Pricing.ItemPrice.Amount
 
         original_order_total = order_ins.get('order_total', 0.0)

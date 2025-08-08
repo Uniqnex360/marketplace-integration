@@ -1701,6 +1701,7 @@ def getPeriodWiseDataCustom(request):
         ),
     }
     return JsonResponse(response_data, safe=False)
+
 @csrf_exempt
 def allMarketplaceData(request):
     json_request = JSONParser().parse(request)
