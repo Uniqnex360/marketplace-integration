@@ -298,7 +298,7 @@ class OrderItems(Document):
     created_date = DateTimeField(default=datetime.now())
     document_created_date = DateTimeField()
     PromotionDiscount = FloatField(required=False)
-
+    net_profit = FloatField(default=0.0)
 
 
 class Order(Document):
