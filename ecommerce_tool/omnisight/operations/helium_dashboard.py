@@ -2933,7 +2933,7 @@ def getProfitAndLossDetails(request):
         item_lookup = {item['_id']: item for item in item_results}
 
         for order in result:
-            gross_revenue += order['order_total']
+            gross_revenue += order['original_order_total']
             total_units += order['items_order_quantity']
             shipping_cost += order.get('shipping_price', 0) or 0 #added shipping cost
 
@@ -3169,7 +3169,7 @@ def profit_loss_chart(request):
         
         # Process orders using pre-fetched data
         for order in result:
-            gross_revenue_amt += order.get("order_total", 0)
+            gross_revenue_amt += order.get("original_order_total", 0)
             total_units += order.get('items_order_quantity', 0)
             marketplace_name = order.get('marketplace_name', '')
             
