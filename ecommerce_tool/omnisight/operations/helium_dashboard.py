@@ -1745,6 +1745,7 @@ def allMarketplaceData(request):
                     "tax_price": "$Pricing.ItemTax.Amount",
                     "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                     "sku": "$product_ins.sku",
+                    "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},  
                     "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
                     "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                     "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
