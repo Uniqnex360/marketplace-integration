@@ -2986,7 +2986,7 @@ def getProfitAndLossDetails(request):
 
         return {
             "grossRevenue": round(gross_revenue, 2),
-            "expenses": round(total_cogs, 2),
+            "expenses": round(total_cogs + channel_fee, 2),
             "netProfit": round(net_profit, 2),
             "roi": round((net_profit / total_cogs) * 100, 2) if total_cogs else 0,
             "unitsSold": total_units,
