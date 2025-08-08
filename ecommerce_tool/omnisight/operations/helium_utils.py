@@ -298,39 +298,49 @@ def grossRevenue(start_date, end_date, marketplace_id=None, brand_id=None,
             order_ins['marketplace_name'] = marketplace['name']
 
         tax_sum = 0.0
-        item_price=0.0
+        item_price = 0.0
         for item_id in order_ins['order_items']:
             item = order_items_lookup.get(item_id)
-            tax=0.0
-            if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemTax') and hasattr(item.Pricing.ItemTax, 'Amount'):
-                tax_val=item.Pricing.ItemTax.Amount
-                if isinstance(tax_val,(int,float,str)):
-                    try:
-                        tax=float(tax_val)
-                    except Exception:
-                        tax=0.0
-                else:
-                    tax=0.0
-            tax_sum+=tax
-            price=0.0
-            if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemPrice') and hasattr(item.Pricing.ItemPrice, 'Amount'):
-                
-                price_val= item.Pricing.ItemPrice.Amount
-                if isinstance(price_val,(int,float,str)):
-                    try:
-                        price=float(price_val)
-                    except Exception:
-                        price=0.0
+            
+            # Defensive for ItemTax
+            tax = 0.0
+            if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemTax'):
+                item_tax_obj = item.Pricing.ItemTax
+                if hasattr(item_tax_obj, 'Amount'):
+                    tax_val = item_tax_obj.Amount
+                    if isinstance(tax_val, (int, float, str)):
+                        try:
+                            tax = float(tax_val)
+                        except Exception:
+                            tax = 0.0
                     else:
-                        price=0.0
-                item_price+=price
+                        tax = 0.0
+                else:
+                    tax = 0.0
+            tax_sum += tax
+
+            # Defensive for ItemPrice
+            price = 0.0
+            if item and hasattr(item, 'Pricing') and hasattr(item.Pricing, 'ItemPrice'):
+                item_price_obj = item.Pricing.ItemPrice
+                if hasattr(item_price_obj, 'Amount'):
+                    price_val = item_price_obj.Amount
+                    if isinstance(price_val, (int, float, str)):
+                        try:
+                            price = float(price_val)
+                        except Exception:
+                            price = 0.0
+                    else:
+                        price = 0.0
+                else:
+                    price = 0.0
+            item_price += price
 
         original_order_total = order_ins.get('order_total', 0.0)
         order_ins['original_order_total'] = round(item_price, 2)
         order_ins['order_total'] = round(original_order_total - tax_sum, 2)
     
     return order_list
-
 def get_previous_periods(current_start, current_end):
     # Calculate the duration of the current period
     period_duration = current_end - current_start
