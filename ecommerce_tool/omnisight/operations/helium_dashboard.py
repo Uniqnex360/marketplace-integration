@@ -3025,7 +3025,9 @@ def getProfitAndLossDetails(request):
                 "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
                 "walmart_fee": {"$ifNull": ["$product_ins.walmart_fee", 0]},
                 "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
-                "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]}
+                "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]},
+                "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+
             }}
         ]
         item_results = list(OrderItems.objects.aggregate(*item_pipeline))
