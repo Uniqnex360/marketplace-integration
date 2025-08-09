@@ -45,9 +45,3 @@ def get_full_order_and_shipping_details(order_number):
     except Exception as e:
         print(f"Error fetching details for order {order_number}: {e}")
         return None
-
-if __name__ == "__main__":
-    order_number = "5467089"
-    details = get_full_order_and_shipping_details(order_number)
-    if details:
-        print(json.dumps(details, indent=4))

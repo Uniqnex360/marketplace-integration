@@ -314,7 +314,7 @@ class Order(Document):
     shipping_rates_date=DateTimeField()
     shipping_cost=FloatField(default=0.0)
     tracking_number=StringField()
-    
+    merchant_shipment_cost=FloatField(default=0.0)
     # Customer details
     customer_email_id = StringField()  # Email of the customer
     # Order timing
