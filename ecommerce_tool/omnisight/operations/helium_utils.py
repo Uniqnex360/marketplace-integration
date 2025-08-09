@@ -6,6 +6,7 @@ from dateutil.relativedelta import relativedelta
 from ecommerce_tool.crud import DatabaseModel
 import threading
 import math
+from ecommerce_tool.util.shipping_price import get_full_order_and_shipping_details
 import logging
 logger = logging.getLogger(__name__)
 import pandas as pd
@@ -797,11 +798,10 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     vendor_funding = 0
     vendor_discount = 0
     total_price = 0
-    total_cogs=0
+    total_cogs = 0
     refund_quantity_ins = 0
-    shipping_price=0
+    shipping_price = 0
     channel_fee = 0
-
 
     # Step 1: Fetch orders and refunds
     orders = grossRevenue(start_date, end_date, marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
@@ -818,7 +818,7 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     for order in orders:
         gross_revenue_without_tax += order['order_total']
         gross_revenue_with_tax += order.get('original_order_total', order.get('order_total', 0))
-        shipping_price+=order.get('shipping_price')
+        shipping_price += order.get('shipping_price', 0) or 0
         total_units += order['items_order_quantity']
         total_orders += 1
         for item_id in order['order_items']:
@@ -849,34 +849,53 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
                 "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
                 "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                 "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
             }
         }
     ]
 
     item_results = list(OrderItems.objects.aggregate(*pipeline))
 
-    # Step 4: Aggregate with marketplace-aware COGS logic
-    for item in item_results:
-        item_id = str(item["_id"])
-        temp_other_price += item["price"]
-        referral_fee = float(item.get("referral_fee", 0) or 0)
-        walmart_fee = float(item.get("walmart_fee", 0) or 0)
-        marketplace = item_marketplace_map.get(item_id, "")
+    # Step 4: Aggregate COGS per order
+    # Build a mapping from item_id to item_result for quick lookup
+    item_map = {str(item["_id"]): item for item in item_results}
 
-        vendor_discount += float(item.get("vendor_discount", 0) or 0)
-        vendor_funding += float(item.get("vendor_funding", 0) or 0)
+    # Loop over orders, sum product_cost * quantity for each item, then add shipment cost per order
+    for order in orders:
+        # Sum product cost * quantity for all items in this order
+        for item_id in order['order_items']:
+            item = item_map.get(str(item_id))
+            if not item:
+                continue
+            product_cost = float(item.get('product_cost', 0) or 0)
+            quantity = int(item.get('QuantityOrdered', 1) or 1)
+            total_cogs += product_cost * quantity
+            vendor_discount += float(item.get("vendor_discount", 0) or 0)
+            vendor_funding += float(item.get("vendor_funding", 0) or 0)
+            temp_other_price += item["price"]
 
-        if marketplace == "Amazon":
-            total_cogs += item["total_cogs"]
-            channel_fee += referral_fee
-        else:
-            total_cogs += item["w_total_cogs"]
-            channel_fee += walmart_fee
-        # total_price += item["price"]
-        # vendor_discount += item.get("vendor_discount", 0)
+        # After the item loop, add shipment cost for this order
+        fulfillment_channel = order.get('fulfillment_channel', "").upper()
+        merchant_shipment_cost = 0
+        if fulfillment_channel == 'AFN':
+            merchant_shipment_cost = order.get('shipping_price', 0) or 0
+        elif fulfillment_channel == "MFN":
+            merchant_shipment_cost = order.get('merchant_shipment_cost', None)
+            if merchant_shipment_cost is None:
+                order_number = order.get('merchant_order_id')
+                order_details = get_full_order_and_shipping_details(order_number)
+                if order_details and order_details.get('shipments'):
+                    merchant_shipment_cost = sum(float(s.get('shipmentCost', 0) or 0) for s in order_details['shipments'])
+                    order_obj = Order.objects(merchant_order_id=order_number).first()
+                    if order_obj:
+                        order_obj.merchant_shipment_cost = merchant_shipment_cost
+                        order_obj.save()
+            else:
+                merchant_shipment_cost = merchant_shipment_cost or 0
+        total_cogs += merchant_shipment_cost
 
     # Step 5: Net profit (your custom logic)
-    net_profit = (temp_other_price + shipping_price + vendor_funding- (channel_fee + total_cogs + vendor_discount))
+    net_profit = (temp_other_price + shipping_price + vendor_funding - (channel_fee + total_cogs + vendor_discount))
 
     # Step 6: Final totals
     total = {

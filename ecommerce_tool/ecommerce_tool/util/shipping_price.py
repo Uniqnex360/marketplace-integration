@@ -3,6 +3,7 @@ import requests
 import json
 from ecommerce_tool.settings import SHIPSTATION_API_KEY, SHIPSTATION_API_SECRET
 
+
 def get_full_order_and_shipping_details(order_number):
     order_url = f"https://ssapi.shipstation.com/orders?orderNumber={order_number}"
     shipment_url = f"https://ssapi.shipstation.com/shipments?orderNumber={order_number}"
