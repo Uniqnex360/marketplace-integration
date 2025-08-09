@@ -220,6 +220,7 @@ def get_metrics_by_date_range(request):
         vendor_funding = 0
         channel_fee = 0
         shipping_price=0
+        vendor_discount=0
         result = all_raw_results[key]
         refund_ins = refundOrder(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel)
         if refund_ins != []:
