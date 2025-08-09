@@ -3035,14 +3035,9 @@ def getProfitAndLossDetails(request):
                     continue
                 temp_price += item_data['price']
                 tax_price += item_data['tax_price']
-                if order['marketplace_name'] == "Amazon":
-                    total_cogs += item_data['total_cogs']
-                    channel_fee += item_data['referral_fee']
-                    product_cost += item_data['product_cost']
-                else:
-                    total_cogs += item_data['w_total_cogs']
-                    channel_fee += item_data['walmart_fee']
-                    product_cost += item_data['w_product_cost']
+                product_cost = float(item_data.get('product_cost', 0) or 0)
+                quantity = int(item_data.get('QuantityOrdered', 1) or 1)
+                total_cogs += product_cost * quantity
                 vendor_funding += item_data['vendor_funding']
                 vendor_discount+=item_data['vendor_discount']
                 sku_set.add(item_data.get('sku'))
@@ -3052,9 +3047,27 @@ def getProfitAndLossDetails(request):
                     product_completeness["complete"] += 1
                 else:
                     product_completeness["incomplete"] += 1
-
-        net_profit = (temp_price+ shipping_cost+ vendor_funding- (channel_fee + total_cogs + vendor_discount))
-        margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
+            fulfillment_channel = order.get('fulfillment_channel', "").upper()
+            merchant_shipment_cost = 0
+            if fulfillment_channel == "AFN":
+                merchant_shipment_cost = order.get('shipping_price', 0) or 0
+            elif fulfillment_channel == 'MFN':
+                merchant_shipment_cost = order.get('merchant_shipment_cost', None)
+                if merchant_shipment_cost is None:
+                    order_number = order.get('merchant_order_id')
+                    order_details = get_full_order_and_shipping_details(order_number)
+                    if order_details and order_details.get('shipments'):
+                        merchant_shipment_cost = sum(float(s.get('shipmentCost', 0) or 0) for s in order_details['shipments'])
+                        print(f"Order: {order_number}, Fulfillment: {fulfillment_channel}, Shipment Cost: {merchant_shipment_cost}")
+                        order_obj = Order.objects(merchant_order_id=order_number).first()
+                    if order_obj:
+                        order_obj.merchant_shipment_cost = merchant_shipment_cost
+                        order_obj.save()
+            else:
+                merchant_shipment_cost = merchant_shipment_cost or 0
+            total_cogs += merchant_shipment_cost
+            net_profit = (temp_price+ shipping_cost+ vendor_funding- (channel_fee + total_cogs + vendor_discount))
+            margin = (net_profit / gross_revenue) * 100 if gross_revenue else 0
 
         return {
             "grossRevenue": round(gross_revenue, 2),
