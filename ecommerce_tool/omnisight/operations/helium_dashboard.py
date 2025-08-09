@@ -1812,13 +1812,33 @@ def allMarketplaceData(request):
 
                     referral_fee_total += referral_fee
                     tax_price += item_data['tax_price']
-                    cogs_value = item_data['total_cogs'] if marketplace_name == "Amazon" else item_data['w_total_cogs']
-                    total_cogs += cogs_value
+                    product_cost = float(item_data.get('product_cost', 0) or 0)
+                    quantity = int(item_data.get('QuantityOrdered', 1) or 1)
+                    total_cogs += product_cost * quantity
                     vendor_funding += item_data['vendor_funding']
                     vendor_discount += float(item_data.get('vendor_discount', 0) or 0)
                     total_product_cost += item_data['price']
                     if item_data.get('sku'):
                         sku_set.add(item_data['sku'])
+                fulfillment_channel=order.get('fulfillment_channel',"").upper()
+                merchant_shipment_cost=0
+                if fulfillment_channel=="AFN":
+                    merchant_shipment_cost=order.get('shipping_price',0)
+                elif fulfillment_channel=='MFN':
+                    merchant_shipment_cost=order.get('merchant_shipment_cost',None)
+                    if merchant_shipment_cost is None:
+                        order_number=order.get('merchant_order_id')
+                        order_details=get_full_order_and_shipping_details(order_number)
+                        if order_details and order_details.get('shipments'):
+                            merchant_shipment_cost=sum(float(s.get('shipmentCost',0)or 0) for s in order_details['shipments'])
+                            print(f"Order: {order_number}, Fulfillment: {fulfillment_channel}, Shipment Cost: {merchant_shipment_cost}")
+                            order_obj = Order.objects(merchant_order_id=order_number).first()
+                            if order_obj:
+                                order_obj.merchant_shipment_cost=merchant_shipment_cost
+                                order_obj.save()
+                else:
+                    merchant_shipment_cost=merchant_shipment_cost or 0
+            total_cogs+=merchant_shipment_cost
             expenses = total_cogs + referral_fee_total
             net_profit = (temp_price+ shipping_cost+ vendor_funding- (referral_fee_total + total_cogs + vendor_discount))
             roi = (net_profit / expenses) * 100 if expenses > 0 else 0
