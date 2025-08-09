@@ -548,7 +548,6 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     def process_time_bucket(time_key):
         nonlocal graph_data, orders_by_bucket
         bucket_orders = orders_by_bucket.get(time_key, [])
-        gross_revenue = 0
         total_cogs = 0
         refund_amount = 0
         refund_quantity = 0
@@ -569,7 +568,8 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                     refund_amount += ins['order_total']
                     refund_quantity += len(ins['order_items'])
         for order in bucket_orders:
-            gross_revenue_with_tax += order.get('original_order_total', 0)
+            gross_revenue_with_tax += getattr(order, 'original_order_total', 0)
+
 
             total_units += order.items_order_quantity if order.items_order_quantity else 0
             for item in order.order_items:
