@@ -555,6 +555,8 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
         total_units = 0
         temp_other_price = 0
         vendor_funding = 0
+        gross_revenue_with_tax = 0
+
         bucket_start = datetime.strptime(time_key, time_format).replace(tzinfo=pytz.UTC)
         if preset in ["Today", "Yesterday"]:
             bucket_end = bucket_start + timedelta(hours=1)
@@ -567,7 +569,8 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                     refund_amount += ins['order_total']
                     refund_quantity += len(ins['order_items'])
         for order in bucket_orders:
-            gross_revenue += order.order_total
+            gross_revenue_with_tax += order.get('original_order_total', 0)
+
             total_units += order.items_order_quantity if order.items_order_quantity else 0
             for item in order.order_items:
                 pipeline = [
@@ -595,9 +598,9 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                     total_cogs += result[0]['total_cogs'] if order.marketplace_id.name == "Amazon" else result[0]['w_total_cogs']
                     vendor_funding += result[0]['vendor_funding']
         net_profit = (temp_other_price - total_cogs) + vendor_funding
-        profit_margin = round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0
+        profit_margin = round((net_profit / gross_revenue_with_tax) * 100, 2) if gross_revenue_with_tax else 0
         graph_data[time_key] = {
-            "gross_revenue": round(gross_revenue, 2),
+            "gross_revenue_with_tax": round(gross_revenue_with_tax, 2),
             "net_profit": round(net_profit, 2),
             "profit_margin": profit_margin,
             "orders": len(bucket_orders),
