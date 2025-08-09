@@ -255,7 +255,7 @@ def get_metrics_by_date_range(request):
                         merchant_shipment_cost=merchant_shipment_cost or 0
             total_cogs+=merchant_shipment_cost
             net_profit = (temp_other_price - total_cogs) + vendor_funding
-            margin = (net_profit / gross_revenue_without_tax) * 100 if gross_revenue_without_tax != 0 else 0
+            margin = (net_profit / gross_revenue_with_tax) * 100 if gross_revenue_with_tax != 0 else 0
         metrics[key] = {
             "gross_revenue_without_tax":round(gross_revenue_without_tax,2),
             "gross_revenue_with_tax":round(gross_revenue_with_tax,2),
