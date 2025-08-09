@@ -189,10 +189,13 @@ def get_metrics_by_date_range(request):
                 "cogs": {"$ifNull": ["$product_ins.cogs", 0.0]},
                 "tax_price": {"$ifNull": ["$Pricing.ItemTax.Amount", 0]},
                 "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
+                "referral_fee": {"$ifNull": ["$product_ins.referral_fee", 0]},
                 "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                 "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
                 "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
                 "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+                "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
+
 
 
             }
@@ -224,6 +227,7 @@ def get_metrics_by_date_range(request):
         if result != []:
             for ins in result:
                 gross_revenue_without_tax += ins['order_total']
+                shipping_price += ins.get('shipping_price', 0) or 0
                 gross_revenue_with_tax += ins.get('original_order_total', ins['order_total'])
                 total_units += ins['items_order_quantity']
                 for j in ins['order_items']:
@@ -231,7 +235,9 @@ def get_metrics_by_date_range(request):
                     if item_result:
                         tax_price += item_result['tax_price']
                         temp_other_price += item_result['price']
+                        channel_fee += float(item_result.get("referral_fee", 0) or 0)
                         product_cost = float(item_result.get('product_cost', 0) or 0)
+                        vendor_discount += float(item_result.get("vendor_discount", 0) or 0)
                         quantity=int(item_result.get('QuantityOrdered',1)or 1)
                         total_cogs+=product_cost*quantity
                         vendor_funding += item_result['vendor_funding']
@@ -254,7 +260,7 @@ def get_metrics_by_date_range(request):
                     else:
                         merchant_shipment_cost=merchant_shipment_cost or 0
             total_cogs+=merchant_shipment_cost
-            net_profit = (temp_other_price - total_cogs) + vendor_funding
+            net_profit = (temp_other_price + shipping_price + vendor_funding - (channel_fee + total_cogs + vendor_discount))
             margin = (net_profit / gross_revenue_with_tax) * 100 if gross_revenue_with_tax != 0 else 0
         metrics[key] = {
             "gross_revenue_without_tax":round(gross_revenue_without_tax,2),
