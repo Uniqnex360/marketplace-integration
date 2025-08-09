@@ -3051,6 +3051,7 @@ def getProfitAndLossDetails(request):
                 vendor_discount+=item_data['vendor_discount']
                 sku_set.add(item_data.get('sku'))
                 category = item_data.get('category', 'Unknown')
+                channel_fee += float(item_data.get("referral_fee", 0) or 0)
                 product_categories[category] = product_categories.get(category, 0) + 1
                 if item_data['price'] and item_data['total_cogs'] and item_data.get('sku'):
                     product_completeness["complete"] += 1
