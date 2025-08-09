@@ -9,7 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from datetime import datetime,timedelta
 from bson.son import SON
 from bson import ObjectId
-# from ecommerce_tool.util.shipping_price import get_shipping_price
+from ecommerce_tool.util.shipping_price import get_full_order_and_shipping_details
 import numpy as np
 import json
 import time
@@ -191,6 +191,10 @@ def get_metrics_by_date_range(request):
                 "total_cogs": {"$ifNull": ["$product_ins.total_cogs", 0]},
                 "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                 "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
+                "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
+                "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+
+
             }
         }
     ]
@@ -227,15 +231,21 @@ def get_metrics_by_date_range(request):
                     if item_result:
                         tax_price += item_result['tax_price']
                         temp_other_price += item_result['price']
-                        product_cost = float(item_result.get('price', 0) or 0)
-                        # shipping_cost = get_shipping_price(ins, item_result)
-                        total_cogs += product_cost 
-
-                        # if ins['marketplace_name'] == "Amazon":
-                        #     total_cogs += item_result['total_cogs']
-                        # else:
-                        #     total_cogs += item_result['w_total_cogs']
+                        product_cost = float(item_result.get('product_cost', 0) or 0)
+                        quantity=int(item_result.get('QuantityOrdered',1)or 1)
+                        total_cogs+=product_cost*quantity
                         vendor_funding += item_result['vendor_funding']
+                fulfillment_channel=ins.get('fulfillment_channel',"").upper()
+                merchant_shipment_cost=0
+                if fulfillment_channel=='AFN':
+                    merchant_shipment_cost=ins.get('shipping_price',0)
+                elif fulfillment_channel=="MFN":
+                    order_number=ins.get('merchant_order_id')
+                    order_details=get_full_order_and_shipping_details(order_number)
+                    if order_details and order_details.get('shipments'):
+                        merchant_shipment_cost=sum(float(s.get('shipmentCost',0) or 0) for s in order_details['shipments'])
+                        print(f"Order: {order_number}, Fulfillment: {fulfillment_channel}, Shipment Cost: {merchant_shipment_cost}")
+            total_cogs+=merchant_shipment_cost
             net_profit = (temp_other_price - total_cogs) + vendor_funding
             margin = (net_profit / gross_revenue_without_tax) * 100 if gross_revenue_without_tax != 0 else 0
         metrics[key] = {
