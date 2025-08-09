@@ -631,7 +631,6 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     return converted_graph_data
 def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=None, product_id=None, manufacturer_name=None, fulfillment_channel=None, timezone_str="UTC"):
     total = dict()
-    gross_revenue_without_tax = 0
     gross_revenue_with_tax = 0
     refund = 0
     net_profit = 0
@@ -654,8 +653,7 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     all_item_ids = []
     item_marketplace_map = {}
     for order in orders:
-        gross_revenue_without_tax += order['order_total']
-        gross_revenue_with_tax += order.get('original_order_total', order.get('order_total', 0))
+        gross_revenue_with_tax += order.get('original_order_total')
         shipping_price += order.get('shipping_price', 0) or 0
         total_units += order['items_order_quantity']
         total_orders += 1
@@ -724,7 +722,6 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
     net_profit = (temp_other_price + shipping_price + vendor_funding - (channel_fee + total_cogs + vendor_discount))
     total = {
         "gross_revenue_with_tax": round(gross_revenue_with_tax, 2),
-        "gross_revenue_without_tax": round(gross_revenue_without_tax, 2),
         "net_profit": round(net_profit, 2),
         "profit_margin": round((net_profit / gross_revenue_with_tax) * 100, 2) if gross_revenue_with_tax else 0,
         "orders": total_orders,
