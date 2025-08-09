@@ -131,15 +131,12 @@ def get_metrics_by_date_range(request):
     graph_data = {}
     def process_date_range(key, date_range, results):
         gross_revenue_with_tax = 0
-        gross_revenue_without_tax=0
         result = grossRevenue(date_range["start"], date_range["end"], marketplace_id, brand_id, product_id, manufacturer_name, fulfillment_channel, timezone_str)
         if result != []:
             for ins in result:
                 original_order_total = ins.get('original_order_total', 0.0) 
-                gross_revenue_without_tax += ins['order_total']
                 gross_revenue_with_tax += original_order_total
         results[key] = {
-            "gross_revenue_without_tax": round(gross_revenue_without_tax, 2),
             "gross_revenue_with_tax":round(gross_revenue_with_tax,2)
         }
     from concurrent.futures import ThreadPoolExecutor
@@ -208,7 +205,6 @@ def get_metrics_by_date_range(request):
     for key, date_range in date_filters.items():
         gross_revenue = 0
         gross_revenue_with_tax = 0  
-        gross_revenue_without_tax = 0  
         total_cogs = 0
         refund = 0
         margin = 0
@@ -229,7 +225,6 @@ def get_metrics_by_date_range(request):
         total_orders = len(result)
         if result != []:
             for ins in result:
-                gross_revenue_without_tax += ins['order_total']
                 shipping_price += ins.get('shipping_price', 0) or 0
                 gross_revenue_with_tax += ins.get('original_order_total', ins['order_total'])
                 total_units += ins['items_order_quantity']
@@ -266,7 +261,6 @@ def get_metrics_by_date_range(request):
             net_profit = (temp_other_price + shipping_price + vendor_funding - (channel_fee + total_cogs + vendor_discount))
             margin = (net_profit / gross_revenue_with_tax) * 100 if gross_revenue_with_tax != 0 else 0
         metrics[key] = {
-            "gross_revenue_without_tax":round(gross_revenue_without_tax,2),
             "gross_revenue_with_tax":round(gross_revenue_with_tax,2),
             "total_tax":round(tax_price,2),
             "total_cogs": round(total_cogs, 2),
@@ -277,7 +271,6 @@ def get_metrics_by_date_range(request):
             "total_units": round(total_units, 2)
         }
     difference = {
-        "gross_revenue_without_tax": round(metrics["targeted"]["gross_revenue_without_tax"] - metrics["previous"]["gross_revenue_without_tax"], 2),
         "gross_revenue_with_tax": round(metrics["targeted"]["gross_revenue_with_tax"] - metrics["previous"]["gross_revenue_with_tax"], 2),
         "total_cogs": round(metrics["targeted"]["total_cogs"] - metrics["previous"]["total_cogs"], 2),
         "refund": round(metrics["targeted"]["refund"] - metrics["previous"]["refund"], 2),
