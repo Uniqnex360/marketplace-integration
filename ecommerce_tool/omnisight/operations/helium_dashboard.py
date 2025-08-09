@@ -246,7 +246,7 @@ def get_metrics_by_date_range(request):
                         order_details=get_full_order_and_shipping_details(order_number)
                         if order_details and order_details.get('shipments'):
                             merchant_shipment_cost=sum(float(s.get('shipmentCost',0) or 0) for s in order_details['shipments'])
-                            print(f"Order: {order_number}, Fulfillment: {fulfillment_channel}, Shipment Cost: {merchant_shipment_cost}")
+                            logger.info(f"Order: {order_number}, Fulfillment: {fulfillment_channel}, Shipment Cost: {merchant_shipment_cost}")
                             order_obj=Order.objects(merchant_order_id=merchant_shipment_cost)
                             if order_obj:
                                 order_obj.merchant_shipment_cost=merchant_shipment_cost
