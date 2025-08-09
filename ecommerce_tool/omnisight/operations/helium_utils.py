@@ -548,7 +548,7 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
     def process_time_bucket(time_key):
         nonlocal graph_data, orders_by_bucket
         bucket_orders = orders_by_bucket.get(time_key, [])
-        gross_revenue = 0
+        gross_revenue_with_tax = 0
         total_cogs = 0
         refund_amount = 0
         refund_quantity = 0
@@ -597,12 +597,12 @@ def get_graph_data(start_date, end_date, preset, marketplace_id, brand_id=None, 
                     price = float(result[0]['price'] or 0)
                     total_cogs += result[0]['total_cogs'] if order.marketplace_id.name == "Amazon" else result[0]['w_total_cogs']
                     vendor_funding += result[0]['vendor_funding']
-                    gross_revenue += temp_other_price * price
+                    gross_revenue_with_tax += price * quantity
 
         net_profit = (temp_other_price - total_cogs) + vendor_funding
-        profit_margin = round((net_profit / gross_revenue) * 100, 2) if gross_revenue else 0
+        profit_margin = round((net_profit / gross_revenue_with_tax) * 100, 2) if gross_revenue_with_tax else 0
         graph_data[time_key] = {
-            "gross_revenue": round(gross_revenue, 2),
+            "gross_revenue_with_tax": round(gross_revenue_with_tax, 2),
             "net_profit": round(net_profit, 2),
             "profit_margin": profit_margin,
             "orders": len(bucket_orders),
