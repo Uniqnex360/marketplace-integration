@@ -1768,6 +1768,13 @@ def allMarketplaceData(request):
                     "w_total_cogs": {"$ifNull": ["$product_ins.w_total_cogs", 0]},
                     "vendor_funding": {"$ifNull": ["$product_ins.vendor_funding", 0]},
                     "vendor_discount": {"$ifNull": ["$product_ins.vendor_discount", 0]},
+                    "product_cost": {"$ifNull": ["$product_ins.product_cost", 0]},
+                    "w_product_cost": {"$ifNull": ["$product_ins.w_product_cost", 0]},
+                    "QuantityOrdered": {"$ifNull": ["$ProductDetails.QuantityOrdered", 1]},
+
+
+
+
 
                 }
             }
