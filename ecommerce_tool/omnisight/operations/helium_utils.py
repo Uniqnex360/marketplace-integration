@@ -754,6 +754,8 @@ def totalRevenueCalculation(start_date, end_date, marketplace_id=None, brand_id=
             vendor_discount += float(item.get("vendor_discount", 0) or 0)
             vendor_funding += float(item.get("vendor_funding", 0) or 0)
             temp_other_price += item["price"]
+            channel_fee += float(item.get("referral_fee", 0) or 0)
+
         # After the item loop, add shipment cost for this order
         fulfillment_channel = order.get('fulfillment_channel', "").upper()
         merchant_shipment_cost = 0
